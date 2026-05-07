@@ -174,8 +174,8 @@ const config: Config = {
         src: 'logo.svg',
       },
       items: [
-        {to: '/integrations', label: 'Integrations hub', position: 'right'},
         {to: '/network', label: 'Pricing', position: 'right'},
+        {to: '/integrations', label: 'Integrations hub', position: 'right'},
         {to: '/providers', label: 'Providers', position: 'right'},
         {
           type: 'docSidebar',
