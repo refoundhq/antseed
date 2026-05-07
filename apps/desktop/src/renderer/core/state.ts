@@ -34,7 +34,10 @@ export type PeerEntry = {
   inputUsdPerMillion: number;
   outputUsdPerMillion: number;
   capacityMsgPerHour: number;
-  reputation: number;
+  /** Lifetime settled volume (USDC base units / micros), or null when chain RPC has not enriched yet. */
+  onChainTotalVolumeUsdcMicros: number | null;
+  /** Settled channel count, or null when chain RPC has not enriched yet. */
+  onChainChannelCount: number | null;
   lastSeen: number;
   lastReachedAt: number | null;
   source: string;
@@ -202,8 +205,8 @@ export type RendererUiState = {
   chatPaymentApprovalPeerName: string | null;
   chatPaymentApprovalAmount: string;
   chatPaymentApprovalPeerInfo: {
-    reputation: number;
     channelCount: number | null;
+    volumeUsdcMicros: number | null;
     disputeCount: number | null;
     networkAgeDays: number | null;
     evmAddress: string | null;
@@ -308,7 +311,7 @@ export function createInitialUiState(): RendererUiState {
     peersMeta: { tone: 'idle', label: '0 peers' },
     peersMessage: 'Loading peer visibility...',
     lastPeers: [],
-    peerSort: { key: 'reputation', dir: 'desc' },
+    peerSort: { key: 'onChainTotalVolumeUsdcMicros', dir: 'desc' },
     peerFilter: '',
     lastDebugKey: '',
 

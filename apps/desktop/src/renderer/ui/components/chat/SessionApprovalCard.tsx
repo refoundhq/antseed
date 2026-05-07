@@ -1,4 +1,5 @@
 import { useUiSnapshot } from '../../hooks/useUiSnapshot';
+import { formatUsdcVolume } from '../../../core/format';
 import styles from './SessionApprovalCard.module.scss';
 
 type SessionApprovalCardProps = {
@@ -6,8 +7,8 @@ type SessionApprovalCardProps = {
   peerName: string | null;
   amount: string;
   peerInfo: {
-    reputation: number;
     channelCount: number | null;
+    volumeUsdcMicros: number | null;
     disputeCount: number | null;
     networkAgeDays: number | null;
     evmAddress: string | null;
@@ -45,10 +46,22 @@ export function SessionApprovalCard({
         }
       </div>
 
-      {peerInfo && (peerInfo.reputation > 0 || peerInfo.channelCount !== null) && (
+      {/*
+        Trust signals shown on the payment approval card. "Volume" is lifetime
+        settled USDC from on-chain AntseedChannels.getAgentStats — the most
+        honest "useful provider" signal we have. The previous "reputation"
+        line was a static placeholder masquerading as a trust score (#362).
+      */}
+      {peerInfo && (peerInfo.volumeUsdcMicros !== null
+        || peerInfo.channelCount !== null
+        || peerInfo.networkAgeDays !== null) && (
         <div className={styles.approvalStats}>
-          {peerInfo.reputation > 0 && <span>{peerInfo.reputation} reputation</span>}
-          {peerInfo.channelCount !== null && <span>{peerInfo.channelCount} channels</span>}
+          {peerInfo.volumeUsdcMicros !== null && (
+            <span>{formatUsdcVolume(peerInfo.volumeUsdcMicros)} volume</span>
+          )}
+          {peerInfo.channelCount !== null && (
+            <span>{peerInfo.channelCount} session{peerInfo.channelCount === 1 ? '' : 's'}</span>
+          )}
           {peerInfo.networkAgeDays !== null && <span>{peerInfo.networkAgeDays}d in network</span>}
         </div>
       )}

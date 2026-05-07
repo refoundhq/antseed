@@ -1,5 +1,5 @@
 import { useUiSnapshot } from '../../hooks/useUiSnapshot';
-import { formatShortId, formatInt } from '../../../core/format';
+import { formatShortId, formatUsdcVolume } from '../../../core/format';
 
 type OverviewViewProps = {
   active: boolean;
@@ -65,7 +65,7 @@ export function OverviewView({ active }: OverviewViewProps) {
                   <th>Peer</th>
                   <th>ID</th>
                   <th>Services</th>
-                  <th>Rep</th>
+                  <th>Volume</th>
                 </tr>
               </thead>
               <tbody>
@@ -81,7 +81,7 @@ export function OverviewView({ active }: OverviewViewProps) {
                       <td>{peer.displayName || '-'}</td>
                       <td title={peer.peerId}>{formatShortId(peer.peerId)}</td>
                       <td>{peer.services.join(', ')}</td>
-                      <td>{formatInt(peer.reputation)}</td>
+                      <td>{formatUsdcVolume(peer.onChainTotalVolumeUsdcMicros)}</td>
                     </tr>
                   ))
                 )}

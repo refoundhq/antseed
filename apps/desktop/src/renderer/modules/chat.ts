@@ -165,8 +165,8 @@ export function initChatModule({
         const ageDays = Math.floor((now - timestamp) / 86400);
 
         uiState.chatPaymentApprovalPeerInfo = {
-          reputation: result.data.onChainChannelCount ?? result.data.reputation ?? 0,
           channelCount: result.data.onChainChannelCount ?? null,
+          volumeUsdcMicros: result.data.onChainTotalVolumeUsdcMicros ?? null,
           disputeCount: result.data.onChainGhostCount ?? null,
           networkAgeDays: ageDays > 0 ? ageDays : null,
           evmAddress: result.data.evmAddress ?? null,

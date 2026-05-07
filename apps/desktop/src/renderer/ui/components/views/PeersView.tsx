@@ -1,7 +1,7 @@
 import { useState, useMemo, useCallback } from 'react';
 import { useUiSnapshot } from '../../hooks/useUiSnapshot';
 import { useActions } from '../../hooks/useActions';
-import { formatShortId, formatInt, formatEndpoint } from '../../../core/format';
+import { formatShortId, formatInt, formatEndpoint, formatUsdcVolume } from '../../../core/format';
 import { safeString } from '../../../core/safe';
 import type { PeerEntry, SortDirection } from '../../../core/state';
 
@@ -19,6 +19,12 @@ function sortPeers(items: PeerEntry[], key: SortKey, dir: SortDirection): PeerEn
     if (Array.isArray(vb)) vb = (vb as string[]).join(', ');
     if (typeof va === 'string') va = va.toLowerCase();
     if (typeof vb === 'string') vb = vb.toLowerCase();
+    // Null numeric fields (peers without on-chain enrichment yet) sort below
+    // every real value so unenriched peers don't artificially top a sort.
+    const vaNullNumeric = va == null && typeof vb === 'number';
+    const vbNullNumeric = vb == null && typeof va === 'number';
+    if (vaNullNumeric) return 1;
+    if (vbNullNumeric) return -1;
     if (va == null) va = '';
     if (vb == null) vb = '';
     if ((va as string | number) < (vb as string | number)) return dir === 'asc' ? -1 : 1;
@@ -38,7 +44,7 @@ function filterPeers(peers: PeerEntry[], filterText: string): PeerEntry[] {
       String(peer.inputUsdPerMillion),
       String(peer.outputUsdPerMillion),
       String(peer.capacityMsgPerHour),
-      String(peer.reputation),
+      formatUsdcVolume(peer.onChainTotalVolumeUsdcMicros),
       formatEndpoint(peer),
     ]
       .join(' ')
@@ -56,7 +62,10 @@ const COLUMNS: { key: string; label: string; sortable: boolean }[] = [
   { key: 'inputUsdPerMillion', label: 'Input $/1M', sortable: true },
   { key: 'outputUsdPerMillion', label: 'Output $/1M', sortable: true },
   { key: 'capacityMsgPerHour', label: 'Capacity', sortable: true },
-  { key: 'reputation', label: 'Rep', sortable: true },
+  // Lifetime settled USDC volume from AntseedChannels.getAgentStats. Replaces
+  // the prior "Rep" column whose underlying value was a static `100`
+  // placeholder for every peer (#362).
+  { key: 'onChainTotalVolumeUsdcMicros', label: 'Volume', sortable: true },
   { key: 'endpoint', label: 'Endpoint', sortable: false },
 ];
 
@@ -64,7 +73,7 @@ export function PeersView({ active }: PeersViewProps) {
   const { lastPeers, peersMeta, peersMessage } = useUiSnapshot();
   const actions = useActions();
 
-  const [sortKey, setSortKey] = useState('reputation');
+  const [sortKey, setSortKey] = useState('onChainTotalVolumeUsdcMicros');
   const [sortDir, setSortDir] = useState<SortDirection>('desc');
   const [filter, setFilter] = useState('');
 
@@ -151,7 +160,7 @@ export function PeersView({ active }: PeersViewProps) {
                           ? `${formatInt(peer.capacityMsgPerHour)}/h`
                           : 'n/a'}
                       </td>
-                      <td>{formatInt(peer.reputation)}</td>
+                      <td>{formatUsdcVolume(peer.onChainTotalVolumeUsdcMicros)}</td>
                       <td>{formatEndpoint(peer)}</td>
                     </tr>
                   ))

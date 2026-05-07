@@ -72,7 +72,10 @@ function normalizeNetworkData(
       inputUsdPerMillion: safeNumber(peer.inputUsdPerMillion, 0),
       outputUsdPerMillion: safeNumber(peer.outputUsdPerMillion, 0),
       capacityMsgPerHour: safeNumber(peer.capacityMsgPerHour, 0),
-      reputation: safeNumber(peer.reputation, 0),
+      onChainTotalVolumeUsdcMicros:
+        typeof peer.onChainTotalVolumeUsdcMicros === 'number' ? peer.onChainTotalVolumeUsdcMicros : null,
+      onChainChannelCount:
+        typeof peer.onChainChannelCount === 'number' ? peer.onChainChannelCount : null,
       lastSeen: safeNumber(peer.lastSeen, 0),
       lastReachedAt: safeNumber(peer.lastReachedAt, 0) || null,
       source: safeString(peer.source, 'dht'),
@@ -94,7 +97,8 @@ function normalizeNetworkData(
       inputUsdPerMillion: 0,
       outputUsdPerMillion: 0,
       capacityMsgPerHour: 0,
-      reputation: 0,
+      onChainTotalVolumeUsdcMicros: null,
+      onChainChannelCount: null,
       lastSeen: 0,
       lastReachedAt: null,
       source: 'daemon',
@@ -111,7 +115,12 @@ function normalizeNetworkData(
     if (safeNumber(peer.inputUsdPerMillion, 0) > 0) existing.inputUsdPerMillion = safeNumber(peer.inputUsdPerMillion, 0);
     if (safeNumber(peer.outputUsdPerMillion, 0) > 0) existing.outputUsdPerMillion = safeNumber(peer.outputUsdPerMillion, 0);
     if (safeNumber(peer.capacityMsgPerHour, 0) > 0) existing.capacityMsgPerHour = safeNumber(peer.capacityMsgPerHour, 0);
-    if (safeNumber(peer.reputation, 0) > 0) existing.reputation = safeNumber(peer.reputation, 0);
+    if (typeof peer.onChainTotalVolumeUsdcMicros === 'number') {
+      existing.onChainTotalVolumeUsdcMicros = peer.onChainTotalVolumeUsdcMicros;
+    }
+    if (typeof peer.onChainChannelCount === 'number') {
+      existing.onChainChannelCount = peer.onChainChannelCount;
+    }
     const daemonDn = typeof peer.displayName === 'string' && (peer.displayName as string).trim().length > 0 ? (peer.displayName as string).trim() : null;
     if (daemonDn) existing.displayName = daemonDn;
     if (!existing.source || existing.source === 'dht') existing.source = safeString(peer.source, 'daemon');
@@ -122,7 +131,13 @@ function normalizeNetworkData(
   const peers = Array.from(merged.values())
     .filter((peer) => peer.services.length > 0 || peer.providers.length > 0)
     .sort((a, b) => {
-      if (b.reputation !== a.reputation) return b.reputation - a.reputation;
+      // Sort by lifetime settled USDC volume desc — the most concrete "useful
+      // provider" signal we have. Peers without chain enrichment yet (null)
+      // sort below those with any positive volume but above $0 peers; ties
+      // and untracked peers fall through to most-recently-seen.
+      const va = a.onChainTotalVolumeUsdcMicros ?? -1;
+      const vb = b.onChainTotalVolumeUsdcMicros ?? -1;
+      if (vb !== va) return vb - va;
       return b.lastSeen - a.lastSeen;
     });
 

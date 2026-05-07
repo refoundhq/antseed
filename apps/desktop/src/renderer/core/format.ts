@@ -129,6 +129,22 @@ export function formatMoney(value: unknown): string {
   return `$${numeric.toFixed(2)}`;
 }
 
+/**
+ * Format a USDC volume amount expressed in base units (micros, 1e-6 USDC).
+ * `null`/invalid → "—" so the UI distinguishes "unknown" from "$0". Mirrors
+ * the CLI's `formatUsdcVolume` so desktop and CLI surfaces stay consistent.
+ */
+export function formatUsdcVolume(micros: number | null | undefined): string {
+  if (typeof micros !== 'number' || !Number.isFinite(micros) || micros < 0) {
+    return '—';
+  }
+  const usd = micros / 1_000_000;
+  if (usd >= 1000) return `$${usd.toFixed(0)}`;
+  if (usd >= 1) return `$${usd.toFixed(2)}`;
+  if (usd > 0) return `$${usd.toFixed(4)}`;
+  return '$0';
+}
+
 export function formatPrice(value: unknown): string {
   const numeric = safeNumber(value, 0);
   if (numeric <= 0) {

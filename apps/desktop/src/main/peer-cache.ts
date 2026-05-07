@@ -11,7 +11,16 @@ export type DashboardNetworkPeer = {
   inputUsdPerMillion: number;
   outputUsdPerMillion: number;
   capacityMsgPerHour: number;
-  reputation: number;
+  /**
+   * Lifetime settled volume in USDC base units (micros), from on-chain
+   * AntseedChannels.getAgentStats. `null` when chain RPC has not populated
+   * the stat (e.g. cold start, no RPC configured). The Peers/Overview tables
+   * sort and render by this; the prior "reputation" field was a static `100`
+   * placeholder and only ever sorted peers, never gated routing — see #362.
+   */
+  onChainTotalVolumeUsdcMicros: number | null;
+  /** Settled-channel count, from AntseedChannels.getAgentStats. `null` when chain RPC unavailable. */
+  onChainChannelCount: number | null;
   lastSeen: number;
   /**
    * Last successful transport-level contact with the peer. This can be fresher
@@ -129,7 +138,12 @@ export function parsePeerFromRaw(pr: Record<string, unknown>): DashboardNetworkP
     inputUsdPerMillion: Number(pr.defaultInputUsdPerMillion) || 0,
     outputUsdPerMillion: Number(pr.defaultOutputUsdPerMillion) || 0,
     capacityMsgPerHour: (Number(pr.maxConcurrency) || 0) * 60,
-    reputation: 100,
+    onChainTotalVolumeUsdcMicros: typeof pr.onChainTotalVolumeUsdcMicros === 'number'
+      ? pr.onChainTotalVolumeUsdcMicros
+      : null,
+    onChainChannelCount: typeof pr.onChainChannelCount === 'number'
+      ? pr.onChainChannelCount
+      : null,
     lastSeen: Number(pr.lastSeen) || Date.now(),
     lastReachedAt: Number(pr.lastReachedAt) || null,
     source: 'dht',
@@ -171,6 +185,12 @@ export async function refreshPeerCache(): Promise<void> {
         peer.inputUsdPerMillion = peer.inputUsdPerMillion || existing.inputUsdPerMillion;
         peer.outputUsdPerMillion = peer.outputUsdPerMillion || existing.outputUsdPerMillion;
         peer.capacityMsgPerHour = peer.capacityMsgPerHour || existing.capacityMsgPerHour;
+        // Preserve cached on-chain stats when the latest buyer.state.json
+        // entry has not been enriched yet (null wins should never clobber a
+        // real chain reading).
+        peer.onChainTotalVolumeUsdcMicros = peer.onChainTotalVolumeUsdcMicros
+          ?? existing.onChainTotalVolumeUsdcMicros;
+        peer.onChainChannelCount = peer.onChainChannelCount ?? existing.onChainChannelCount;
         peer.lastSeen = Math.max(peer.lastSeen, existing.lastSeen);
         peer.lastReachedAt = Math.max(peer.lastReachedAt ?? 0, existing.lastReachedAt ?? 0) || null;
       }
