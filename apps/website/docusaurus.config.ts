@@ -167,7 +167,7 @@ const config: Config = {
         src: 'logo.svg',
       },
       items: [
-        {to: '/connect', label: 'Connect', position: 'right'},
+        {to: '/connect', label: 'Integration hub', position: 'right'},
         {to: '/network', label: 'Pricing', position: 'right'},
         {to: '/providers', label: 'Providers', position: 'right'},
         {
