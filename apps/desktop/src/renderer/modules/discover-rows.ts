@@ -70,6 +70,7 @@ export function projectRowsToChatServiceOptions(rows: DiscoverRow[]): ChatServic
       peerLabel: row.peerLabel,
       inputUsdPerMillion: row.inputUsdPerMillion,
       outputUsdPerMillion: row.outputUsdPerMillion,
+      cachedInputUsdPerMillion: row.cachedInputUsdPerMillion,
       categories: row.categories,
       description: '',
     });

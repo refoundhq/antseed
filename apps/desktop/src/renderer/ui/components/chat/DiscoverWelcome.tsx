@@ -54,6 +54,7 @@ type CardItem = {
   description: string;
   inputUsdPerMillion: number | null;
   outputUsdPerMillion: number | null;
+  cachedInputUsdPerMillion: number | null;
   reputationScore: number | null; // 0-100 on-chain activity/reputation score
   channelCount: number;       // on-chain, from AntseedChannels.getAgentStats
   ghostCount: number;         // channels withdrawn without settled spend
@@ -109,6 +110,7 @@ function buildCards(options: ChatServiceOptionEntry[]): CardItem[] {
       description: opt.description || generateDescription(opt.id, opt.categories, opt.peerLabel || opt.provider),
       inputUsdPerMillion: opt.inputUsdPerMillion,
       outputUsdPerMillion: opt.outputUsdPerMillion,
+      cachedInputUsdPerMillion: opt.cachedInputUsdPerMillion ?? null,
       reputationScore: null,
       channelCount: 0,
       ghostCount: 0,
@@ -164,6 +166,7 @@ function buildCardsFromRows(rows: DiscoverRow[]): CardItem[] {
       description: generateDescription(row.serviceId, row.categories, peerLabel || row.provider),
       inputUsdPerMillion: row.inputUsdPerMillion,
       outputUsdPerMillion: row.outputUsdPerMillion,
+      cachedInputUsdPerMillion: row.cachedInputUsdPerMillion,
       reputationScore: row.onChainReputationScore,
       channelCount: row.onChainActiveChannelCount,
       ghostCount: row.onChainGhostCount,
@@ -594,7 +597,12 @@ function Card({
   const providerName = (item.peerLabel ? getPeerDisplayName(item.peerLabel) : '') || item.provider || 'Peer';
   const hasInput = item.inputUsdPerMillion != null;
   const hasOutput = item.outputUsdPerMillion != null;
-  const isFree = hasInput && hasOutput && item.inputUsdPerMillion === 0 && item.outputUsdPerMillion === 0;
+  const hasCachedInput = item.cachedInputUsdPerMillion != null;
+  const isFree = hasInput
+    && hasOutput
+    && item.inputUsdPerMillion === 0
+    && item.outputUsdPerMillion === 0
+    && (!hasCachedInput || item.cachedInputUsdPerMillion === 0);
   const lowReputation = isLowReputation(item.reputationScore);
   const reputationTooltip = formatReputationTooltip(item);
   const scoreBadgeRef = useRef<HTMLSpanElement>(null);
@@ -675,17 +683,22 @@ function Card({
         <div className={styles.cardPricing}>
           {isFree ? (
             <span className={styles.pricingFree}>Free</span>
-          ) : hasInput && hasOutput ? (
+          ) : (
             <>
-              <span>{formatPerMillionPrice(item.inputUsdPerMillion!)} input tokens</span>
-              <span className={styles.pricingDot} />
-              <span>{formatPerMillionPrice(item.outputUsdPerMillion!)} output tokens</span>
+              {(hasInput || hasCachedInput) && (
+                <span className={styles.pricingInputGroup}>
+                  {hasInput && <span>{formatPerMillionPrice(item.inputUsdPerMillion!)} input tokens</span>}
+                  {hasCachedInput && (
+                    <span className={styles.pricingCached}>
+                      {formatPerMillionPrice(item.cachedInputUsdPerMillion!)} cached input
+                    </span>
+                  )}
+                </span>
+              )}
+              {hasOutput && (hasInput || hasCachedInput) && <span className={styles.pricingDot} />}
+              {hasOutput && <span>{formatPerMillionPrice(item.outputUsdPerMillion!)} output tokens</span>}
             </>
-          ) : hasInput ? (
-            <span>{formatPerMillionPrice(item.inputUsdPerMillion!)} input tokens</span>
-          ) : hasOutput ? (
-            <span>{formatPerMillionPrice(item.outputUsdPerMillion!)} output tokens</span>
-          ) : null}
+          )}
         </div>
       </div>
 

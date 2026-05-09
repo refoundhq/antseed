@@ -63,6 +63,7 @@ export type ChatServiceOptionEntry = {
   peerLabel: string;
   inputUsdPerMillion: number | null;
   outputUsdPerMillion: number | null;
+  cachedInputUsdPerMillion?: number | null;
   categories: string[];
   description: string;
 };
