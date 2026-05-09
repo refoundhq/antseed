@@ -1491,6 +1491,10 @@ export function initChatModule({
     uiState.chatDeleteVisible = false;
     uiState.chatInputDisabled = false;
     uiState.chatSendDisabled = false;
+    // Reset abort visibility: a fresh session has no in-flight request.
+    // Without this, chatAbortVisible stays true when the user opens a new
+    // chat while another conversation is still streaming — #454.
+    uiState.chatAbortVisible = false;
     uiState.chatConversationTitle = 'New Chat';
     uiState.chatError = null;
     updateThreadMeta(null);
