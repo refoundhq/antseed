@@ -513,6 +513,24 @@
   line-height: 12px;
 }
 
+.pricing-input-group {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+}
+
+.pricing-cached {
+  position: absolute;
+  top: 13px;
+  left: 0;
+  font-size: 10px;
+  line-height: 10px;
+  color: var(--text-muted);
+  opacity: 0.78;
+  white-space: nowrap;
+}
+
 .pricing-dot {
   width: 2px;
   height: 2px;
