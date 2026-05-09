@@ -5,6 +5,7 @@ export type DiscoverSortKey =
   | 'serviceAsc' | 'serviceDesc'
   | 'priceAsc' | 'priceDesc'
   | 'stakeDesc'
+  | 'reputationDesc'
   | 'channelsDesc'
   | 'lastSettledDesc';
 
@@ -18,11 +19,11 @@ export const MAX_CHANNELS_SLIDER = 200;
 export const CHANNELS_SLIDER_STEP = 5;
 
 /**
- * Default minimum on-chain channel count for Discover. 120 hides brand-new peers
- * that haven't accumulated a stronger track record. Users can lower the slider
- * to 0 to see every peer.
+ * Default minimum on-chain channel count for Discover. Keep this at 0 so every
+ * price-eligible peer remains usable; the default reputation sort floats the
+ * strongest peers to the top without hiding newer services.
  */
-export const DEFAULT_MIN_ON_CHAIN_CHANNELS = 120;
+export const DEFAULT_MIN_ON_CHAIN_CHANNELS = 0;
 
 export type TimeWindow = 'any' | 'today' | 'week' | 'month';
 
@@ -151,6 +152,12 @@ export function rowChannelCount(row: DiscoverRow): number {
   return Math.max(active, meta);
 }
 
+export function rowReputationScore(row: DiscoverRow): number {
+  return typeof row.onChainReputationScore === 'number' && Number.isFinite(row.onChainReputationScore)
+    ? row.onChainReputationScore
+    : -1;
+}
+
 export function matchesMinChannels(row: DiscoverRow, minChannels: number): boolean {
   if (minChannels <= 0) return true;
   return rowChannelCount(row) >= minChannels;
@@ -202,6 +209,11 @@ export function applySort(rows: DiscoverRow[], key: DiscoverSortKey, dir: 'asc' 
         return priceOf(a) - priceOf(b);
       case 'stakeDesc':
         return Number(BigInt(b.stakeUsdc) - BigInt(a.stakeUsdc));
+      case 'reputationDesc': {
+        const diff = rowReputationScore(b) - rowReputationScore(a);
+        if (diff !== 0) return diff;
+        return rowChannelCount(b) - rowChannelCount(a);
+      }
       case 'channelsDesc': {
         const diff = rowChannelCount(b) - rowChannelCount(a);
         if (diff !== 0) return diff;

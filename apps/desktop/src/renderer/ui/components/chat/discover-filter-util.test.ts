@@ -4,7 +4,7 @@ import {
   matchesSearch, matchesMaxInputPrice, matchesMaxOutputPrice,
   matchesMinStake,
   matchesLastSeen, matchesLastSettled,
-  matchesMinChannels, rowChannelCount,
+  matchesMinChannels, rowChannelCount, rowReputationScore,
   hasValidCachedInputPrice,
   applyFilters, applySort, paginate, totalPagesFor,
   MAX_INPUT_PRICE_SLIDER_USD, MAX_OUTPUT_PRICE_SLIDER_USD,
@@ -21,8 +21,9 @@ function mkRow(overrides: Partial<DiscoverRow> = {}): DiscoverRow {
     lifetimeSessions: 0, lifetimeRequests: 0, lifetimeInputTokens: 0, lifetimeOutputTokens: 0,
     lifetimeFirstSessionAt: null, lifetimeLastSessionAt: null,
     onChainChannelCount: null,
-    agentId: 1, stakeUsdc: '0', stakedAt: 0,
+    agentId: 1, stakeUsdc: '0',
     onChainActiveChannelCount: 0, onChainGhostCount: 0, onChainTotalVolumeUsdc: '0', onChainLastSettledAt: 0,
+    onChainReputationScore: null,
     networkRequests: null, networkInputTokens: null, networkOutputTokens: null,
     selectionValue: '',
     ...overrides,
@@ -124,6 +125,21 @@ test('applyFilters composes all predicates', () => {
   });
   assert.equal(filtered.length, 1);
   assert.equal(filtered[0]!.serviceLabel, 'B');
+});
+
+test('rowReputationScore returns score or -1 for missing values', () => {
+  assert.equal(rowReputationScore(mkRow({ onChainReputationScore: 72.5 })), 72.5);
+  assert.equal(rowReputationScore(mkRow({ onChainReputationScore: null })), -1);
+});
+
+test('applySort reputationDesc orders by reputation score then channel count', () => {
+  const rows = [
+    mkRow({ serviceLabel: 'A', onChainReputationScore: 20, onChainActiveChannelCount: 100 }),
+    mkRow({ serviceLabel: 'B', onChainReputationScore: 80, onChainActiveChannelCount: 1 }),
+    mkRow({ serviceLabel: 'C', onChainReputationScore: 20, onChainActiveChannelCount: 50 }),
+  ];
+  const sorted = applySort(rows, 'reputationDesc', 'desc');
+  assert.deepEqual(sorted.map((r) => r.serviceLabel), ['B', 'A', 'C']);
 });
 
 test('applySort channelsDesc orders by channel count', () => {

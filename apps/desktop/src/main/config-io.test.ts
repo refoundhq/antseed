@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import {
   DESKTOP_DEFAULT_MAX_INPUT_USD_PER_MILLION,
   DESKTOP_DEFAULT_MAX_OUTPUT_USD_PER_MILLION,
+  DESKTOP_DEFAULT_MIN_PEER_REPUTATION,
   ensureConfig,
   readConfig,
 } from './config-io.js';
@@ -35,6 +36,7 @@ test('ensureConfig creates config with desktop buyer max pricing defaults', asyn
   const pricing = readBuyerMaxPricing(config);
   assert.equal(pricing.input, DESKTOP_DEFAULT_MAX_INPUT_USD_PER_MILLION);
   assert.equal(pricing.output, DESKTOP_DEFAULT_MAX_OUTPUT_USD_PER_MILLION);
+  assert.equal((config.buyer as { minPeerReputation?: number }).minPeerReputation, DESKTOP_DEFAULT_MIN_PEER_REPUTATION);
 });
 
 test('ensureConfig clamps buyer max pricing above desktop defaults', async (t) => {
@@ -61,6 +63,7 @@ test('ensureConfig clamps buyer max pricing above desktop defaults', async (t) =
   const pricing = readBuyerMaxPricing(config);
   assert.equal(pricing.input, DESKTOP_DEFAULT_MAX_INPUT_USD_PER_MILLION);
   assert.equal(pricing.output, DESKTOP_DEFAULT_MAX_OUTPUT_USD_PER_MILLION);
+  assert.equal((config.buyer as { minPeerReputation?: number }).minPeerReputation, DESKTOP_DEFAULT_MIN_PEER_REPUTATION);
   assert.equal((config.identity as { displayName?: string }).displayName, 'Existing User');
 });
 

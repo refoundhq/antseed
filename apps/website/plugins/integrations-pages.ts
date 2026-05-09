@@ -436,7 +436,7 @@ function renderSkillMarkdown(): string {
   out.push('{');
   out.push('  "buyer": {');
   out.push('    "proxyPort": 8377,                  // change if 8377 conflicts on the host');
-  out.push('    "minPeerReputation": 50,            // skip peers with fewer settled streams');
+  out.push('    "minPeerReputation": 0,             // optional: raise to filter lower-reputation peers');
   out.push('    "maxPricing": {                     // refuse to route to peers above this rate');
   out.push('      "defaults": { "inputUsdPerMillion": 100, "outputUsdPerMillion": 100 }');
   out.push('    }');
