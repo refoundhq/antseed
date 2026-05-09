@@ -5,6 +5,7 @@ import { mkdir, readFile, stat, unlink } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { createConnection } from 'node:net';
 import path from 'node:path';
+import { Contract } from 'ethers';
 import type { AgentSession, AgentSessionEvent } from '@mariozechner/pi-coding-agent';
 import { createBrowserPreviewTool, createStartDevServerTool } from './chat-dev-tools.js';
 import {
@@ -267,11 +268,11 @@ type DiscoverRowEntry = {
   onChainChannelCount: number | null;
   agentId: number;
   stakeUsdc: string;
-  stakedAt: number;
   onChainActiveChannelCount: number;
   onChainGhostCount: number;
   onChainTotalVolumeUsdc: string;
   onChainLastSettledAt: number;
+  onChainReputationScore: number | null;
   networkRequests: string | null;
   networkInputTokens: string | null;
   networkOutputTokens: string | null;
@@ -335,6 +336,54 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 
 function normalizeNonNegativeNumber(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null;
+}
+
+function computeDesktopOnChainReputationScore(stats: {
+  onChainChannelCount: number;
+  onChainGhostCount: number;
+  onChainTotalVolumeUsdcMicros: number;
+  onChainLastSettledAtSec: number;
+  onChainStakedAtSec: number;
+}): number | null {
+  const channels = normalizeNonNegativeNumber(stats.onChainChannelCount);
+  const volumeMicros = normalizeNonNegativeNumber(stats.onChainTotalVolumeUsdcMicros);
+  if (channels == null && volumeMicros == null) return null;
+
+  const safeChannels = channels ?? 0;
+  const ghosts = normalizeNonNegativeNumber(stats.onChainGhostCount) ?? 0;
+  const volumeUsdc = (volumeMicros ?? 0) / 1_000_000;
+  const avgChannelUsdc = safeChannels > 0 ? volumeUsdc / safeChannels : 0;
+  const lastSettledAtSec = normalizeNonNegativeNumber(stats.onChainLastSettledAtSec);
+  const daysSinceLastSettled = lastSettledAtSec && lastSettledAtSec > 0
+    ? Math.max(0, (Date.now() - lastSettledAtSec * 1000) / 86_400_000)
+    : null;
+  const stakedAtSec = normalizeNonNegativeNumber(stats.onChainStakedAtSec);
+  const daysSinceStaked = stakedAtSec && stakedAtSec > 0
+    ? Math.max(0, (Date.now() - stakedAtSec * 1000) / 86_400_000)
+    : null;
+
+  const clamp01 = (value: number): number => Math.min(1, Math.max(0, Number.isFinite(value) ? value : 0));
+  const logFactor = (value: number, target: number): number => {
+    if (value <= 0 || target <= 0) return 0;
+    return clamp01(Math.log1p(value) / Math.log1p(target));
+  };
+  const channelFactor = logFactor(safeChannels, 120);
+  const volumeFactor = Math.pow(logFactor(volumeUsdc, 1000), 1.25);
+  const avgChannelFactor = clamp01(avgChannelUsdc / 2);
+  const recencyFactor = daysSinceLastSettled == null
+    ? 0.25
+    : Math.max(0.25, Math.exp(-daysSinceLastSettled / 30));
+  const stakeAgeFactor = daysSinceStaked == null ? 1 : clamp01(daysSinceStaked / 30);
+  const ghostRate = safeChannels + ghosts > 0 ? ghosts / (safeChannels + ghosts) : 0;
+  const ghostPenalty = clamp01(1 - 3 * ghostRate);
+  const qualityMultiplier = 0.60
+    + 0.15 * channelFactor
+    + 0.15 * avgChannelFactor
+    + 0.05 * recencyFactor
+    + 0.05 * stakeAgeFactor;
+  const volumeActivityScore = volumeUsdc > 0 ? 100 * volumeFactor * qualityMultiplier : 0;
+
+  return Math.min(100, volumeActivityScore * ghostPenalty);
 }
 
 async function loadBuyerMaxPricingDefaults(configPath: string): Promise<BuyerMaxPricingDefaults> {
@@ -605,6 +654,36 @@ export function invalidateOnChainEnrichmentCache(): void {
 let cachedStakingClient: StakingClient | null = null;
 let cachedChannelsClient: ChannelsClient | null = null;
 
+const STAKING_SELLER_ABI = [
+  'function sellers(address seller) external view returns (uint256 stake, uint256 stakedAt)',
+] as const;
+
+type StakingClientWithOptionalStakedAt = StakingClient & {
+  getStakedAt?: (sellerAddr: string) => Promise<number>;
+  provider?: unknown;
+  contractAddress?: string;
+};
+
+async function getSellerStakedAt(stakingClient: StakingClient, sellerAddr: string): Promise<number> {
+  const client = stakingClient as StakingClientWithOptionalStakedAt;
+  try {
+    const fromClient = await client.getStakedAt?.(sellerAddr);
+    if (typeof fromClient === 'number' && Number.isFinite(fromClient) && fromClient > 0) return fromClient;
+  } catch {
+    // Fall back to a direct contract read below. This keeps the desktop app
+    // working even when its bundled @antseed/node build predates getStakedAt().
+  }
+
+  if (!client.provider || !client.contractAddress) return 0;
+  try {
+    const contract = new Contract(client.contractAddress, STAKING_SELLER_ABI, client.provider);
+    const result = await contract.getFunction('sellers')(sellerAddr) as { stakedAt?: bigint; 1?: bigint };
+    return Number(result.stakedAt ?? result[1] ?? 0n);
+  } catch {
+    return 0;
+  }
+}
+
 async function loadOnChainClients(configPath: string): Promise<{ stakingClient: StakingClient; channelsClient: ChannelsClient } | null> {
   if (cachedStakingClient && cachedChannelsClient) {
     return { stakingClient: cachedStakingClient, channelsClient: cachedChannelsClient };
@@ -680,9 +759,10 @@ async function fetchOnChainEnrichment(
 
   await Promise.all(toFetch.map(async (addr) => {
     try {
-      const [agentId, stake] = await Promise.all([
+      const [agentId, stake, stakedAt] = await Promise.all([
         stakingClient.getAgentId(addr),
         stakingClient.getStake(addr),
+        getSellerStakedAt(stakingClient, addr),
       ]);
       if (agentId === 0) {
         const sentinel: OnChainPeerEnrichment = {
@@ -723,7 +803,7 @@ async function fetchOnChainEnrichment(
       const data: OnChainPeerEnrichment = {
         agentId,
         stakeUsdc: stake.toString(),
-        stakedAt: 0,
+        stakedAt,
         onChainActiveChannelCount: stats.channelCount,
         onChainGhostCount: stats.ghostCount,
         onChainTotalVolumeUsdc: stats.totalVolumeUsdc.toString(),
@@ -802,6 +882,14 @@ async function buildDiscoverRows(
     const networkRequests = netForAgent ? netForAgent.requests.toString() : null;
     const networkInputTokens = netForAgent ? netForAgent.inputTokens.toString() : null;
     const networkOutputTokens = netForAgent ? netForAgent.outputTokens.toString() : null;
+    const onChainTotalVolumeUsdcMicros = Number(enrichmentRow.onChainTotalVolumeUsdc);
+    const onChainReputationScore = computeDesktopOnChainReputationScore({
+      onChainChannelCount: enrichmentRow.onChainActiveChannelCount,
+      onChainGhostCount: enrichmentRow.onChainGhostCount,
+      onChainTotalVolumeUsdcMicros: Number.isFinite(onChainTotalVolumeUsdcMicros) ? onChainTotalVolumeUsdcMicros : 0,
+      onChainLastSettledAtSec: enrichmentRow.onChainLastSettledAt,
+      onChainStakedAtSec: enrichmentRow.stakedAt,
+    });
 
     rows.push({
       rowKey: `${peerId}:${entry.id}`,
@@ -827,11 +915,11 @@ async function buildDiscoverRows(
       onChainChannelCount: peerBlob?.onChainChannelCount ?? null,
       agentId: enrichmentRow.agentId,
       stakeUsdc: enrichmentRow.stakeUsdc,
-      stakedAt: enrichmentRow.stakedAt,
       onChainActiveChannelCount: enrichmentRow.onChainActiveChannelCount,
       onChainGhostCount: enrichmentRow.onChainGhostCount,
       onChainTotalVolumeUsdc: enrichmentRow.onChainTotalVolumeUsdc,
       onChainLastSettledAt: enrichmentRow.onChainLastSettledAt,
+      onChainReputationScore,
       networkRequests,
       networkInputTokens,
       networkOutputTokens,

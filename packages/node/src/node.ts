@@ -611,7 +611,10 @@ export class AntseedNode extends EventEmitter {
         const evmAddress = resolver
           ? await resolver.resolveSellerAddress(p.peerId, p.metadata)
           : peerIdToAddress(p.peerId);
-        const agentId = await stakingClient.getAgentId(evmAddress);
+        const [agentId, stakedAt] = await Promise.all([
+          stakingClient.getAgentId(evmAddress),
+          stakingClient.getStakedAt(evmAddress).catch(() => 0),
+        ]);
         const stats = await channelsClient.getAgentStats(agentId);
         p.onChainChannelCount = stats.channelCount;
         p.onChainGhostCount = stats.ghostCount;
@@ -622,6 +625,7 @@ export class AntseedNode extends EventEmitter {
           ? Number(volumeMicros)
           : Number.MAX_SAFE_INTEGER;
         p.onChainLastSettledAtSec = stats.lastSettledAt;
+        p.onChainStakedAtSec = stakedAt;
         p.onChainStatsFetchedAt = Date.now();
       } catch {
         // Per-peer verification failure — keep whatever seller metadata claimed

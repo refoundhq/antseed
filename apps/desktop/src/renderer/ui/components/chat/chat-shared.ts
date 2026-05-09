@@ -322,7 +322,10 @@ export function shortServiceName(service: unknown): string {
 export function formatCompactNumber(value: unknown): string {
   const num = Number(value);
   if (!Number.isFinite(num) || num <= 0) return '0';
-  return Math.floor(num).toLocaleString();
+  if (num >= 1_000_000_000) return `${(num / 1_000_000_000).toFixed(1).replace(/\.0$/, '')}B`;
+  if (num >= 1_000_000) return `${(num / 1_000_000).toFixed(1).replace(/\.0$/, '')}M`;
+  if (num >= 1_000) return `${(num / 1_000).toFixed(1).replace(/\.0$/, '')}k`;
+  return String(Math.floor(num));
 }
 
 export function formatUsd(value: unknown, fractionDigits = 2): string {

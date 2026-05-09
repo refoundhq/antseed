@@ -19,12 +19,13 @@ test('normalizeDiscoverRow populates all numeric defaults to 0 / null', () => {
   assert.equal(row!.lifetimeSessions, 0);
   assert.equal(row!.stakeUsdc, '0');
   assert.equal(row!.cachedInputUsdPerMillion, null);
+  assert.equal(row!.onChainReputationScore, null);
 });
 
 test('projectRowsToChatServiceOptions dedupes by (provider, service, peer)', () => {
   const rows = [
-    { rowKey: 'p1:s1', serviceId: 's1', serviceLabel: 's1', categories: [], provider: 'openai', protocol: 'openai-chat-completions', peerId: 'p1', peerEvmAddress: '', peerDisplayName: null, peerLabel: '', inputUsdPerMillion: 1, outputUsdPerMillion: 2, cachedInputUsdPerMillion: null, lifetimeSessions: 0, lifetimeRequests: 0, lifetimeInputTokens: 0, lifetimeOutputTokens: 0, lifetimeFirstSessionAt: null, lifetimeLastSessionAt: null, onChainChannelCount: null, agentId: 1, stakeUsdc: '0', stakedAt: 0, onChainActiveChannelCount: 0, onChainGhostCount: 0, onChainTotalVolumeUsdc: '0', onChainLastSettledAt: 0, selectionValue: 'openai\u0001s1\u0001p1' },
-    { rowKey: 'p1:s1', serviceId: 's1', serviceLabel: 's1', categories: [], provider: 'openai', protocol: 'openai-chat-completions', peerId: 'p1', peerEvmAddress: '', peerDisplayName: null, peerLabel: '', inputUsdPerMillion: 1, outputUsdPerMillion: 2, cachedInputUsdPerMillion: null, lifetimeSessions: 0, lifetimeRequests: 0, lifetimeInputTokens: 0, lifetimeOutputTokens: 0, lifetimeFirstSessionAt: null, lifetimeLastSessionAt: null, onChainChannelCount: null, agentId: 1, stakeUsdc: '0', stakedAt: 0, onChainActiveChannelCount: 0, onChainGhostCount: 0, onChainTotalVolumeUsdc: '0', onChainLastSettledAt: 0, selectionValue: 'openai\u0001s1\u0001p1' },
+    { rowKey: 'p1:s1', serviceId: 's1', serviceLabel: 's1', categories: [], provider: 'openai', protocol: 'openai-chat-completions', peerId: 'p1', peerEvmAddress: '', peerDisplayName: null, peerLabel: '', inputUsdPerMillion: 1, outputUsdPerMillion: 2, cachedInputUsdPerMillion: null, lifetimeSessions: 0, lifetimeRequests: 0, lifetimeInputTokens: 0, lifetimeOutputTokens: 0, lifetimeFirstSessionAt: null, lifetimeLastSessionAt: null, onChainChannelCount: null, agentId: 1, stakeUsdc: '0', onChainActiveChannelCount: 0, onChainGhostCount: 0, onChainTotalVolumeUsdc: '0', onChainLastSettledAt: 0, onChainReputationScore: null, selectionValue: 'openai\u0001s1\u0001p1' },
+    { rowKey: 'p1:s1', serviceId: 's1', serviceLabel: 's1', categories: [], provider: 'openai', protocol: 'openai-chat-completions', peerId: 'p1', peerEvmAddress: '', peerDisplayName: null, peerLabel: '', inputUsdPerMillion: 1, outputUsdPerMillion: 2, cachedInputUsdPerMillion: null, lifetimeSessions: 0, lifetimeRequests: 0, lifetimeInputTokens: 0, lifetimeOutputTokens: 0, lifetimeFirstSessionAt: null, lifetimeLastSessionAt: null, onChainChannelCount: null, agentId: 1, stakeUsdc: '0', onChainActiveChannelCount: 0, onChainGhostCount: 0, onChainTotalVolumeUsdc: '0', onChainLastSettledAt: 0, onChainReputationScore: null, selectionValue: 'openai\u0001s1\u0001p1' },
   ];
   const options = projectRowsToChatServiceOptions(rows);
   assert.equal(options.length, 1);

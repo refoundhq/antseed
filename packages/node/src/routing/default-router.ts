@@ -1,9 +1,10 @@
 import type { Router } from '../interfaces/buyer-router.js';
 import type { PeerInfo } from '../types/peer.js';
 import type { SerializedHttpRequest } from '../types/http.js';
+import { computeOnChainReputationScore } from '../reputation/on-chain-reputation.js';
 
 export interface DefaultRouterConfig {
-  minReputation?: number;  // Default: 50
+  minReputation?: number;  // Default: 0 (no reputation gate)
 }
 
 export class DefaultRouter implements Router {
@@ -11,7 +12,7 @@ export class DefaultRouter implements Router {
   private _latencyMap = new Map<string, number>();
 
   constructor(config?: DefaultRouterConfig) {
-    this._minReputation = config?.minReputation ?? 50;
+    this._minReputation = config?.minReputation ?? 0;
   }
 
   selectPeer(_req: SerializedHttpRequest, peers: PeerInfo[]): PeerInfo | null {
@@ -44,8 +45,9 @@ export class DefaultRouter implements Router {
   }
 
   private _effectiveReputation(peer: PeerInfo): number {
-    if (this._isFiniteNonNegative(peer.onChainChannelCount)) {
-      return peer.onChainChannelCount;
+    const onChainScore = computeOnChainReputationScore(peer);
+    if (onChainScore != null) {
+      return onChainScore;
     }
     if (this._isFiniteNonNegative(peer.trustScore)) {
       return peer.trustScore;
@@ -57,11 +59,9 @@ export class DefaultRouter implements Router {
   }
 
   private _hasReputation(peer: PeerInfo): boolean {
-    if (this._isFiniteNonNegative(peer.onChainChannelCount)) {
-      return (peer.onChainChannelCount ?? 0) > 0 || (peer.onChainGhostCount ?? 0) > 0;
-    }
-
-    return this._isFiniteNonNegative(peer.trustScore) || this._isFiniteNonNegative(peer.reputationScore);
+    return computeOnChainReputationScore(peer) != null
+      || this._isFiniteNonNegative(peer.trustScore)
+      || this._isFiniteNonNegative(peer.reputationScore);
   }
 
   private _isFiniteNonNegative(value: number | undefined): value is number {

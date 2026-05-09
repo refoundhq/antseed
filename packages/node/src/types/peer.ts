@@ -104,6 +104,11 @@ export interface PeerInfo {
    */
   onChainLastSettledAtSec?: number;
   /**
+   * Unix seconds when the seller first staked in `AntseedStaking.sellers`.
+   * Read by the buyer from chain and used as a small maturity signal.
+   */
+  onChainStakedAtSec?: number;
+  /**
    * Unix ms when the buyer last refreshed on-chain stats for this peer.
    * Used to throttle repeat `getAgentStats` calls across discovery cycles.
    */

@@ -1,4 +1,4 @@
-import type { Router, PeerInfo, SerializedHttpRequest } from '@antseed/node';
+import { computeOnChainReputationScore, type Router, type PeerInfo, type SerializedHttpRequest } from '@antseed/node';
 import {
   scoreCandidates,
   PeerMetricsTracker,
@@ -34,7 +34,7 @@ export class LocalRouter implements Router {
   private readonly _metrics: PeerMetricsTracker;
 
   constructor(config?: LocalRouterConfig) {
-    this._minReputation = config?.minReputation ?? 50;
+    this._minReputation = config?.minReputation ?? 0;
     this._maxPricing = {
       defaults: {
         inputUsdPerMillion: config?.maxPricing?.defaults.inputUsdPerMillion ?? Number.POSITIVE_INFINITY,
@@ -136,19 +136,26 @@ export class LocalRouter implements Router {
     });
   }
 
+  allowsPeerForPricing(req: SerializedHttpRequest, peer: PeerInfo): boolean {
+    const requestedService = this._extractRequestedService(req);
+    const provider = this._selectProviderForPeer(peer, requestedService);
+    if (!provider) return false;
+
+    const offer = this._resolvePeerOfferPrice(peer, provider, requestedService);
+    if (!offer) return false;
+
+    const max = this._resolveBuyerMaxPrice(provider, requestedService);
+    return !this._offerExceedsMaxPrice(offer, max);
+  }
+
   private _effectiveReputation(p: PeerInfo): number {
-    if (p.onChainChannelCount !== undefined) {
-      return p.onChainChannelCount;
-    }
-    return p.trustScore ?? p.reputationScore ?? 0;
+    return computeOnChainReputationScore(p) ?? p.trustScore ?? p.reputationScore ?? 0;
   }
 
   private _hasReputation(p: PeerInfo): boolean {
-    if (this._isFiniteNonNegative(p.onChainChannelCount)) {
-      return (p.onChainChannelCount ?? 0) > 0 || (p.onChainGhostCount ?? 0) > 0;
-    }
-
-    return this._isFiniteNonNegative(p.trustScore) || this._isFiniteNonNegative(p.reputationScore);
+    return computeOnChainReputationScore(p) != null
+      || this._isFiniteNonNegative(p.trustScore)
+      || this._isFiniteNonNegative(p.reputationScore);
   }
 
   private _extractRequestedService(req: SerializedHttpRequest): string | null {

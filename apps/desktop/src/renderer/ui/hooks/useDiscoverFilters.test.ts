@@ -16,8 +16,9 @@ function mkRow(i: number, chat: boolean): DiscoverRow {
     lifetimeSessions: chat ? i : 0, lifetimeRequests: 0, lifetimeInputTokens: 0, lifetimeOutputTokens: 0,
     lifetimeFirstSessionAt: null, lifetimeLastSessionAt: chat ? i * 1000 : null,
     onChainChannelCount: null,
-    agentId: 1, stakeUsdc: String(i * 1_000_000), stakedAt: 0,
+    agentId: 1, stakeUsdc: String(i * 1_000_000),
     onChainActiveChannelCount: 0, onChainGhostCount: 0, onChainTotalVolumeUsdc: '0', onChainLastSettledAt: 0,
+    onChainReputationScore: null,
     networkRequests: null, networkInputTokens: null, networkOutputTokens: null,
     selectionValue: '',
   };

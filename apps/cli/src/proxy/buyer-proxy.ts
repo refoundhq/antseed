@@ -73,7 +73,7 @@ export interface BuyerProxyConfig {
   /**
    * Pin all requests to a specific peer ID for this session.
    * The named peer is used directly if it is available, protocol-compatible,
-   * and allowed by the router's buyer policy. A 502 is returned if the peer cannot be reached.
+   * and allowed by the buyer's pricing policy. A 502 is returned if the peer cannot be reached.
    */
   pinnedPeerId?: string
   /**
@@ -106,6 +106,10 @@ const PEER_FAILURE_WINDOW_MS = 5 * 60_000
 
 type TransformResult = { request: SerializedHttpRequest; streamRequested: boolean; requestedModel: string | null }
 type AdaptResponseMeta = { streamRequested: boolean; fallbackModel: string | null }
+
+type PricingPolicyRouter = Router & {
+  allowsPeerForPricing?: (req: SerializedHttpRequest, peer: PeerInfo) => boolean
+}
 
 type ProtocolTransformStrategy = {
   transformRequest: (req: SerializedHttpRequest) => TransformResult | null
@@ -284,6 +288,9 @@ export function parsePersistedPeers(
     }
     if (typeof entry.onChainLastSettledAtSec === 'number' && Number.isFinite(entry.onChainLastSettledAtSec)) {
       peer.onChainLastSettledAtSec = entry.onChainLastSettledAtSec
+    }
+    if (typeof entry.onChainStakedAtSec === 'number' && Number.isFinite(entry.onChainStakedAtSec)) {
+      peer.onChainStakedAtSec = entry.onChainStakedAtSec
     }
     if (typeof entry.onChainStatsFetchedAt === 'number' && Number.isFinite(entry.onChainStatsFetchedAt)) {
       peer.onChainStatsFetchedAt = entry.onChainStatsFetchedAt
@@ -593,6 +600,7 @@ export class BuyerProxy {
         onChainGhostCount: p.onChainGhostCount ?? null,
         onChainTotalVolumeUsdcMicros: p.onChainTotalVolumeUsdcMicros ?? null,
         onChainLastSettledAtSec: p.onChainLastSettledAtSec ?? null,
+        onChainStakedAtSec: p.onChainStakedAtSec ?? null,
         onChainStatsFetchedAt: p.onChainStatsFetchedAt ?? null,
         // Persisted so cold-started buyers can still resolve the facade address
         // for channelId derivation. See parsePersistedPeers for the round-trip.
@@ -1150,12 +1158,15 @@ export class BuyerProxy {
       res.end(`Pinned peer ${explicitPeerId.slice(0, 12)}... is currently unreachable. Try again in a moment.`)
       return
     }
-    const policySelectedPeer = router?.selectPeer(serializedReq, [selectedPeer]) ?? null
-    if (router && policySelectedPeer?.peerId !== selectedPeer.peerId) {
-      log(`Pinned peer ${selectedPeer.peerId.slice(0, 12)}... filtered out by buyer routing policy`)
+    const pricingRouter = router as PricingPolicyRouter | null | undefined
+    const pricingAllowed = pricingRouter?.allowsPeerForPricing
+      ? pricingRouter.allowsPeerForPricing(serializedReq, selectedPeer)
+      : true
+    if (!pricingAllowed) {
+      log(`Pinned peer ${selectedPeer.peerId.slice(0, 12)}... filtered out by buyer pricing policy`)
       res.writeHead(502, { 'content-type': 'text/plain' })
       res.end(
-        `Pinned peer ${selectedPeer.peerId.slice(0, 12)}... is outside your buyer routing policy. `
+        `Pinned peer ${selectedPeer.peerId.slice(0, 12)}... is outside your buyer pricing policy. `
         + 'Pick a different service in Discover or adjust your buyer max pricing.',
       )
       return

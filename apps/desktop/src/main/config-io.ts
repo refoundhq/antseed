@@ -7,6 +7,7 @@ import { asString, asNumber } from './utils.js';
 
 export const DESKTOP_DEFAULT_MAX_INPUT_USD_PER_MILLION = 5;
 export const DESKTOP_DEFAULT_MAX_OUTPUT_USD_PER_MILLION = 30;
+export const DESKTOP_DEFAULT_MIN_PEER_REPUTATION = 0;
 
 const DEFAULT_CONFIG: Record<string, unknown> = {
   identity: { displayName: 'AntSeed Node' },
@@ -23,7 +24,7 @@ const DEFAULT_CONFIG: Record<string, unknown> = {
         outputUsdPerMillion: DESKTOP_DEFAULT_MAX_OUTPUT_USD_PER_MILLION,
       },
     },
-    minPeerReputation: 50,
+    minPeerReputation: DESKTOP_DEFAULT_MIN_PEER_REPUTATION,
     proxyPort: 8377,
   },
   network: { bootstrapNodes: [] },
@@ -57,8 +58,10 @@ function migrateDesktopBuyerMaxPricing(config: Record<string, unknown>): {
   const input = defaults.inputUsdPerMillion;
   const output = defaults.outputUsdPerMillion;
 
+  const minPeerReputation = buyer.minPeerReputation;
   const nextDefaults = { ...defaults };
   let migrated = false;
+  let nextBuyer = buyer;
 
   if (
     typeof input !== 'number' ||
@@ -78,13 +81,25 @@ function migrateDesktopBuyerMaxPricing(config: Record<string, unknown>): {
     migrated = true;
   }
 
+  if (
+    typeof minPeerReputation !== 'number' ||
+    !Number.isFinite(minPeerReputation) ||
+    minPeerReputation === 50
+  ) {
+    nextBuyer = {
+      ...nextBuyer,
+      minPeerReputation: DESKTOP_DEFAULT_MIN_PEER_REPUTATION,
+    };
+    migrated = true;
+  }
+
   if (!migrated) return { config, migrated: false };
 
   return {
     config: {
       ...config,
       buyer: {
-        ...buyer,
+        ...nextBuyer,
         maxPricing: {
           ...maxPricing,
           defaults: nextDefaults,
