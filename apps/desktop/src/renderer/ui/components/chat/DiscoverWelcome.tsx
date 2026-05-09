@@ -9,7 +9,7 @@ import {
   type DiscoverSortKey,
   MAX_INPUT_PRICE_SLIDER_USD,
   MAX_OUTPUT_PRICE_SLIDER_USD,
-  DEFAULT_MIN_ON_CHAIN_CHANNELS,
+  DEFAULT_MIN_REPUTATION_SCORE,
   formatCategoryLabel,
 } from './discover-filter-util';
 import { DiscoverFilters } from './DiscoverFilters';
@@ -354,11 +354,8 @@ export function DiscoverWelcome({ serviceOptions, onStartChatting }: DiscoverWel
     filterState.peerSet.size > 0 ||
     filterState.maxInputPrice < MAX_INPUT_PRICE_SLIDER_USD ||
     filterState.maxOutputPrice < MAX_OUTPUT_PRICE_SLIDER_USD ||
-    filterState.chattedOnly ||
     filterState.minStakeUsdc > 0 ||
-    filterState.lastSeenWindow !== 'any' ||
-    filterState.lastSettledWindow !== 'any' ||
-    filterState.minOnChainChannels !== DEFAULT_MIN_ON_CHAIN_CHANNELS;
+    filterState.minReputationScore !== DEFAULT_MIN_REPUTATION_SCORE;
 
   const hasNetworkData = serviceOptions.length > 0 || rows.length > 0;
   const cards = useMemo(() => {
@@ -379,11 +376,8 @@ export function DiscoverWelcome({ serviceOptions, onStartChatting }: DiscoverWel
     filterState.peerSet,
     filterState.maxInputPrice,
     filterState.maxOutputPrice,
-    filterState.chattedOnly,
     filterState.minStakeUsdc,
-    filterState.lastSeenWindow,
-    filterState.lastSettledWindow,
-    filterState.minOnChainChannels,
+    filterState.minReputationScore,
     filterState.sortKey,
   ]);
 

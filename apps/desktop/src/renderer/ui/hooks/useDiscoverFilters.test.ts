@@ -30,30 +30,30 @@ test('pipeline: filter → sort → paginate on 25 rows', () => {
     search: '', categorySet: new Set(), peerSet: new Set(),
     maxInputPrice: MAX_INPUT_PRICE_SLIDER_USD,
     maxOutputPrice: MAX_OUTPUT_PRICE_SLIDER_USD,
-    chattedOnly: true,
     minStakeUsdc: 0,
-    lastSeenWindow: 'any', lastSettledWindow: 'any',
-    minOnChainChannels: 0,
+    minReputationScore: 0,
   });
-  assert.equal(filtered.length, 9);
+  assert.equal(filtered.length, 25);
   const sorted = applySort(filtered, 'recentlyUsed', 'desc');
   assert.equal(sorted[0]!.serviceLabel, 'Svc25');
   const paged = paginate(sorted, 1, 5);
   assert.equal(paged.length, 5);
-  assert.equal(totalPagesFor(sorted.length, 5), 2);
+  assert.equal(totalPagesFor(sorted.length, 5), 5);
 });
 
-test('pipeline: chattedOnly + stake filter', () => {
-  const rows = [mkRow(1, true), mkRow(50, true), mkRow(100, false)];
+test('pipeline: stake + reputation filters', () => {
+  const rows = [
+    { ...mkRow(1, true), onChainReputationScore: 80 },
+    { ...mkRow(50, true), onChainReputationScore: 40 },
+    { ...mkRow(100, false), onChainReputationScore: 90 },
+  ];
   const filtered = applyFilters(rows, {
     search: '', categorySet: new Set(), peerSet: new Set(),
     maxInputPrice: MAX_INPUT_PRICE_SLIDER_USD,
     maxOutputPrice: MAX_OUTPUT_PRICE_SLIDER_USD,
-    chattedOnly: true,
     minStakeUsdc: 50,
-    lastSeenWindow: 'any', lastSettledWindow: 'any',
-    minOnChainChannels: 0,
+    minReputationScore: 50,
   });
   assert.equal(filtered.length, 1);
-  assert.equal(filtered[0]!.serviceLabel, 'Svc50');
+  assert.equal(filtered[0]!.serviceLabel, 'Svc100');
 });

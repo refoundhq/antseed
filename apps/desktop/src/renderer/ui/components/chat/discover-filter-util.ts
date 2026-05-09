@@ -15,17 +15,9 @@ export const MAX_OUTPUT_PRICE_SLIDER_USD = 3;
 export const OUTPUT_PRICE_SLIDER_STEP = 0.1;
 export const MAX_STAKE_SLIDER_USDC = 1000;
 
-export const MAX_CHANNELS_SLIDER = 200;
-export const CHANNELS_SLIDER_STEP = 5;
-
-/**
- * Default minimum on-chain channel count for Discover. Keep this at 0 so every
- * price-eligible peer remains usable; the default reputation sort floats the
- * strongest peers to the top without hiding newer services.
- */
-export const DEFAULT_MIN_ON_CHAIN_CHANNELS = 0;
-
-export type TimeWindow = 'any' | 'today' | 'week' | 'month';
+export const MAX_REPUTATION_SCORE_SLIDER = 100;
+export const REPUTATION_SCORE_SLIDER_STEP = 5;
+export const DEFAULT_MIN_REPUTATION_SCORE = 0;
 
 /**
  * Friendlier display labels for raw lowercase category tags announced by
@@ -50,11 +42,8 @@ export type DiscoverFilterInputs = {
   peerSet: Set<string>;
   maxInputPrice: number;
   maxOutputPrice: number;
-  chattedOnly: boolean;
-  lastSeenWindow: TimeWindow;
-  lastSettledWindow: TimeWindow;
   minStakeUsdc: number;
-  minOnChainChannels: number;
+  minReputationScore: number;
 };
 
 export function hasBeenUsed(row: DiscoverRow): boolean {
@@ -115,32 +104,6 @@ export function matchesMinStake(row: DiscoverRow, minStakeUsdc: number): boolean
   return stakeUsdc >= minStakeUsdc;
 }
 
-export function matchesTimeWindow(
-  ts: number | null | undefined,
-  window: TimeWindow,
-  unit: 'ms' | 'sec',
-  nowMs: number = Date.now(),
-): boolean {
-  if (window === 'any') return true;
-  if (!ts || ts <= 0) return false;
-  const tsMs = unit === 'sec' ? ts * 1000 : ts;
-  const diffMs = nowMs - tsMs;
-  switch (window) {
-    case 'today': return diffMs < 24 * 3600 * 1000;
-    case 'week':  return diffMs < 7 * 24 * 3600 * 1000;
-    case 'month': return diffMs < 30 * 24 * 3600 * 1000;
-  }
-  return true;
-}
-
-export function matchesLastSeen(row: DiscoverRow, window: TimeWindow, nowMs?: number): boolean {
-  return matchesTimeWindow(row.lifetimeLastSessionAt, window, 'ms', nowMs);
-}
-
-export function matchesLastSettled(row: DiscoverRow, window: TimeWindow, nowMs?: number): boolean {
-  return matchesTimeWindow(row.onChainLastSettledAt, window, 'sec', nowMs);
-}
-
 /**
  * Effective on-chain channel count for a peer. Prefers the live value from
  * AntseedChannels.getAgentStats; falls back to the peer-metadata count while
@@ -158,13 +121,13 @@ export function rowReputationScore(row: DiscoverRow): number {
     : -1;
 }
 
-export function matchesMinChannels(row: DiscoverRow, minChannels: number): boolean {
-  if (minChannels <= 0) return true;
-  return rowChannelCount(row) >= minChannels;
+export function matchesMinReputationScore(row: DiscoverRow, minScore: number): boolean {
+  if (minScore <= DEFAULT_MIN_REPUTATION_SCORE) return true;
+  const score = rowReputationScore(row);
+  return score >= minScore;
 }
 
 export function applyFilters(rows: DiscoverRow[], inputs: DiscoverFilterInputs): DiscoverRow[] {
-  const nowMs = Date.now();
   return rows.filter((row) =>
     matchesSearch(row, inputs.search)
     && matchesCategoryFilter(row, inputs.categorySet)
@@ -172,11 +135,8 @@ export function applyFilters(rows: DiscoverRow[], inputs: DiscoverFilterInputs):
     && matchesMaxInputPrice(row, inputs.maxInputPrice)
     && matchesMaxOutputPrice(row, inputs.maxOutputPrice)
     && hasValidCachedInputPrice(row)
-    && (inputs.chattedOnly ? hasBeenUsed(row) : true)
     && matchesMinStake(row, inputs.minStakeUsdc)
-    && matchesLastSeen(row, inputs.lastSeenWindow, nowMs)
-    && matchesLastSettled(row, inputs.lastSettledWindow, nowMs)
-    && matchesMinChannels(row, inputs.minOnChainChannels)
+    && matchesMinReputationScore(row, inputs.minReputationScore)
   );
 }
 

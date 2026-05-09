@@ -3,8 +3,7 @@ import assert from 'node:assert/strict';
 import {
   matchesSearch, matchesMaxInputPrice, matchesMaxOutputPrice,
   matchesMinStake,
-  matchesLastSeen, matchesLastSettled,
-  matchesMinChannels, rowChannelCount, rowReputationScore,
+  matchesMinReputationScore, rowChannelCount, rowReputationScore,
   hasValidCachedInputPrice,
   applyFilters, applySort, paginate, totalPagesFor,
   MAX_INPUT_PRICE_SLIDER_USD, MAX_OUTPUT_PRICE_SLIDER_USD,
@@ -71,29 +70,6 @@ test('matchesMinStake compares base-6 USDC bigint to slider value', () => {
   assert.ok(matchesMinStake(mkRow({ stakeUsdc: '0' }), 0));
 });
 
-test('matchesLastSeen uses lifetimeLastSessionAt in ms', () => {
-  const now = 10_000_000_000;
-  const hourAgo = now - 3600 * 1000;
-  const tenDaysAgo = now - 10 * 86_400 * 1000;
-  assert.ok(matchesLastSeen(mkRow({ lifetimeLastSessionAt: null }), 'any', now));
-  assert.ok(!matchesLastSeen(mkRow({ lifetimeLastSessionAt: null }), 'today', now));
-  assert.ok(matchesLastSeen(mkRow({ lifetimeLastSessionAt: hourAgo }), 'today', now));
-  assert.ok(!matchesLastSeen(mkRow({ lifetimeLastSessionAt: tenDaysAgo }), 'week', now));
-  assert.ok(matchesLastSeen(mkRow({ lifetimeLastSessionAt: tenDaysAgo }), 'month', now));
-});
-
-test('matchesLastSettled uses onChainLastSettledAt in seconds', () => {
-  const nowMs = 10_000_000_000;
-  const nowSec = Math.floor(nowMs / 1000);
-  const dayAgoSec = nowSec - 86_400;
-  const monthAgoSec = nowSec - 86_400 * 40;
-  assert.ok(matchesLastSettled(mkRow({ onChainLastSettledAt: 0 }), 'any', nowMs));
-  assert.ok(!matchesLastSettled(mkRow({ onChainLastSettledAt: 0 }), 'today', nowMs));
-  assert.ok(!matchesLastSettled(mkRow({ onChainLastSettledAt: dayAgoSec }), 'today', nowMs));
-  assert.ok(matchesLastSettled(mkRow({ onChainLastSettledAt: dayAgoSec }), 'week', nowMs));
-  assert.ok(!matchesLastSettled(mkRow({ onChainLastSettledAt: monthAgoSec }), 'month', nowMs));
-});
-
 test('rowChannelCount uses the larger of active vs metadata channel count', () => {
   assert.equal(rowChannelCount(mkRow({ onChainActiveChannelCount: 20 })), 20);
   assert.equal(rowChannelCount(mkRow({ onChainActiveChannelCount: 0, onChainChannelCount: 25 })), 25);
@@ -101,12 +77,13 @@ test('rowChannelCount uses the larger of active vs metadata channel count', () =
   assert.equal(rowChannelCount(mkRow({ onChainActiveChannelCount: 0, onChainChannelCount: null })), 0);
 });
 
-test('matchesMinChannels gates rows by channel-count threshold', () => {
-  assert.ok(matchesMinChannels(mkRow({ onChainActiveChannelCount: 20 }), 20));
-  assert.ok(matchesMinChannels(mkRow({ onChainActiveChannelCount: 0, onChainChannelCount: 25 }), 20));
-  assert.ok(!matchesMinChannels(mkRow({ onChainActiveChannelCount: 5, onChainChannelCount: 8 }), 20));
-  // A threshold of zero always passes, regardless of on-chain state
-  assert.ok(matchesMinChannels(mkRow({ onChainActiveChannelCount: 0, onChainChannelCount: null }), 0));
+test('matchesMinReputationScore gates rows by reputation threshold', () => {
+  assert.ok(matchesMinReputationScore(mkRow({ onChainReputationScore: 75 }), 50));
+  assert.ok(matchesMinReputationScore(mkRow({ onChainReputationScore: 50 }), 50));
+  assert.ok(!matchesMinReputationScore(mkRow({ onChainReputationScore: 49 }), 50));
+  assert.ok(!matchesMinReputationScore(mkRow({ onChainReputationScore: null }), 50));
+  // A threshold of zero always passes, including peers whose score has not loaded.
+  assert.ok(matchesMinReputationScore(mkRow({ onChainReputationScore: null }), 0));
 });
 
 test('applyFilters composes all predicates', () => {
@@ -118,10 +95,8 @@ test('applyFilters composes all predicates', () => {
     search: '', categorySet: new Set(['coding']), peerSet: new Set(),
     maxInputPrice: MAX_INPUT_PRICE_SLIDER_USD,
     maxOutputPrice: MAX_OUTPUT_PRICE_SLIDER_USD,
-    chattedOnly: false,
     minStakeUsdc: 0,
-    lastSeenWindow: 'any', lastSettledWindow: 'any',
-    minOnChainChannels: 0,
+    minReputationScore: 0,
   });
   assert.equal(filtered.length, 1);
   assert.equal(filtered[0]!.serviceLabel, 'B');
