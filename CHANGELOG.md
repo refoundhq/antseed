@@ -10,6 +10,10 @@ This project uses selective package publishing. Each release entry lists the pub
 
 - `@antseed/cli@0.1.117`
 
+### Desktop
+
+- `@antseed/desktop@0.1.73`
+
 ### Fixed
 
 - Fixed `antseed buyer start` so trusted router plugins are repaired automatically when the plugin package is present but incomplete, such as a missing `@antseed/router-core` dependency.
