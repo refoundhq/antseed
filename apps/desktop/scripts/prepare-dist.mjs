@@ -155,6 +155,12 @@ console.log('[prepare-dist] Native module prebuild installed for Electron.');
 // bundled-runtime/ and ship it as extraResources.
 
 const BUNDLED_RUNTIME_DIR = path.join(appDir, 'bundled-runtime');
+const EXPLICITLY_BUNDLED_PACKAGES = new Set([
+  '@antseed/router-local',
+  '@antseed/router-core',
+  '@antseed/node',
+  '@antseed/api-adapter',
+]);
 const NODE_BUILTINS = new Set([
   ...builtinModules,
   ...builtinModules.map((name) => `node:${name}`),
@@ -216,16 +222,18 @@ function copyDepTree(name, destRoot, visited) {
     return;
   }
 
-  const destDir = path.join(destRoot, ...name.split('/'));
-  mkdirSync(path.dirname(destDir), { recursive: true });
-  rmSync(destDir, { recursive: true, force: true });
-  cpSync(sourceDir, destDir, { recursive: true, dereference: true });
+  if (!EXPLICITLY_BUNDLED_PACKAGES.has(name)) {
+    const destDir = path.join(destRoot, ...name.split('/'));
+    mkdirSync(path.dirname(destDir), { recursive: true });
+    rmSync(destDir, { recursive: true, force: true });
+    cpSync(sourceDir, destDir, { recursive: true, dereference: true });
 
-  // Drop any nested node_modules to keep the bundled tree flat — every
-  // dependency lives at the top level of bundled-runtime/.
-  const nestedNm = path.join(destDir, 'node_modules');
-  if (existsSync(nestedNm)) {
-    rmSync(nestedNm, { recursive: true, force: true });
+    // Drop any nested node_modules to keep the bundled tree flat — every
+    // dependency lives at the top level of bundled-runtime/.
+    const nestedNm = path.join(destDir, 'node_modules');
+    if (existsSync(nestedNm)) {
+      rmSync(nestedNm, { recursive: true, force: true });
+    }
   }
 
   let pkg;
