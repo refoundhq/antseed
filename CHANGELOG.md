@@ -8,15 +8,16 @@ This project uses selective package publishing. Each release entry lists the pub
 
 ### Published
 
-- `@antseed/cli@0.1.117`
+- `@antseed/cli@0.1.118`
 
 ### Desktop
 
-- `@antseed/desktop@0.1.73`
+- `@antseed/desktop@0.1.74`
 
 ### Fixed
 
-- Fixed `antseed buyer start` so trusted router plugins are repaired automatically when the plugin package is present but incomplete, such as a missing `@antseed/router-core` dependency.
+- Fixed `antseed buyer start` so trusted router plugins are repaired automatically when the plugin package is present but incomplete, including missing nested dependencies such as `ethers` under bundled Desktop installs.
+- Fixed Desktop plugin setup so bundled router repairs copy the runtime dependency tree needed by `@antseed/node`.
 - Added a manual install hint to missing third-party plugin errors.
 
 ## 2026-05-09 — Reputation, pricing, and cached-token fixes

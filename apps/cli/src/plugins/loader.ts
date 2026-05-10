@@ -74,7 +74,9 @@ async function ensureTrustedPluginInstallReady(
   pluginsDir: string,
 ): Promise<void> {
   const pkgJsonPath = join(pluginsDir, 'node_modules', ...pkgName.split('/'), 'package.json')
-  const shouldInstall = !existsSync(entryPath) || !existsSync(pkgJsonPath) || hasMissingDeclaredDependency(pkgJsonPath, pluginsDir)
+  const shouldInstall = !existsSync(entryPath)
+    || !existsSync(pkgJsonPath)
+    || hasMissingDeclaredDependencyTree(pkgName, pluginsDir)
   if (!shouldInstall) return
 
   const action = existsSync(entryPath)
@@ -89,14 +91,32 @@ async function ensureTrustedPluginInstallReady(
   }
 }
 
-function hasMissingDeclaredDependency(pkgJsonPath: string, pluginsDir: string): boolean {
+function hasMissingDeclaredDependencyTree(
+  pkgName: string,
+  pluginsDir: string,
+  visited: Set<string> = new Set(),
+): boolean {
+  if (visited.has(pkgName)) return false
+  visited.add(pkgName)
+
+  const pkgJsonPath = path.resolve(join(pluginsDir, 'node_modules', ...pkgName.split('/'), 'package.json'))
+  if (!pkgJsonPath.startsWith(path.resolve(pluginsDir))) return true
+  if (!existsSync(pkgJsonPath)) return true
+
   try {
     const raw = readFileSync(pkgJsonPath, 'utf8')
-    const parsed = JSON.parse(raw) as { dependencies?: Record<string, string> }
-    for (const depName of Object.keys(parsed.dependencies ?? {})) {
-      const depPkgJsonPath = path.resolve(join(pluginsDir, 'node_modules', ...depName.split('/'), 'package.json'))
-      if (!depPkgJsonPath.startsWith(path.resolve(pluginsDir))) return true
-      if (!existsSync(depPkgJsonPath)) return true
+    const parsed = JSON.parse(raw) as {
+      name?: string
+      dependencies?: Record<string, string>
+      peerDependencies?: Record<string, string>
+    }
+    const manifestName = typeof parsed.name === 'string' ? parsed.name : pkgName
+    const deps = {
+      ...(parsed.dependencies ?? {}),
+      ...(manifestName.startsWith('@antseed/') ? parsed.peerDependencies ?? {} : {}),
+    }
+    for (const depName of Object.keys(deps)) {
+      if (hasMissingDeclaredDependencyTree(depName, pluginsDir, visited)) return true
     }
     return false
   } catch {

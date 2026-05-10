@@ -1,7 +1,8 @@
 import { readFile, writeFile, readdir, mkdir, cp, rm } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { execFile as execFileCallback } from 'node:child_process';
 import { promisify } from 'node:util';
+import { createRequire } from 'node:module';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -12,6 +13,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const execFileAsync = promisify(execFileCallback);
+const requireFromHere = createRequire(import.meta.url);
 
 export const DEFAULT_PLUGINS_DIR = path.join(homedir(), '.antseed', 'plugins');
 const DEFAULT_PLUGINS_PACKAGE_JSON = path.join(DEFAULT_PLUGINS_DIR, 'package.json');
@@ -96,13 +98,124 @@ function bundledPackagePath(bundleRoot: string, packageName: string): string {
   return path.join(bundleRoot, ...packageName.split('/'));
 }
 
-async function readPackageVersion(packageDir: string): Promise<string | null> {
+function packageManifestPath(root: string, packageName: string): string {
+  return path.join(packageNodeModulesPath(root, packageName), 'package.json');
+}
+
+interface PackageManifest {
+  name?: string;
+  version?: string;
+  dependencies?: Record<string, string>;
+  peerDependencies?: Record<string, string>;
+}
+
+async function readPackageManifest(packageDir: string): Promise<PackageManifest | null> {
   try {
     const raw = await readFile(path.join(packageDir, 'package.json'), 'utf-8');
-    const parsed = JSON.parse(raw) as { version?: unknown };
-    return typeof parsed.version === 'string' ? parsed.version : null;
+    return JSON.parse(raw) as PackageManifest;
   } catch {
     return null;
+  }
+}
+
+function readPackageManifestSync(packageDir: string): PackageManifest | null {
+  try {
+    const raw = readFileSync(path.join(packageDir, 'package.json'), 'utf-8');
+    return JSON.parse(raw) as PackageManifest;
+  } catch {
+    return null;
+  }
+}
+
+async function readPackageVersion(packageDir: string): Promise<string | null> {
+  const manifest = await readPackageManifest(packageDir);
+  return typeof manifest?.version === 'string' ? manifest.version : null;
+}
+
+function dependencyNamesForManifest(manifest: PackageManifest, includePeers: boolean): string[] {
+  return Object.keys({
+    ...(manifest.dependencies ?? {}),
+    ...(includePeers ? manifest.peerDependencies ?? {} : {}),
+  });
+}
+
+function findAppPackageDir(packageName: string): string | null {
+  const lookupPaths = requireFromHere.resolve.paths(packageName) ?? [];
+  for (const dir of lookupPaths) {
+    const candidate = path.join(dir, ...packageName.split('/'));
+    const manifest = readPackageManifestSync(candidate);
+    if (manifest?.name === packageName) return candidate;
+  }
+
+  let entry: string;
+  try {
+    entry = requireFromHere.resolve(packageName);
+  } catch {
+    return null;
+  }
+
+  let cur = entry;
+  for (let i = 0; i < 16; i += 1) {
+    const parent = path.dirname(cur);
+    if (parent === cur) break;
+    cur = parent;
+    const manifest = readPackageManifestSync(cur);
+    if (manifest?.name === packageName) return cur;
+  }
+  return null;
+}
+
+function hasMissingInstalledDependencyTree(
+  packageName: string,
+  pluginsDir: string = DEFAULT_PLUGINS_DIR,
+  visited: Set<string> = new Set(),
+): boolean {
+  if (visited.has(packageName)) return false;
+  visited.add(packageName);
+
+  const packageDir = packageNodeModulesPath(pluginsDir, packageName);
+  const manifest = readPackageManifestSync(packageDir);
+  if (!manifest) return true;
+
+  const includePeers = (manifest.name ?? packageName).startsWith('@antseed/');
+  for (const depName of dependencyNamesForManifest(manifest, includePeers)) {
+    const depManifestPath = path.resolve(packageManifestPath(pluginsDir, depName));
+    if (!depManifestPath.startsWith(path.resolve(pluginsDir))) return true;
+    if (!existsSync(depManifestPath)) return true;
+    if (hasMissingInstalledDependencyTree(depName, pluginsDir, visited)) return true;
+  }
+
+  return false;
+}
+
+async function copyAppDependencyTree(
+  packageName: string,
+  visited: Set<string> = new Set(),
+): Promise<void> {
+  if (visited.has(packageName)) return;
+  visited.add(packageName);
+
+  const destDir = packageNodeModulesPath(DEFAULT_PLUGINS_DIR, packageName);
+  let manifest = await readPackageManifest(destDir);
+  if (!manifest) {
+    const sourceDir = findAppPackageDir(packageName);
+    if (!sourceDir) {
+      throw new Error(`Bundled dependency "${packageName}" is not available in the desktop app`);
+    }
+    await mkdir(path.dirname(destDir), { recursive: true });
+    await rm(destDir, { recursive: true, force: true });
+    await cp(sourceDir, destDir, { recursive: true, force: true });
+    _appendLog('connect', 'system', `Copied bundled dependency ${packageName}.`);
+    manifest = await readPackageManifest(destDir);
+  }
+
+  if (!manifest) {
+    throw new Error(`Bundled dependency "${packageName}" has no readable package.json after copy`);
+  }
+
+  const includePeers = (manifest.name ?? packageName).startsWith('@antseed/');
+  for (const depName of dependencyNamesForManifest(manifest, includePeers)) {
+    await copyAppDependencyTree(depName, visited);
   }
 }
 
@@ -225,7 +338,10 @@ export async function installPluginFromBundle(packageName: string): Promise<bool
     }
   }
 
-  return existsSync(path.join(destRoot, ...packageName.split('/'), 'package.json'));
+  await copyAppDependencyTree(packageName);
+
+  return existsSync(path.join(destRoot, ...packageName.split('/'), 'package.json'))
+    && !hasMissingInstalledDependencyTree(packageName);
 }
 
 export function isPluginInstalled(packageName: string): boolean {
@@ -336,7 +452,8 @@ export async function ensureDefaultPlugin(
   ctx: EnsureDefaultPluginContext,
 ): Promise<void> {
   const installed = isPluginInstalled(packageName);
-  const refreshFromBundle = installed ? await isBundledPluginRefreshNeeded(packageName) : false;
+  const incompleteInstall = installed ? hasMissingInstalledDependencyTree(packageName) : false;
+  const refreshFromBundle = installed ? incompleteInstall || await isBundledPluginRefreshNeeded(packageName) : false;
   if (installed && !refreshFromBundle) {
     ctx.setAppSetupNeeded(false);
     ctx.setAppSetupComplete(true);
@@ -347,9 +464,11 @@ export async function ensureDefaultPlugin(
   ctx.appendLog(
     'connect',
     'system',
-    refreshFromBundle
-      ? `Refreshing bundled plugin "${packageName}".`
-      : `Required plugin "${packageName}" not found. Installing`,
+    incompleteInstall
+      ? `Plugin "${packageName}" is incomplete. Repairing bundled dependencies.`
+      : refreshFromBundle
+        ? `Refreshing bundled plugin "${packageName}".`
+        : `Required plugin "${packageName}" not found. Installing`,
   );
   try {
     // 1. Try copying from the app bundle (production builds — instant, no network)
