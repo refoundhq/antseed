@@ -127,6 +127,46 @@ function summarizeToolActivity(items: ToolRenderItem[]): ActivitySummary {
   return { label: `Used ${pluralize(items.length, 'tool')}`, verb: 'Used', noun: 'tools' };
 }
 
+function formatDuration(ms: number): string {
+  if (!Number.isFinite(ms) || ms <= 0) return '';
+  if (ms < 1000) return '<1s';
+  const seconds = Math.round(ms / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = seconds % 60;
+  return remainingSeconds > 0 ? `${minutes}m ${remainingSeconds}s` : `${minutes}m`;
+}
+
+function getAssistantWorkDuration(message: ChatMessage): string {
+  const latencyMs = Number(message.meta?.latencyMs);
+  if (Number.isFinite(latencyMs) && latencyMs > 0) {
+    return formatDuration(latencyMs);
+  }
+  return '';
+}
+
+function AssistantWorkHeader({ message, working, hasActivity }: { message: ChatMessage; working: boolean; hasActivity: boolean }) {
+  if (!working && !hasActivity) return null;
+  const duration = getAssistantWorkDuration(message);
+  const label = working
+    ? 'Working'
+    : duration
+      ? `Worked for ${duration}`
+      : 'Worked';
+
+  return (
+    <div className={styles.assistantWorkHeader}>
+      <span className={styles.assistantWorkLabel}>{label}</span>
+      {working ? (
+        <span className="thinking-dots" aria-hidden="true">
+          <span /><span /><span />
+        </span>
+      ) : null}
+      <span className={styles.assistantWorkRule} aria-hidden="true" />
+    </div>
+  );
+}
+
 // messagePrefix scopes the key to a specific message so that when
 // buildDisplayMessages merges consecutive assistant turns, two text-0 blocks
 // from different turns don't share the same React key.
@@ -413,7 +453,9 @@ function ToolGroupView({ blocks, onOpenPreview }: { blocks: ContentBlock[]; onOp
               {runningSummary || preview}
               {previewSuffix}
             </span>
-            <span className={`tool-group-status ${groupStatus}`}>{groupStatusLabel}</span>
+            {groupStatus !== 'success' ? (
+              <span className={`tool-group-status ${groupStatus}`}>{groupStatusLabel}</span>
+            ) : null}
           </div>
         ) : null}
         <div className={`tool-group-list-wrap${isOpen ? '' : ' collapsed'}`}>
@@ -776,7 +818,13 @@ export function ChatBubble({ message, streaming = false, onOpenPreview, conversa
     if (message.role === 'assistant') {
       const assistantTurnContent = buildAssistantTurnContent(message.content);
       const inlineBlocks = assistantTurnContent.orderedParts.map((part) => part.block);
-      return renderAssistantBlocks(inlineBlocks, isStreamingBubble, messagePrefix, onOpenPreview, conversationId);
+      const hasActivity = assistantTurnContent.processBlocks.length > 0;
+      return (
+        <>
+          <AssistantWorkHeader message={message} working={isStreamingBubble} hasActivity={hasActivity} />
+          {renderAssistantBlocks(inlineBlocks, isStreamingBubble, messagePrefix, onOpenPreview, conversationId)}
+        </>
+      );
     }
 
     if (typeof message.content === 'string') {
