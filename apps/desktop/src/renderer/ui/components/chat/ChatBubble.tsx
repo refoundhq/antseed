@@ -145,26 +145,10 @@ function getAssistantWorkDuration(message: ChatMessage): string {
   return '';
 }
 
-function AssistantWorkHeader({ message, working, hasActivity }: { message: ChatMessage; working: boolean; hasActivity: boolean }) {
-  if (!working && !hasActivity) return null;
+function getAssistantWorkLabel(message: ChatMessage, working: boolean): string {
   const duration = getAssistantWorkDuration(message);
-  const label = working
-    ? 'Working'
-    : duration
-      ? `Worked for ${duration}`
-      : 'Worked';
-
-  return (
-    <div className={styles.assistantWorkHeader}>
-      <span className={styles.assistantWorkLabel}>{label}</span>
-      {working ? (
-        <span className="thinking-dots" aria-hidden="true">
-          <span /><span /><span />
-        </span>
-      ) : null}
-      <span className={styles.assistantWorkRule} aria-hidden="true" />
-    </div>
-  );
+  if (working) return 'Working';
+  return duration ? `Worked for ${duration}` : 'Worked';
 }
 
 // messagePrefix scopes the key to a specific message so that when
@@ -390,6 +374,73 @@ function ToolModal({ item, onClose }: { item: ToolRenderItem; onClose: () => voi
   );
 }
 
+function ToolInlineItem({ item, onOpenPreview, onOpenModal }: { item: ToolRenderItem; onOpenPreview?: (url: string) => void; onOpenModal: (item: ToolRenderItem) => void }) {
+  const [expanded, setExpanded] = useState(false);
+  const hasInlineDiff = item.kind === 'edit' && item.diff.length > 0;
+  const hasDetail = item.diff.length > 0 || item.output.trim().length > 0;
+
+  const statusNode =
+    hasInlineDiff ? (
+      <span className={`tool-inline-status ${item.status}`}>
+        <span className="diff-additions">+{item.additions}</span>
+        {' / '}
+        <span className="diff-removals">-{item.removals}</span>
+      </span>
+    ) : (
+      <span className={`tool-inline-status ${item.status}`}>
+        {item.kind === 'bash' && item.outputLineCount > 0
+          ? `${item.outputLineCount} lines`
+          : item.status === 'running'
+            ? 'Running'
+            : item.status === 'error'
+              ? 'Error'
+              : 'Done'}
+      </span>
+    );
+
+  return (
+    <div className={`tool-inline${expanded ? ' open' : ''}`}>
+      <button
+        type="button"
+        className={`tool-inline-row${hasDetail ? ' expandable' : ''}${hasInlineDiff ? ' has-inline-diff' : ''}`}
+        onClick={() => hasDetail && setExpanded((prev) => !prev)}
+      >
+        <span className="tool-inline-chevron">›</span>
+        <span className={`tool-inline-dot ${item.status}`} />
+        <span className="tool-inline-label">{item.label}</span>
+        {statusNode}
+      </button>
+      {expanded && hasDetail ? (
+        <div className="tool-inline-detail">
+          {item.diff.length > 0 ? (
+            <ToolDiffInline diff={item.diff} />
+          ) : item.output.trim().length > 0 ? (
+            <pre className={`tool-inline-output${item.status === 'error' ? ' error' : ''}`}>
+              {item.output.length > 6000 ? `${item.output.slice(0, 6000)}\n... (truncated)` : item.output}
+            </pre>
+          ) : null}
+          {item.output.length > 6000 ? (
+            <button type="button" className="tool-inline-open-full" onClick={() => onOpenModal(item)}>
+              Open full output
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+      {item.previewUrl && onOpenPreview && (
+        <button
+          type="button"
+          className="tool-preview-btn"
+          onClick={(e) => { e.stopPropagation(); onOpenPreview(item.previewUrl!); }}
+          title={`Preview ${item.previewUrl}`}
+        >
+          <HugeiconsIcon icon={BrowserIcon} size={12} strokeWidth={1.5} />
+          Preview
+        </button>
+      )}
+    </div>
+  );
+}
+
 function ToolGroupView({ blocks, onOpenPreview }: { blocks: ContentBlock[]; onOpenPreview?: (url: string) => void }) {
   const [manualToggle, setManualToggle] = useState<boolean | null>(null);
   const [modalItem, setModalItem] = useState<ToolRenderItem | null>(null);
@@ -415,15 +466,6 @@ function ToolGroupView({ blocks, onOpenPreview }: { blocks: ContentBlock[]; onOp
   const groupStatusLabel = anyRunning ? 'Running' : anyError ? 'Error' : 'Done';
   const activitySummary = summarizeToolActivity(items);
   const label = activitySummary.label;
-  const runningSummary = items
-    .filter((item) => item.status === 'running')
-    .map((item) => item.label)
-    .join(' / ');
-  const preview = items
-    .slice(0, 3)
-    .map((item) => item.label)
-    .join(' • ');
-  const previewSuffix = items.length > 3 ? ` +${items.length - 3} more` : '';
 
   return (
     <>
@@ -442,70 +484,22 @@ function ToolGroupView({ blocks, onOpenPreview }: { blocks: ContentBlock[]; onOp
             </span>
           ) : null}
         </button>
-        {!isOpen ? (
+        {!isOpen && groupStatus !== 'success' ? (
           <div className="tool-group-preview">
-            <span className="tool-group-preview-text">
-              {runningSummary || preview}
-              {previewSuffix}
-            </span>
-            {groupStatus !== 'success' ? (
-              <span className={`tool-group-status ${groupStatus}`}>{groupStatusLabel}</span>
-            ) : null}
+            <span className={`tool-group-status ${groupStatus}`}>{groupStatusLabel}</span>
           </div>
         ) : null}
         <div className={`tool-group-list-wrap${isOpen ? '' : ' collapsed'}`}>
           <div className="tool-group-list-inner">
             <div className="tool-group-list">
-              {items.map((item) => {
-                const hasInlineDiff = item.kind === 'edit' && item.diff.length > 0;
-                const hasDetail = !hasInlineDiff && (item.diff.length > 0 || item.output.trim().length > 0);
-
-                const statusNode =
-                  hasInlineDiff ? (
-                    <span className={`tool-inline-status ${item.status}`}>
-                      <span className="diff-additions">+{item.additions}</span>
-                      {' / '}
-                      <span className="diff-removals">-{item.removals}</span>
-                    </span>
-                  ) : (
-                    <span className={`tool-inline-status ${item.status}`}>
-                      {item.kind === 'bash' && item.outputLineCount > 0
-                        ? `${item.outputLineCount} lines`
-                        : item.status === 'running'
-                          ? 'Running'
-                          : item.status === 'error'
-                            ? 'Error'
-                            : 'Done'}
-                    </span>
-                  );
-
-                return (
-                  <div key={item.id} className="tool-inline">
-                    <button
-                      type="button"
-                      className={`tool-inline-row${hasDetail ? ' expandable' : ''}${hasInlineDiff ? ' has-inline-diff' : ''}`}
-                      onClick={() => hasDetail && setModalItem(item)}
-                    >
-                      <span className={`tool-inline-dot ${item.status}`} />
-                      <span className="tool-inline-label">{item.label}</span>
-                      {statusNode}
-                      <span className={`tool-inline-open${hasDetail ? '' : ' hidden'}`}>↗</span>
-                    </button>
-                    {item.previewUrl && onOpenPreview && (
-                      <button
-                        type="button"
-                        className="tool-preview-btn"
-                        onClick={(e) => { e.stopPropagation(); onOpenPreview(item.previewUrl!); }}
-                        title={`Preview ${item.previewUrl}`}
-                      >
-                        <HugeiconsIcon icon={BrowserIcon} size={12} strokeWidth={1.5} />
-                        Preview
-                      </button>
-                    )}
-                    {hasInlineDiff ? <ToolDiffInline diff={item.diff} /> : null}
-                  </div>
-                );
-              })}
+              {items.map((item) => (
+                <ToolInlineItem
+                  key={item.id}
+                  item={item}
+                  onOpenPreview={onOpenPreview}
+                  onOpenModal={setModalItem}
+                />
+              ))}
             </div>
           </div>
         </div>
@@ -550,6 +544,62 @@ function renderAssistantBlocks(
 
   flushToolGroup();
   return nodes;
+}
+
+function AssistantWorkSection({
+  message,
+  blocks,
+  working,
+  messagePrefix,
+  onOpenPreview,
+  conversationId,
+}: {
+  message: ChatMessage;
+  blocks: ContentBlock[];
+  working: boolean;
+  messagePrefix: string;
+  onOpenPreview?: (url: string) => void;
+  conversationId?: string;
+}) {
+  const [expanded, setExpanded] = useState(true);
+  if (blocks.length === 0) return null;
+
+  return (
+    <section className={`${styles.assistantWorkSection}${expanded ? ` ${styles.assistantWorkSectionOpen}` : ''}`}>
+      <button
+        type="button"
+        className={styles.assistantWorkHeader}
+        onClick={() => setExpanded((prev) => !prev)}
+        aria-expanded={expanded}
+      >
+        <span className={styles.assistantWorkLabel}>{getAssistantWorkLabel(message, working)}</span>
+        <span className={styles.assistantWorkChevron}>›</span>
+        {working ? (
+          <span className="thinking-dots" aria-hidden="true">
+            <span /><span /><span />
+          </span>
+        ) : null}
+        <span className={styles.assistantWorkRule} aria-hidden="true" />
+      </button>
+      {expanded ? (
+        <div className={styles.assistantWorkBody}>
+          {renderAssistantBlocks(blocks, working, `${messagePrefix}-work`, onOpenPreview, conversationId)}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function splitAssistantDisplayBlocks(orderedParts: ReturnType<typeof buildAssistantTurnContent>['orderedParts']): { workBlocks: ContentBlock[]; answerBlocks: ContentBlock[] } {
+  const lastProcessIndex = orderedParts.reduce((lastIndex, part, index) => part.kind === 'process' ? index : lastIndex, -1);
+  if (lastProcessIndex < 0) {
+    return { workBlocks: [], answerBlocks: orderedParts.map((part) => part.block) };
+  }
+
+  return {
+    workBlocks: orderedParts.slice(0, lastProcessIndex + 1).map((part) => part.block),
+    answerBlocks: orderedParts.slice(lastProcessIndex + 1).map((part) => part.block),
+  };
 }
 
 function FileAttachmentBlock({ block, conversationId }: { block: ContentBlock; conversationId?: string }) {
@@ -812,12 +862,18 @@ export function ChatBubble({ message, streaming = false, onOpenPreview, conversa
   const content = useMemo(() => {
     if (message.role === 'assistant') {
       const assistantTurnContent = buildAssistantTurnContent(message.content);
-      const inlineBlocks = assistantTurnContent.orderedParts.map((part) => part.block);
-      const hasActivity = assistantTurnContent.processBlocks.length > 0;
+      const { workBlocks, answerBlocks } = splitAssistantDisplayBlocks(assistantTurnContent.orderedParts);
       return (
         <>
-          <AssistantWorkHeader message={message} working={isStreamingBubble} hasActivity={hasActivity} />
-          {renderAssistantBlocks(inlineBlocks, isStreamingBubble, messagePrefix, onOpenPreview, conversationId)}
+          <AssistantWorkSection
+            message={message}
+            blocks={workBlocks}
+            working={isStreamingBubble}
+            messagePrefix={messagePrefix}
+            onOpenPreview={onOpenPreview}
+            conversationId={conversationId}
+          />
+          {renderAssistantBlocks(answerBlocks, isStreamingBubble, `${messagePrefix}-answer`, onOpenPreview, conversationId)}
         </>
       );
     }
