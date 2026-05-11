@@ -89,6 +89,43 @@ function buildToolRenderItem(block: ContentBlock, index: number): ToolRenderItem
   };
 }
 
+type ActivitySummary = {
+  label: string;
+  verb: string;
+  noun: string;
+};
+
+function pluralize(count: number, singular: string, plural = `${singular}s`): string {
+  return `${count} ${count === 1 ? singular : plural}`;
+}
+
+function summarizeToolActivity(items: ToolRenderItem[]): ActivitySummary {
+  const kinds = new Set(items.map((item) => item.kind));
+  if ([...kinds].every((kind) => ['read', 'grep', 'find', 'ls'].includes(kind))) {
+    const reads = items.filter((item) => item.kind === 'read').length;
+    const searches = items.filter((item) => item.kind === 'grep' || item.kind === 'find').length;
+    const lists = items.filter((item) => item.kind === 'ls').length;
+    const bits = [
+      reads > 0 ? pluralize(reads, 'file') : '',
+      searches > 0 ? pluralize(searches, 'search', 'searches') : '',
+      lists > 0 ? pluralize(lists, 'list') : '',
+    ].filter(Boolean);
+    return { label: `Explored ${bits.join(', ') || pluralize(items.length, 'item')}`, verb: 'Explored', noun: 'files' };
+  }
+  if ([...kinds].every((kind) => ['edit', 'write'].includes(kind))) {
+    return { label: `Edited ${pluralize(items.length, 'file')}`, verb: 'Edited', noun: 'files' };
+  }
+  if ([...kinds].every((kind) => kind === 'bash')) {
+    return { label: `Ran ${pluralize(items.length, 'command')}`, verb: 'Ran', noun: 'commands' };
+  }
+  if ([...kinds].every((kind) => ['web_fetch'].includes(kind))) {
+    return { label: `Researched ${pluralize(items.length, 'page')}`, verb: 'Researched', noun: 'pages' };
+  }
+  if ([...kinds].every((kind) => ['open_browser_preview', 'start_dev_server'].includes(kind))) {
+    return { label: `Opened ${pluralize(items.length, 'preview')}`, verb: 'Previewed', noun: 'preview' };
+  }
+  return { label: `Used ${pluralize(items.length, 'tool')}`, verb: 'Used', noun: 'tools' };
+}
 
 // messagePrefix scopes the key to a specific message so that when
 // buildDisplayMessages merges consecutive assistant turns, two text-0 blocks
@@ -184,8 +221,8 @@ function ThinkingBlockView({ block }: { block: ContentBlock }) {
         className="thinking-block-header"
         onClick={() => setManualToggle((prev) => !(prev ?? true))}
       >
-        <span className="thinking-block-triangle">▶</span>
-        <span>Internal Thoughts</span>
+        <span className="thinking-block-triangle">›</span>
+        <span>Thinking</span>
         {block.streaming ? (
           <span className="thinking-dots" aria-hidden="true">
             <span />
@@ -336,12 +373,13 @@ function ToolGroupView({ blocks, onOpenPreview }: { blocks: ContentBlock[]; onOp
   }
   if (anyRunning) wasRunningRef.current = true;
 
-  // Open by default (unless user manually collapsed)
-  const isOpen = manualToggle ?? true;
+  // Keep finished work compact by default, but open live/running work.
+  const isOpen = manualToggle ?? anyRunning;
 
   const groupStatus: 'running' | 'success' | 'error' = anyRunning ? 'running' : anyError ? 'error' : 'success';
   const groupStatusLabel = anyRunning ? 'Running' : anyError ? 'Error' : 'Done';
-  const label = `Tools (${items.length})`;
+  const activitySummary = summarizeToolActivity(items);
+  const label = activitySummary.label;
   const runningSummary = items
     .filter((item) => item.status === 'running')
     .map((item) => item.label)
@@ -361,6 +399,7 @@ function ToolGroupView({ blocks, onOpenPreview }: { blocks: ContentBlock[]; onOp
           onClick={() => setManualToggle((prev) => !(prev ?? anyRunning))}
         >
           <span className="tool-group-chevron">›</span>
+          <span className={`tool-group-icon ${groupStatus}`} aria-hidden="true" />
           <span className="tool-group-label">{label}</span>
           {anyRunning ? (
             <span className="thinking-dots" aria-hidden="true">
