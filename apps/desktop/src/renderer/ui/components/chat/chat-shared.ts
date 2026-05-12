@@ -549,6 +549,17 @@ export type AssistantMessageContentParts = {
 
 export type AssistantTurnContent = AssistantMessageContentParts & {
   /**
+   * Response blocks that represent the final assistant answer for copy/export.
+   *
+   * Assistant turns may include short progress/update text before or between
+   * tool calls. Those lines are useful in the chat transcript, but they lose
+   * context when copied as an answer. As a structure-based fallback, final
+   * response blocks are the response blocks after the last process block. If
+   * there are no response blocks after process activity, this falls back to all
+   * response blocks so simple/process-free answers still copy normally.
+   */
+  finalResponseBlocks: ContentBlock[];
+  /**
    * Original assistant block order annotated with the lane it belongs to.
    *
    * This lets the current inline chat renderer keep existing behavior while
@@ -583,7 +594,23 @@ export function buildAssistantTurnContent(content: unknown): AssistantTurnConten
     }
   }
 
-  return { responseBlocks, processBlocks, orderedParts };
+  const lastProcessIndex = orderedParts.reduce(
+    (lastIndex, part, index) => (part.kind === 'process' ? index : lastIndex),
+    -1,
+  );
+  const finalResponseBlocks = lastProcessIndex >= 0
+    ? orderedParts
+        .slice(lastProcessIndex + 1)
+        .filter((part) => part.kind === 'response')
+        .map((part) => part.block)
+    : responseBlocks;
+
+  return {
+    responseBlocks,
+    processBlocks,
+    finalResponseBlocks: finalResponseBlocks.length > 0 ? finalResponseBlocks : responseBlocks,
+    orderedParts,
+  };
 }
 
 export function splitAssistantContentBlocks(content: unknown): AssistantMessageContentParts {
