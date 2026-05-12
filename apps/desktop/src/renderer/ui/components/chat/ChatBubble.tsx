@@ -592,14 +592,9 @@ function AssistantWorkSection({
 }
 
 function splitAssistantDisplayBlocks(orderedParts: ReturnType<typeof buildAssistantTurnContent>['orderedParts']): { workBlocks: ContentBlock[]; answerBlocks: ContentBlock[] } {
-  const lastProcessIndex = orderedParts.reduce((lastIndex, part, index) => part.kind === 'process' ? index : lastIndex, -1);
-  if (lastProcessIndex < 0) {
-    return { workBlocks: [], answerBlocks: orderedParts.map((part) => part.block) };
-  }
-
   return {
-    workBlocks: orderedParts.slice(0, lastProcessIndex + 1).map((part) => part.block),
-    answerBlocks: orderedParts.slice(lastProcessIndex + 1).map((part) => part.block),
+    workBlocks: orderedParts.filter((part) => part.kind === 'process').map((part) => part.block),
+    answerBlocks: orderedParts.filter((part) => part.kind === 'response').map((part) => part.block),
   };
 }
 
