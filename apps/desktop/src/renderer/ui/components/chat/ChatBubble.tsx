@@ -787,7 +787,7 @@ function CopyResponseButton({ message }: { message: ChatMessage }) {
 
   const handleCopy = useCallback(() => {
     const copyContent = message.role === 'assistant'
-      ? buildAssistantTurnContent(message.content).responseBlocks
+      ? buildAssistantTurnContent(message.content).finalResponseBlocks
       : message.content;
     const text = extractPlainText(copyContent);
     if (!text) return;

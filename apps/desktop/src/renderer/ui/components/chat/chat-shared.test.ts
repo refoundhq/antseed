@@ -40,6 +40,33 @@ test('assistant turn content preserves original order while annotating response/
   assert.deepEqual(turn.orderedParts.map((part) => part.block.type), ['thinking', 'text', 'tool_use', 'text']);
   assert.deepEqual(turn.responseBlocks.map((block) => block.type), ['text', 'text']);
   assert.deepEqual(turn.processBlocks.map((block) => block.type), ['thinking', 'tool_use']);
+  assert.deepEqual(turn.finalResponseBlocks.map((block) => block.type), ['text']);
+  assert.equal(turn.finalResponseBlocks[0]?.text, 'Second answer chunk');
+});
+
+test('assistant final response blocks skip progress text before the last process block', () => {
+  const turn = buildAssistantTurnContent([
+    { type: 'text', text: 'I will inspect the repo first.' },
+    { type: 'tool_use', id: 'tool-1', name: 'bash' },
+    { type: 'text', text: 'Repo is confirmed. I will inspect the renderer next.' },
+    { type: 'tool_use', id: 'tool-2', name: 'read' },
+    { type: 'text', text: 'Final answer' },
+  ]);
+
+  assert.deepEqual(
+    turn.responseBlocks.map((block) => block.text),
+    ['I will inspect the repo first.', 'Repo is confirmed. I will inspect the renderer next.', 'Final answer'],
+  );
+  assert.deepEqual(turn.finalResponseBlocks.map((block) => block.text), ['Final answer']);
+});
+
+test('assistant final response blocks fall back when no final text follows process activity', () => {
+  const turn = buildAssistantTurnContent([
+    { type: 'text', text: 'Only visible text' },
+    { type: 'tool_use', id: 'tool-1', name: 'bash' },
+  ]);
+
+  assert.deepEqual(turn.finalResponseBlocks.map((block) => block.text), ['Only visible text']);
 });
 
 test('assistant process block predicate is centralized for reasoning and tools', () => {
