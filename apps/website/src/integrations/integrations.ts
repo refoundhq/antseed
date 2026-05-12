@@ -250,6 +250,8 @@ model_provider = "antseed"
 
 # Optional: make AntSeed the default profile so you don't need --profile every time.
 # profile = "antseed"`,
+        note:
+          'This must be your **user-level** `~/.codex/config.toml`. Codex silently ignores `model_provider` / `model_providers` if they appear in a project-local `./.codex/config.toml` and prints a one-line warning at launch (see Troubleshooting).',
       },
       {
         kind: 'gui',
@@ -278,11 +280,32 @@ model_provider = "antseed"
         command: 'codex --profile antseed',
         note: 'Or pin a model for one session: `codex --profile antseed --model deepseek-v4-flash`.',
       },
+      {
+        label: 'Verify inference is actually paid through AntSeed',
+        command: 'open http://localhost:3118   # or: antseed buyer status',
+        outputLabel: 'What to look for after one real prompt',
+        output: `Deposits available: 4.289391 USDC → 3.289391 USDC
+Deposits reserved:           0 USDC → 1 USDC`,
+        note:
+          'The buyer dashboard at http://localhost:3118 is the authoritative real-time signal: a non-zero `Reserved` (channel opened) and/or a drop in `Available` (settled spend) after a real prompt confirms AntSeed served the request. The `antseed buyer status` CLI output is cached and may lag the dashboard — refresh the web view for confirmation. Do not rely on `lsof -i | grep codex` or `~/.codex/log/codex-tui.log`: Codex keeps persistent TCP connections to Cloudflare/ChatGPT IPs (e.g. 172.64.0.0/13) for non-inference purposes (the cause was not isolated during testing), and the `provider=OpenAI` lines in the TUI log are not a reliable indicator that inference went to OpenAI — the on-chain numbers can show AntSeed served the request despite that log line.',
+      },
     ],
     troubleshooting: [
       {
         problem: '`OPENAI_BASE_URL` / `OPENAI_API_KEY` are being ignored',
         fix: 'Expected on Codex 0.40+ — it no longer reads OpenAI env vars and only loads providers from `~/.codex/config.toml`. Use the profile shown above and launch with `codex --profile antseed`.',
+      },
+      {
+        problem: 'How can I tell if Codex is actually routing through AntSeed?',
+        fix: 'Check the buyer dashboard at http://localhost:3118 (or `antseed buyer status`) after sending a test prompt. `Reserved` going from $0 to a non-zero value (a channel was opened) and/or `Available` dropping (spend settled) confirms AntSeed served the request. If both stay flat after a real prompt, the profile is not being applied. Do not trust `lsof` connections to Cloudflare IPs or `provider=OpenAI` lines in `~/.codex/log/codex-tui.log` — neither is a reliable routing signal.',
+      },
+      {
+        problem: 'Codex prints `Ignored unsupported project-local config keys … model_provider, model_providers`',
+        fix: 'Provider settings must live in your **user-level** `~/.codex/config.toml`. Codex silently rejects them in a project-local `./.codex/config.toml` and falls back to its default (OpenAI). Move the `[model_providers.antseed]` and `[profiles.antseed]` blocks to `~/.codex/config.toml` and relaunch.',
+      },
+      {
+        problem: 'Declaring the provider on the command line via `-c model_provider=…` / `-c model_providers.antseed=…`',
+        fix: 'Prefer `~/.codex/config.toml` + `--profile antseed`. Declaring the provider via `-c` flags has been observed to apply on `codex resume` but silently revert to OpenAI on a fresh `codex` launch. The config-file path is the only setup we reliably reproduce.',
       },
       {
         problem: 'Streaming stops after the first chunk',
