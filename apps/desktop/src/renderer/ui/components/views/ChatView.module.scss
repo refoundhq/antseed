@@ -294,6 +294,60 @@
   padding: 40px 16px;
 }
 
+.scroll-to-latest-button {
+  position: absolute;
+  left: 50%;
+  bottom: 104px;
+  transform: translateX(-50%);
+  z-index: 12;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 1px solid var(--border-light);
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--bg-card) 94%, transparent);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.12);
+  color: var(--text-muted);
+  cursor: pointer;
+  backdrop-filter: blur(10px);
+  transition: color 0.15s, border-color 0.15s, background 0.15s, transform 0.15s, box-shadow 0.15s;
+
+  &:hover {
+    color: var(--accent-green);
+    border-color: color-mix(in srgb, var(--accent-green) 38%, var(--border-light));
+    background: color-mix(in srgb, var(--accent-green) 7%, var(--bg-card));
+    transform: translateX(-50%) translateY(-1px);
+    box-shadow: 0 8px 22px rgba(0, 0, 0, 0.16);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--accent-green);
+    outline-offset: 2px;
+  }
+}
+
+.scroll-to-latest-icon {
+  transform: rotate(180deg);
+}
+
+.scroll-to-latest-button-new {
+  border-color: color-mix(in srgb, var(--accent-green) 32%, var(--border-light));
+}
+
+.scroll-to-latest-dot {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent-green);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-green) 14%, transparent);
+}
+
 /* ===================================================================
    Chat input area
    =================================================================== */

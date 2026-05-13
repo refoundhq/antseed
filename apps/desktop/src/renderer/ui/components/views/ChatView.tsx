@@ -40,6 +40,11 @@ const DEFAULT_PREVIEW_FRACTION = 0.5;
 const MAX_ATTACHMENTS = 5;
 const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 const MAX_TOTAL_ATTACHMENT_BYTES = 50 * 1024 * 1024;
+const NEAR_BOTTOM_PX = 40;
+
+function isNearScrollBottom(el: HTMLElement): boolean {
+  return el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM_PX;
+}
 
 function getMessageContentKey(content: unknown): string {
   if (typeof content === 'string') {
@@ -160,6 +165,8 @@ export function ChatView({ active, onSelectView }: ChatViewProps) {
   };
   const [pendingQueue, setPendingQueue] = useState<PendingDraft[]>([]);
   const [previewAttachment, setPreviewAttachment] = useState<ViewerAttachment | null>(null);
+  const [isNearBottom, setIsNearBottom] = useState(true);
+  const [hasNewActivityWhileScrolledUp, setHasNewActivityWhileScrolledUp] = useState(false);
   const [tooltipDismissed, setTooltipDismissed] = useState<boolean>(() => {
     if (typeof window === 'undefined') return true;
     return window.localStorage.getItem(SWITCH_TOOLTIP_DISMISSED_KEY) === 'true';
@@ -195,23 +202,30 @@ export function ChatView({ active, onSelectView }: ChatViewProps) {
     }
   }, [previewUrl, previewRequestId]);
 
-  // Track whether the user has scrolled away from the bottom
+  // Track whether the user has scrolled away from the bottom.
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
     const handleScroll = () => {
-      const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+      const atBottom = isNearScrollBottom(el);
       isUserScrolledUp.current = !atBottom;
+      setIsNearBottom(atBottom);
+      if (atBottom) {
+        setHasNewActivityWhileScrolledUp(false);
+      }
     };
+    handleScroll();
     el.addEventListener('scroll', handleScroll, { passive: true });
     return () => el.removeEventListener('scroll', handleScroll);
   }, []);
 
-  const scrollChatToBottom = useCallback(() => {
+  const scrollChatToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
     const el = scrollRef.current;
     if (!el) return;
-    el.scrollTop = el.scrollHeight;
+    el.scrollTo({ top: el.scrollHeight, behavior });
     isUserScrolledUp.current = false;
+    setIsNearBottom(true);
+    setHasNewActivityWhileScrolledUp(false);
   }, []);
 
   // Opening/reopening a conversation should land on the latest message, not the
@@ -232,14 +246,18 @@ export function ChatView({ active, onSelectView }: ChatViewProps) {
 
     isUserScrolledUp.current = false;
     scrollChatToBottom();
-    const frame = requestAnimationFrame(scrollChatToBottom);
+    const frame = requestAnimationFrame(() => scrollChatToBottom());
     return () => cancelAnimationFrame(frame);
   }, [active, snap.chatActiveConversation, scrollChatToBottom]);
 
   // Keep the view pinned to the bottom while the user is already at the bottom.
   useEffect(() => {
     const el = scrollRef.current;
-    if (!el || isUserScrolledUp.current) {
+    if (!el) {
+      return;
+    }
+    if (isUserScrolledUp.current) {
+      setHasNewActivityWhileScrolledUp(true);
       return;
     }
 
@@ -659,11 +677,16 @@ export function ChatView({ active, onSelectView }: ChatViewProps) {
     bridge?.sendBrowserPreviewElementSelected?.(info);
   }, []);
 
+  const handleScrollToLatest = useCallback(() => {
+    scrollChatToBottom('smooth');
+  }, [scrollChatToBottom]);
+
   const showWelcome =
     snap.chatConversationsLoaded &&
     !snap.chatActiveConversation &&
     visibleMessages.length === 0 &&
     !snap.chatStreamingMessage;
+  const showScrollToLatest = !showWelcome && !isNearBottom;
 
   const workspacePath = snap.chatWorkspacePath || snap.chatWorkspaceDefaultPath;
   const workspaceLabel = getPathEnding(workspacePath);
@@ -848,6 +871,18 @@ export function ChatView({ active, onSelectView }: ChatViewProps) {
             />
           </div>
 
+          {showScrollToLatest ? (
+            <button
+              type="button"
+              className={`${styles.scrollToLatestButton}${hasNewActivityWhileScrolledUp ? ` ${styles.scrollToLatestButtonNew}` : ''}`}
+              onClick={handleScrollToLatest}
+              aria-label="Scroll to latest message"
+              title="Scroll to latest message"
+            >
+              <HugeiconsIcon icon={ArrowUp02Icon} size={16} strokeWidth={2} className={styles.scrollToLatestIcon} />
+              {hasNewActivityWhileScrolledUp ? <span className={styles.scrollToLatestDot} aria-hidden="true" /> : null}
+            </button>
+          ) : null}
 
           <div className={styles.chatInputArea}>
             {snap.chatError && <div className={styles.chatError}>{snap.chatError}</div>}

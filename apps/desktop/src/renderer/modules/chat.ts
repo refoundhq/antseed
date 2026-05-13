@@ -887,7 +887,7 @@ export function initChatModule({
   function scrollChatToBottom(): void {
     const container = document.querySelector<HTMLElement>('[data-chat-scroll]');
     if (!container) return;
-    const threshold = 100;
+    const threshold = 40;
     const distanceFromBottom =
       container.scrollHeight - container.scrollTop - container.clientHeight;
     if (distanceFromBottom < threshold) {
