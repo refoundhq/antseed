@@ -113,12 +113,6 @@ contract AntseedEmissionsV2 is Ownable, Pausable, ReentrancyGuard {
     // ─── Events ───
     event SellerPointsAccrued(address indexed seller, uint256 indexed epoch, uint256 pointsDelta);
     event BuyerPointsAccrued(address indexed buyer, uint256 indexed epoch, uint256 pointsDelta);
-    event RawSellerPointsAccrued(
-        address indexed seller, uint256 indexed epoch, uint256 rawPoints, uint256 creditedPoints
-    );
-    event RawBuyerPointsAccrued(
-        address indexed buyer, uint256 indexed epoch, uint256 rawPoints, uint256 creditedPoints
-    );
     event PairPointsAccrued(
         bytes32 indexed channelId,
         address indexed buyer,
@@ -212,7 +206,6 @@ contract AntseedEmissionsV2 is Ownable, Pausable, ReentrancyGuard {
         userSellerPoints[seller][epoch] += pointsDelta;
         epochTotalSellerPoints[epoch] += pointsDelta;
         emit SellerPointsAccrued(seller, epoch, pointsDelta);
-        emit RawSellerPointsAccrued(seller, epoch, pointsDelta, pointsDelta);
     }
 
     function accrueBuyerPoints(address buyer, uint256 pointsDelta) external onlyChannels whenNotPaused {
@@ -221,7 +214,6 @@ contract AntseedEmissionsV2 is Ownable, Pausable, ReentrancyGuard {
         userBuyerPoints[buyer][epoch] += pointsDelta;
         epochTotalBuyerPoints[epoch] += pointsDelta;
         emit BuyerPointsAccrued(buyer, epoch, pointsDelta);
-        emit RawBuyerPointsAccrued(buyer, epoch, pointsDelta, pointsDelta);
     }
 
     /// @notice Pair-aware accrual for future Channels versions.
