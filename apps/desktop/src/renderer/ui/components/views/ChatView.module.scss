@@ -287,6 +287,23 @@
   }
 }
 
+.chat-turn-section {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 18px 0 22px;
+  scroll-margin-top: 24px;
+
+  + .chat-turn-section {
+    border-top: 1px solid var(--border-light);
+  }
+
+  > * {
+    width: 100%;
+  }
+}
+
 .chat-empty {
   color: var(--text-muted);
   font-size: 14px;

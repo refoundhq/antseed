@@ -67,6 +67,27 @@ function getMessageKey(message: ChatMessage, index: number): string {
   return `${message.role}:${createdAt}:${getMessageContentKey(message.content)}:${index}`;
 }
 
+type ChatTurnSectionMessage = {
+  key: string;
+  message: ChatMessage;
+  streaming?: boolean;
+};
+
+function buildChatTurnSections(messages: ChatTurnSectionMessage[]): ChatTurnSectionMessage[][] {
+  const sections: ChatTurnSectionMessage[][] = [];
+
+  for (const item of messages) {
+    if (item.message.role === 'user' || sections.length === 0) {
+      sections.push([item]);
+      continue;
+    }
+
+    sections[sections.length - 1].push(item);
+  }
+
+  return sections;
+}
+
 function getPathTail(value: string | null | undefined): string {
   const trimmed = String(value || '').trim().replace(/[\\/]+$/, '');
   if (!trimmed) {
@@ -185,6 +206,22 @@ export function ChatView({ active, onSelectView }: ChatViewProps) {
     const msgs = Array.isArray(snap.chatMessages) ? (snap.chatMessages as ChatMessage[]) : [];
     return buildDisplayMessages(msgs).filter((msg) => !isToolResultOnlyMessage(msg));
   }, [snap.chatMessages]);
+  const chatTurnSections = useMemo(() => {
+    const sectionMessages: ChatTurnSectionMessage[] = visibleMessages.map((message, index) => ({
+      key: getMessageKey(message, index),
+      message,
+    }));
+
+    if (snap.chatStreamingMessage) {
+      sectionMessages.push({
+        key: `streaming:${snap.chatActiveConversation || 'new'}`,
+        message: snap.chatStreamingMessage as ChatMessage,
+        streaming: true,
+      });
+    }
+
+    return buildChatTurnSections(sectionMessages);
+  }, [visibleMessages, snap.chatStreamingMessage, snap.chatActiveConversation]);
 
   const previewUrl = snap.browserPreviewUrl;
   const previewRequestId = snap.browserPreviewRequestId;
@@ -771,24 +808,24 @@ export function ChatView({ active, onSelectView }: ChatViewProps) {
                 </div>
               </div>
             ) : (
-              visibleMessages.map((msg, i) => (
-                <ChatBubble
-                  key={getMessageKey(msg, i)}
-                  message={msg}
-                  onOpenPreview={handleOpenPreview}
-                  conversationId={snap.chatActiveConversation || undefined}
-                />
+              chatTurnSections.map((section, sectionIndex) => (
+                <section
+                  key={`turn-section-${sectionIndex}-${section[0]?.key || 'empty'}`}
+                  className={styles.chatTurnSection}
+                  aria-label={`Conversation turn ${sectionIndex + 1}`}
+                >
+                  {section.map((item) => (
+                    <ChatBubble
+                      key={item.key}
+                      message={item.message}
+                      streaming={item.streaming}
+                      onOpenPreview={handleOpenPreview}
+                      conversationId={snap.chatActiveConversation || undefined}
+                    />
+                  ))}
+                </section>
               ))
             )}
-            {snap.chatStreamingMessage ? (
-              <ChatBubble
-                key={`streaming:${snap.chatActiveConversation || 'new'}`}
-                message={snap.chatStreamingMessage as ChatMessage}
-                streaming
-                onOpenPreview={handleOpenPreview}
-                conversationId={snap.chatActiveConversation || undefined}
-              />
-            ) : null}
             {snap.chatSending && snap.chatSendingConversationId === snap.chatActiveConversation && (
               <WalkingAnt
                 elapsedMs={snap.chatThinkingElapsedMs}
