@@ -67,6 +67,41 @@ function extractPreviewUrl(name: unknown, input: unknown, output: string): strin
   return urlMatch?.[0];
 }
 
+type VerbBucket = 'edit' | 'read' | 'bash' | 'search' | 'browse' | 'write' | 'other';
+
+function bucketForKind(kind: string): VerbBucket {
+  if (kind === 'edit' || kind === 'multi_edit' || kind === 'apply_patch') return 'edit';
+  if (kind === 'read' || kind === 'read_file' || kind === 'ls' || kind === 'find') return 'read';
+  if (kind === 'bash' || kind === 'shell' || kind === 'run' || kind === 'execute') return 'bash';
+  if (kind === 'grep' || kind === 'search' || kind === 'search_files') return 'search';
+  if (kind === 'web_fetch' || kind === 'open_browser_preview' || kind === 'start_dev_server') return 'browse';
+  if (kind === 'write' || kind === 'write_file') return 'write';
+  return 'other';
+}
+
+function summarizeToolItems(items: ToolRenderItem[]): string {
+  const counts: Record<VerbBucket, number> = {
+    edit: 0, read: 0, bash: 0, search: 0, browse: 0, write: 0, other: 0,
+  };
+  for (const item of items) counts[bucketForKind(item.kind)] += 1;
+
+  const phrase = (n: number, singular: string, plural: string) =>
+    `${n} ${n === 1 ? singular : plural}`;
+
+  const parts: string[] = [];
+  if (counts.edit > 0)   parts.push(`edited ${phrase(counts.edit,   'file',    'files')}`);
+  if (counts.write > 0)  parts.push(`wrote ${phrase(counts.write,   'file',    'files')}`);
+  if (counts.read > 0)   parts.push(`read ${phrase(counts.read,     'file',    'files')}`);
+  if (counts.search > 0) parts.push(`ran ${phrase(counts.search,    'search',  'searches')}`);
+  if (counts.bash > 0)   parts.push(`executed ${phrase(counts.bash, 'command', 'commands')}`);
+  if (counts.browse > 0) parts.push(`opened ${phrase(counts.browse, 'page',    'pages')}`);
+  if (counts.other > 0)  parts.push(`used ${phrase(counts.other,    'tool',    'tools')}`);
+
+  if (parts.length === 0) return '';
+  if (parts.length === 1) return parts[0];
+  return `${parts.slice(0, -1).join(', ')}, ${parts[parts.length - 1]}`;
+}
+
 function buildToolRenderItem(block: ContentBlock, index: number): ToolRenderItem {
   const output = String(block.content || '');
   const diff = extractToolDiff(block);
@@ -350,43 +385,34 @@ function ToolGroupView({ blocks, onOpenPreview }: { blocks: ContentBlock[]; onOp
   const isOpen = manualToggle ?? false;
 
   const groupStatus: 'running' | 'success' | 'error' = anyRunning ? 'running' : anyError ? 'error' : 'success';
-  const groupStatusLabel = anyRunning ? 'Running' : anyError ? 'Error' : 'Done';
-  const label = `Tools (${items.length})`;
-  const runningSummary = items
-    .filter((item) => item.status === 'running')
-    .map((item) => item.label)
-    .join(' / ');
-  const preview = items
-    .slice(0, 3)
-    .map((item) => item.label)
-    .join(' • ');
-  const previewSuffix = items.length > 3 ? ` +${items.length - 3} more` : '';
+  const summary = summarizeToolItems(items);
+  const closedLabel = anyRunning ? `Running ${items.length} ${items.length === 1 ? 'tool' : 'tools'}` : summary;
+  // Current activity hint: while running, show the active tool; otherwise the last one.
+  const activityItem = items.find((it) => it.status === 'running') ?? items[items.length - 1];
+  const activityHint = activityItem?.label ?? '';
+  const toggle = () => setManualToggle((prev) => !(prev ?? false));
 
   return (
     <>
-      <div className={`tool-group${anyRunning ? ' streaming' : ''}${isOpen ? ' open' : ''}`}>
+      <div className={`tool-group${anyRunning ? ' streaming' : ''}${isOpen ? ' open' : ''} status-${groupStatus}`}>
         <button
           type="button"
-          className="tool-group-header-btn"
-          onClick={() => setManualToggle((prev) => !(prev ?? anyRunning))}
+          className="tool-group-summary-btn"
+          onClick={toggle}
         >
           <span className="tool-group-chevron">›</span>
-          <span className="tool-group-label">{label}</span>
+          <span className="tool-group-summary-text">
+            {isOpen ? `Tools (${items.length})` : closedLabel}
+          </span>
+          {!isOpen && activityHint ? (
+            <span className="tool-group-summary-activity">{activityHint}</span>
+          ) : null}
           {anyRunning ? (
             <span className="thinking-dots" aria-hidden="true">
               <span /><span /><span />
             </span>
           ) : null}
         </button>
-        {!isOpen ? (
-          <div className="tool-group-preview">
-            <span className="tool-group-preview-text">
-              {runningSummary || preview}
-              {previewSuffix}
-            </span>
-            <span className={`tool-group-status ${groupStatus}`}>{groupStatusLabel}</span>
-          </div>
-        ) : null}
         <div className={`tool-group-list-wrap${isOpen ? '' : ' collapsed'}`}>
           <div className="tool-group-list-inner">
             <div className="tool-group-list">
