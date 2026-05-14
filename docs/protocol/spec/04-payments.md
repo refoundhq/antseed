@@ -215,7 +215,7 @@ buyerReward  = (userBuyerPoints / epochTotalBuyerPoints) * buyerBudget
 
 #### Per-Epoch Caps
 
-- **Seller cap:** `maxSellerSharePct` (default historically ~15% of the seller bucket). Excess redirected to reserve.
+- **Seller cap:** `maxSellerSharePct` (default 50% of the seller bucket). Excess redirected to reserve.
 - **Buyer cap:** `maxBuyerSharePct` (default 5% of the buyer bucket). Excess redirected to reserve.
 
 #### Seller Claiming

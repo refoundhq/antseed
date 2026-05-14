@@ -31,7 +31,7 @@ The on-chain seller changes from "peerId's derived EVM address" to "the proxy co
        ▼ reserve/topUp/        ▼ operatorClaimEmissions  ▼ getReward()
          settle/close            (epochs[])               (by user)
        ┌─────────────┐       ┌──────────────────┐       ┌──────────────────┐
-        │ AntseedCh-  │       │AntseedEmissionsV2│       │ USDC / ANTS      │
+       │ AntseedCh-  │       │AntseedEmissionsV2│       │ USDC / ANTS      │
        │ annels      │       │                  │       │ safeTransfer     │
        └──────┬──────┘       └────────┬─────────┘       └──────────────────┘
               │                       │
