@@ -1,5 +1,7 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import type { CSSProperties, MouseEvent } from 'react';
+import { HugeiconsIcon } from '@hugeicons/react';
+import { Copy01Icon, Tick02Icon } from '@hugeicons/core-free-icons';
 import Skeleton from 'react-loading-skeleton';
 import 'react-loading-skeleton/dist/skeleton.css';
 import type { ChatServiceOptionEntry, DiscoverRow } from '../../../core/state';
@@ -687,17 +689,19 @@ function Card({
     return () => window.clearTimeout(timer);
   }, [copied]);
 
-  const handleCopyModelName = useCallback((event: MouseEvent<HTMLButtonElement>) => {
+  const serviceKey = item.canonicalName || item.name;
+  const copyValue = `${item.peerId} ${serviceKey}`.trim();
+
+  const handleCopyIdentifiers = useCallback((event: MouseEvent<HTMLButtonElement>) => {
     event.preventDefault();
     event.stopPropagation();
-    const modelName = item.canonicalName || item.name;
-    if (!modelName) return;
-    navigator.clipboard.writeText(modelName).then(() => {
+    if (!copyValue) return;
+    navigator.clipboard.writeText(copyValue).then(() => {
       setCopied(true);
     }).catch(() => {
       // Clipboard permission can be denied; keep the card interaction unchanged.
     });
-  }, [item.canonicalName, item.name]);
+  }, [copyValue]);
 
   return (
     <div
@@ -724,17 +728,16 @@ function Card({
           )}
         </div>
         <div className={styles.cardNameRow}>
-          <div className={styles.cardName} title={item.canonicalName}>{item.displayName}</div>
+          <div className={styles.cardName} title={serviceKey}>{item.displayName}</div>
           <button
             type="button"
-            className={`${styles.copyModelButton}${copied ? ` ${styles.copyModelButtonCopied}` : ''}`}
-            onClick={handleCopyModelName}
+            className={`${styles.copyIconButton}${copied ? ` ${styles.copyIconButtonCopied}` : ''}`}
+            onClick={handleCopyIdentifiers}
             onKeyDown={(e) => e.stopPropagation()}
-            aria-label={copied ? `Copied ${item.canonicalName}` : `Copy exact model name ${item.canonicalName}`}
-            title={copied ? 'Copied' : `Copy exact model name: ${item.canonicalName}`}
+            aria-label={copied ? `Copied ${copyValue}` : `Copy peer ID and service key ${copyValue}`}
+            title={copied ? 'Copied peer ID and service key' : `Copy peer ID and service key: ${copyValue}`}
           >
-            <span className={styles.copyModelIcon} aria-hidden="true">{copied ? '✓' : '⧉'}</span>
-            <span>{copied ? 'Copied' : 'Copy'}</span>
+            <HugeiconsIcon icon={copied ? Tick02Icon : Copy01Icon} size={13} strokeWidth={1.7} />
           </button>
         </div>
         <div className={styles.cardDesc}>{item.description}</div>
