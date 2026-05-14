@@ -128,15 +128,28 @@ USDC on Base. 6 decimal places. All on-chain amounts are in USDC atomic units (1
 ## Smart Contracts
 
 ```text title="contract architecture"
-AntseedRegistry       Central address book for all protocol contracts
-AntseedStaking        Seller staking (holds stake USDC, binds to ERC-8004 agentId)
-AntseedDeposits       Buyer deposits, seller payouts (holds buyer USDC)
-AntseedChannels       Payment channel lifecycle (swappable, holds NO USDC)
-AntseedEmissions      ANTS token emissions (USDC volume-based incentives)
-ANTSToken             ANTS ERC-20 token (1.04B max supply)
+AntseedRegistry            Central address book for all protocol contracts
+AntseedStaking             Seller staking (holds stake USDC, binds to ERC-8004 agentId)
+AntseedDeposits            Buyer deposits, seller payouts (holds buyer USDC)
+AntseedChannels            Payment channel lifecycle (swappable, holds NO USDC)
+AntseedEmissionsV2         ANTS token emissions (backward-compatible replacement)
+AntseedSellerRewardsPool   Locked ANTS reserves for sellers pending unlock
+AntseedSellerUnlockPolicy  On-chain policy controlling when sellers can claim
+AntseedEmissions (legacy)  Original emissions contract — depleted since epoch 4
+ANTSToken                  ANTS ERC-20 token (1.04B max supply)
 ```
 
-Network fees are set to 4% of settlement and flow to the Protocol Reserve, not to a company. The Protocol Reserve is intended to support long-term network sustainability, trust, utility, and alignment. Seller ANTS emissions are currently tracked but locked in a dedicated Provider Pool pending stronger validation; future claims may be subject to verification or slashing.
+Network fees are set to 4% of settlement and flow to the Protocol Reserve, not to a company. The Protocol Reserve is intended to support long-term network sustainability, trust, utility, and alignment.
+
+### Emissions
+
+`AntseedEmissionsV2` replaced the original `AntseedEmissions` contract at epoch 4. It is backward-compatible: historical points from epochs 1–4 remain claimable through V2, while all new points accrue in V2's own ledger.
+
+Each epoch's ANTS are split: 50% to sellers, 20% to buyers, 15% to the Protocol Reserve, and 15% to the team.
+
+**For sellers:** ANTS rewards from finalized epochs are minted to a locked rewards pool (`AntseedSellerRewardsPool`) by default. Sellers can only claim unlocked tokens when the on-chain `AntseedSellerUnlockPolicy` allows it — typically after stake/activity criteria are met.
+
+**For buyers:** Buyer emissions are claimable via an operator address through `claimBuyerEmissions`.
 
 **Stable contracts** (Staking, Deposits) hold funds and rarely change. The **swappable contract** (Channels) holds no USDC and can be redeployed by re-pointing via the Registry.
 
