@@ -33,7 +33,7 @@ type RequestHandler = (request: SerializedHttpRequest) => void | Promise<void>;
 
 /** Per-request upload size cap, total budget, and stall timeout. */
 export interface ProxyMuxUploadLimits {
-  /** Max body bytes for a single upload. Default: 32 MiB. Buyer receives 413 on violation. */
+  /** Max body bytes for a single upload. Default: 64 MiB. Buyer receives 413 on violation. */
   maxUploadBodyBytes?: number;
   /** Max bytes across ALL concurrent in-progress uploads. Default: 256 MiB. */
   maxTotalPendingUploadBytes?: number;
@@ -41,9 +41,13 @@ export interface ProxyMuxUploadLimits {
   uploadTimeoutMs?: number;
 }
 
-const DEFAULT_MAX_UPLOAD_BODY_BYTES       = 32  * 1024 * 1024; // 32 MiB
-const DEFAULT_MAX_TOTAL_PENDING_BYTES     = 256 * 1024 * 1024; // 256 MiB
-const DEFAULT_UPLOAD_TIMEOUT_MS           = 120_000;            // 2 min
+// Codex-style /v1/responses requests can include large repository context.
+// Raising the per-request cap to 64 MiB accommodates those requests while the
+// separate 256 MiB aggregate pending-upload budget continues to bound seller
+// memory exposure across concurrent uploads.
+export const DEFAULT_MAX_UPLOAD_BODY_BYTES = 64  * 1024 * 1024; // 64 MiB
+const DEFAULT_MAX_TOTAL_PENDING_BYTES      = 256 * 1024 * 1024; // 256 MiB
+const DEFAULT_UPLOAD_TIMEOUT_MS            = 120_000;            // 2 min
 
 interface PendingUpload {
   headerReq: SerializedHttpRequest;
@@ -162,7 +166,7 @@ export class ProxyMux {
       payload,
     });
 
-    this._connection.send(frame);
+    this._safeSendFrame(frame, 'response', response.requestId);
   }
 
   /** Seller side: send a proxy response chunk. */
@@ -178,7 +182,7 @@ export class ProxyMux {
       payload,
     });
 
-    this._connection.send(frame);
+    this._safeSendFrame(frame, chunk.done ? 'response-end' : 'response-chunk', chunk.requestId);
   }
 
   /** Route an incoming frame to the correct handler based on message type. */
@@ -392,9 +396,22 @@ export class ProxyMux {
     this.sendProxyResponse({
       requestId,
       statusCode,
-      headers: { 'content-type': 'text/plain' },
+      headers: {
+        'content-type': 'text/plain',
+        ...(statusCode === 413 ? { 'x-antseed-max-upload-body-bytes': String(this._maxUploadBodyBytes) } : {}),
+      },
       body: new TextEncoder().encode(reason),
     });
+  }
+
+  private _safeSendFrame(frame: Uint8Array, kind: 'response' | 'response-chunk' | 'response-end', requestId: string): void {
+    try {
+      this._connection.send(frame);
+    } catch (err) {
+      debugLog(
+        `[ProxyMux] drop ${kind} reqId=${requestId.slice(0, 8)} because connection closed: ${err instanceof Error ? err.message : err}`,
+      );
+    }
   }
 
   private _nextMessageId(): number {

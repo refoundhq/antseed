@@ -6,7 +6,7 @@ import { homedir } from 'node:os';
 import { createConnection } from 'node:net';
 import path from 'node:path';
 import type { AgentSession, AgentSessionEvent } from '@mariozechner/pi-coding-agent';
-import { browserPreviewTool, startDevServerTool } from './chat-dev-tools.js';
+import { createBrowserPreviewTool, createStartDevServerTool } from './chat-dev-tools.js';
 import {
   classifyChatStreamFailure,
   formatChatStreamStopForLog,
@@ -45,7 +45,18 @@ import {
 import { DEFAULT_BUYER_STATE_PATH } from './constants.js';
 import { PROXY_PROVIDER_ID, normalizeProviderId, sanitizeProviderHint } from './chat-provider-hint.js';
 import { asErrorMessage } from './utils.js';
-import { StakingClient, ChannelsClient, resolveChainConfig } from '@antseed/node';
+import {
+  DESKTOP_DEFAULT_MAX_INPUT_USD_PER_MILLION,
+  DESKTOP_DEFAULT_MAX_OUTPUT_USD_PER_MILLION,
+} from './config-io.js';
+import {
+  buildChatServiceCatalogFromPeers,
+  sortChatServiceCatalogEntries,
+  type ChatServiceCatalogEntry,
+  type ChatServiceProtocol,
+  type NetworkPeerAddress,
+} from './chat-service-catalog.js';
+import { resolveChainConfig } from '@antseed/node';
 import {
   AuthStorage,
   createAgentSession,
@@ -97,7 +108,6 @@ type AiMessageMeta = {
   peerAddress?: string;
   peerProviders?: string[];
   peerReputation?: number;
-  peerTrustScore?: number;
   peerCurrentLoad?: number;
   peerMaxConcurrency?: number;
   provider?: string;
@@ -137,6 +147,7 @@ type AiConversation = {
   createdAt: number;
   updatedAt: number;
   usage: AiUsageTotals;
+  workspacePath?: string;
 };
 
 type AiConversationSummary = {
@@ -152,6 +163,7 @@ type AiConversationSummary = {
   usage: AiUsageTotals;
   totalTokens: number;
   totalEstimatedCostUsd: number;
+  workspacePath?: string;
 };
 
 type RegisterPiChatHandlersOptions = {
@@ -179,36 +191,6 @@ type ActiveRun = {
   conversationId: string;
   session: AgentSession;
   unsubscribe: () => void;
-};
-
-type NetworkPeerAddress = {
-  peerId?: string;
-  displayName?: string;
-  host: string;
-  port: number;
-  providers?: string[];
-  services?: string[];
-  providerServiceApiProtocols?: Record<string, { services: Record<string, string[]> }>;
-  providerPricing?: Record<string, { services: Record<string, { input: number; output: number }> }>;
-  providerServiceCategories?: Record<string, { services: Record<string, string[]> }>;
-  defaultInputUsdPerMillion?: number;
-  defaultOutputUsdPerMillion?: number;
-};
-
-type ChatServiceProtocol = 'anthropic-messages' | 'openai-chat-completions' | 'openai-responses';
-
-type ChatServiceCatalogEntry = {
-  id: string;
-  label: string;
-  provider: string;
-  protocol: ChatServiceProtocol;
-  count: number;
-  peerId?: string;
-  peerLabel?: string;
-  inputUsdPerMillion?: number;
-  outputUsdPerMillion?: number;
-  categories?: string[];
-  description?: string;
 };
 
 function augmentChatToolPath(): void {
@@ -256,6 +238,12 @@ function augmentChatToolPath(): void {
 
 augmentChatToolPath();
 
+type BuyerMaxPricingDefaults = {
+  inputUsdPerMillion: number;
+  outputUsdPerMillion: number;
+  cachedInputUsdPerMillion?: number;
+};
+
 type DiscoverRowEntry = {
   rowKey: string;
   serviceId: string;
@@ -265,6 +253,7 @@ type DiscoverRowEntry = {
   protocol: ChatServiceProtocol;
   peerId: string;
   peerEvmAddress: string;
+  sellerEvmAddress: string;
   peerDisplayName: string | null;
   peerLabel: string;
   inputUsdPerMillion: number | null;
@@ -279,11 +268,14 @@ type DiscoverRowEntry = {
   onChainChannelCount: number | null;
   agentId: number;
   stakeUsdc: string;
-  stakedAt: number;
   onChainActiveChannelCount: number;
   onChainGhostCount: number;
   onChainTotalVolumeUsdc: string;
   onChainLastSettledAt: number;
+  onChainReputationScore: number | null;
+  onChainTrustScore: number | null;
+  onChainSybilRisk: number | null;
+  onChainSybilFlags: string[];
   networkRequests: string | null;
   networkInputTokens: string | null;
   networkOutputTokens: string | null;
@@ -330,45 +322,6 @@ function isChatServiceProtocol(value: unknown): value is ChatServiceProtocol {
     || value === 'openai-responses';
 }
 
-function inferProviderProtocol(provider: string): ChatServiceProtocol | null {
-  if (provider === 'openai-responses') {
-    return 'openai-responses';
-  }
-  if (provider === 'openai' || provider === 'openrouter' || provider === 'local-llm') {
-    return 'openai-chat-completions';
-  }
-  if (provider === 'anthropic' || provider === 'claude-code' || provider === 'claude-oauth') {
-    return 'anthropic-messages';
-  }
-  return null;
-}
-
-const VALID_CHAT_SERVICE_PROTOCOLS = new Set<string>([
-  'anthropic-messages', 'openai-chat-completions', 'openai-responses',
-]);
-
-/**
- * Resolve protocol for a service from the peer's announced providerServiceApiProtocols metadata.
- * Returns the first recognized chat protocol, or null if not found.
- */
-function resolveServiceProtocol(
-  apiProtocols: NetworkPeerAddress['providerServiceApiProtocols'],
-  serviceId: string,
-): ChatServiceProtocol | null {
-  if (!apiProtocols) return null;
-  for (const providerEntry of Object.values(apiProtocols)) {
-    const protocols = providerEntry?.services?.[serviceId];
-    if (Array.isArray(protocols)) {
-      for (const p of protocols) {
-        if (VALID_CHAT_SERVICE_PROTOCOLS.has(p)) {
-          return p as ChatServiceProtocol;
-        }
-      }
-    }
-  }
-  return null;
-}
-
 function normalizeServiceValue(value: unknown): string | null {
   if (typeof value !== 'string') {
     return null;
@@ -384,7 +337,68 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   return value as Record<string, unknown>;
 }
 
+function normalizeNonNegativeNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null;
+}
 
+async function loadBuyerMaxPricingDefaults(configPath: string): Promise<BuyerMaxPricingDefaults> {
+  try {
+    const raw = await readFile(configPath, 'utf8');
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const buyer = asRecord(parsed.buyer);
+    const maxPricing = asRecord(buyer?.maxPricing);
+    const defaults = asRecord(maxPricing?.defaults);
+    const input = normalizeNonNegativeNumber(defaults?.inputUsdPerMillion);
+    const output = normalizeNonNegativeNumber(defaults?.outputUsdPerMillion);
+    const cachedInput = normalizeNonNegativeNumber(defaults?.cachedInputUsdPerMillion);
+    return {
+      inputUsdPerMillion: input ?? DESKTOP_DEFAULT_MAX_INPUT_USD_PER_MILLION,
+      outputUsdPerMillion: output ?? DESKTOP_DEFAULT_MAX_OUTPUT_USD_PER_MILLION,
+      ...(cachedInput != null ? { cachedInputUsdPerMillion: cachedInput } : {}),
+    };
+  } catch {
+    return {
+      inputUsdPerMillion: DESKTOP_DEFAULT_MAX_INPUT_USD_PER_MILLION,
+      outputUsdPerMillion: DESKTOP_DEFAULT_MAX_OUTPUT_USD_PER_MILLION,
+    };
+  }
+}
+
+function isPriceAllowedByBuyerMax(
+  inputUsdPerMillion: number | null | undefined,
+  outputUsdPerMillion: number | null | undefined,
+  cachedInputUsdPerMillion: number | null | undefined,
+  maxPricing: BuyerMaxPricingDefaults,
+): boolean {
+  if (inputUsdPerMillion != null && inputUsdPerMillion > maxPricing.inputUsdPerMillion) {
+    return false;
+  }
+  if (outputUsdPerMillion != null && outputUsdPerMillion > maxPricing.outputUsdPerMillion) {
+    return false;
+  }
+  if (cachedInputUsdPerMillion != null) {
+    if (inputUsdPerMillion != null && cachedInputUsdPerMillion > inputUsdPerMillion) {
+      return false;
+    }
+    const maxCachedInput = maxPricing.cachedInputUsdPerMillion ?? maxPricing.inputUsdPerMillion;
+    if (cachedInputUsdPerMillion > maxCachedInput) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function isCatalogEntryAllowedByBuyerMax(
+  entry: ChatServiceCatalogEntry,
+  maxPricing: BuyerMaxPricingDefaults,
+): boolean {
+  return isPriceAllowedByBuyerMax(
+    entry.inputUsdPerMillion,
+    entry.outputUsdPerMillion,
+    entry.cachedInputUsdPerMillion,
+    maxPricing,
+  );
+}
 
 function updateServiceProviderHints(
   serviceProviderHints: Map<string, string[]>,
@@ -451,6 +465,7 @@ function normalizeChatServiceCatalogEntry(raw: unknown): ChatServiceCatalogEntry
   const peerLabel = typeof entry.peerLabel === 'string' ? entry.peerLabel.trim() : undefined;
   const inputUsd = normalizeOptionalNumber(entry.inputUsdPerMillion);
   const outputUsd = normalizeOptionalNumber(entry.outputUsdPerMillion);
+  const cachedInputUsd = normalizeOptionalNumber(entry.cachedInputUsdPerMillion);
   const categories = Array.isArray(entry.categories) ? entry.categories.filter((c): c is string => typeof c === 'string') : undefined;
   const description = typeof entry.description === 'string' ? entry.description.trim() : undefined;
   return {
@@ -463,6 +478,7 @@ function normalizeChatServiceCatalogEntry(raw: unknown): ChatServiceCatalogEntry
     ...(peerLabel ? { peerLabel } : {}),
     ...(inputUsd != null && inputUsd >= 0 ? { inputUsdPerMillion: inputUsd } : {}),
     ...(outputUsd != null && outputUsd >= 0 ? { outputUsdPerMillion: outputUsd } : {}),
+    ...(cachedInputUsd != null && cachedInputUsd >= 0 ? { cachedInputUsdPerMillion: cachedInputUsd } : {}),
     ...(categories?.length ? { categories } : {}),
     ...(description ? { description } : {}),
   };
@@ -484,29 +500,6 @@ function normalizeChatServiceCatalogEntries(rawEntries: unknown[]): ChatServiceC
     deduped.set(key, { ...entry });
   }
   return sortChatServiceCatalogEntries([...deduped.values()]);
-}
-
-function sortChatServiceCatalogEntries(entries: ChatServiceCatalogEntry[]): ChatServiceCatalogEntry[] {
-  const protocolRank = (protocol: ChatServiceProtocol): number => (
-    protocol === 'anthropic-messages'
-      ? 0
-      : protocol === 'openai-chat-completions'
-        ? 1
-        : 2
-  );
-
-  return entries.sort((a, b) => {
-    if (b.count !== a.count) {
-      return b.count - a.count;
-    }
-    if (protocolRank(a.protocol) !== protocolRank(b.protocol)) {
-      return protocolRank(a.protocol) - protocolRank(b.protocol);
-    }
-    if (a.provider !== b.provider) {
-      return a.provider.localeCompare(b.provider);
-    }
-    return a.id.localeCompare(b.id);
-  });
 }
 
 function limitChatServiceCatalogEntries(entries: ChatServiceCatalogEntry[]): ChatServiceCatalogEntry[] {
@@ -566,6 +559,7 @@ async function discoverChatServiceCatalog(
         port: 0,
         providers: Array.isArray(p.providers) ? p.providers.map(String) : [],
         services: Array.isArray(p.services) ? p.services.map(String) : [],
+        sellerContract: typeof p.sellerContract === 'string' ? p.sellerContract : undefined,
         providerServiceApiProtocols: (p.providerServiceApiProtocols && typeof p.providerServiceApiProtocols === 'object')
           ? p.providerServiceApiProtocols as NetworkPeerAddress['providerServiceApiProtocols']
           : undefined,
@@ -577,6 +571,7 @@ async function discoverChatServiceCatalog(
           : undefined,
         defaultInputUsdPerMillion: typeof p.defaultInputUsdPerMillion === 'number' ? p.defaultInputUsdPerMillion : undefined,
         defaultOutputUsdPerMillion: typeof p.defaultOutputUsdPerMillion === 'number' ? p.defaultOutputUsdPerMillion : undefined,
+        defaultCachedInputUsdPerMillion: typeof p.defaultCachedInputUsdPerMillion === 'number' ? p.defaultCachedInputUsdPerMillion : undefined,
       }))
       .filter((p) => p.peerId.length === 40); // EVM address peer IDs only (40 hex chars)
   } catch {
@@ -589,238 +584,27 @@ async function discoverChatServiceCatalog(
     }
   }
 
-  const results: ChatServiceCatalogEntry[] = [];
-  for (const peer of peers) {
-    const peerId = peer.peerId;
-    const peerLabel = peer.displayName
-      ? `${peer.displayName} (${peerId?.slice(0, 8) ?? ''})`
-      : peerId ? peerId.slice(0, 12) + '...' : undefined;
-
-    const providerList = peer.providers ?? [];
-    const serviceList = peer.services ?? [];
-    const apiProtocols = peer.providerServiceApiProtocols;
-    const pricingMap = peer.providerPricing;
-    const categoriesMap = peer.providerServiceCategories;
-    const defaultInput = peer.defaultInputUsdPerMillion;
-    const defaultOutput = peer.defaultOutputUsdPerMillion;
-
-    if (serviceList.length > 0) {
-      // Use explicit service names when available.
-      for (const serviceId of serviceList) {
-        const provider = providerList[0] ?? 'unknown';
-        // Resolve protocol: first check peer metadata, then fall back to inference from provider name.
-        const protocol = resolveServiceProtocol(apiProtocols, serviceId) ?? inferProviderProtocol(provider);
-        if (!protocol) continue;
-
-        const providerPricing = pricingMap?.[provider]?.services?.[serviceId] as Record<string, unknown> | undefined;
-        const inputUsd = (providerPricing?.inputUsdPerMillion as number | undefined) ?? (providerPricing?.input as number | undefined) ?? defaultInput;
-        const outputUsd = (providerPricing?.outputUsdPerMillion as number | undefined) ?? (providerPricing?.output as number | undefined) ?? defaultOutput;
-        const categories = categoriesMap?.[provider]?.services?.[serviceId];
-
-        results.push({
-          id: serviceId,
-          label: serviceId,
-          provider,
-          protocol,
-          count: 1,
-          peerId,
-          peerLabel,
-          ...(inputUsd != null ? { inputUsdPerMillion: inputUsd } : {}),
-          ...(outputUsd != null ? { outputUsdPerMillion: outputUsd } : {}),
-          ...(categories?.length ? { categories } : {}),
-        });
-      }
-    } else if (providerList.length > 0) {
-      // No services listed — create one entry per provider as a fallback.
-      for (const provider of providerList) {
-        const protocol = inferProviderProtocol(provider);
-        if (!protocol) continue;
-
-        results.push({
-          id: provider,
-          label: provider,
-          provider,
-          protocol,
-          count: 1,
-          peerId,
-          peerLabel,
-          ...(defaultInput != null ? { inputUsdPerMillion: defaultInput } : {}),
-          ...(defaultOutput != null ? { outputUsdPerMillion: defaultOutput } : {}),
-        });
-      }
-    }
-  }
-
-  return sortChatServiceCatalogEntries(results);
+  return buildChatServiceCatalogFromPeers(peers);
 }
 
-type OnChainPeerEnrichment = {
-  agentId: number;
-  stakeUsdc: string;
-  stakedAt: number;
-  onChainActiveChannelCount: number;
-  onChainGhostCount: number;
-  onChainTotalVolumeUsdc: string;
-  onChainLastSettledAt: number;
+type BuyerStateDiscoveredPeer = {
+  onChainAgentId: number | null;
+  onChainStakeUsdcMicros: number | null;
+  onChainChannelCount: number | null;
+  onChainGhostCount: number | null;
+  onChainTotalVolumeUsdcMicros: number | null;
+  onChainLastSettledAtSec: number | null;
+  onChainReputationScore: number | null;
+  onChainTrustScore: number | null;
+  onChainSybilRisk: number | null;
+  onChainSybilFlags: string[];
+  sellerContract?: string;
+  providerPricing?: Record<string, { services?: Record<string, { cachedInputUsdPerMillion?: number }> }>;
 };
-
-const ON_CHAIN_ENRICHMENT_TTL_MS = 2 * 60_000;
-let onChainEnrichmentCache: Map<string, { fetchedAt: number; data: OnChainPeerEnrichment }> = new Map();
 
 export function invalidateOnChainEnrichmentCache(): void {
-  onChainEnrichmentCache.clear();
-  cachedStakingClient = null;
-  cachedChannelsClient = null;
-}
-
-let cachedStakingClient: StakingClient | null = null;
-let cachedChannelsClient: ChannelsClient | null = null;
-
-async function loadOnChainClients(configPath: string): Promise<{ stakingClient: StakingClient; channelsClient: ChannelsClient } | null> {
-  if (cachedStakingClient && cachedChannelsClient) {
-    return { stakingClient: cachedStakingClient, channelsClient: cachedChannelsClient };
-  }
-  let overrides: Record<string, unknown> = {};
-  try {
-    const raw = await readFile(configPath, 'utf8');
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
-    const payments = (parsed.payments && typeof parsed.payments === 'object') ? parsed.payments as Record<string, unknown> : {};
-    overrides = (payments.crypto && typeof payments.crypto === 'object') ? payments.crypto as Record<string, unknown> : {};
-  } catch {
-    // No config — use defaults
-  }
-  const selectedChain = (typeof overrides.chainId === 'string' && overrides.chainId.trim().length > 0)
-    ? overrides.chainId
-    : 'base-mainnet';
-  const userRpcUrl = typeof overrides.rpcUrl === 'string' && overrides.rpcUrl.trim().length > 0 ? overrides.rpcUrl : '';
-  const cc = resolveChainConfig({
-    chainId: selectedChain,
-    ...(userRpcUrl ? { rpcUrl: userRpcUrl } : {}),
-  });
-  if (!cc.stakingContractAddress) return null;
-  cachedStakingClient = new StakingClient({
-    rpcUrl: cc.rpcUrl,
-    ...(cc.fallbackRpcUrls ? { fallbackRpcUrls: cc.fallbackRpcUrls } : {}),
-    contractAddress: cc.stakingContractAddress,
-    usdcAddress: cc.usdcContractAddress,
-    evmChainId: cc.evmChainId,
-  });
-  cachedChannelsClient = new ChannelsClient({
-    rpcUrl: cc.rpcUrl,
-    ...(cc.fallbackRpcUrls ? { fallbackRpcUrls: cc.fallbackRpcUrls } : {}),
-    contractAddress: cc.channelsContractAddress,
-    evmChainId: cc.evmChainId,
-  });
-  return { stakingClient: cachedStakingClient, channelsClient: cachedChannelsClient };
-}
-
-/**
- * Per-peer snapshot of on-chain stats lifted from the running buyer daemon's
- * `buyer.state.json`. When the daemon is up, it reads
- * `AntseedChannels.getAgentStats` every discovery cycle and persists the
- * result — so we can reuse those values here and skip the duplicate
- * `channelsClient.getAgentStats()` RPC per peer. `agentId` and `stakeUsdc`
- * are not in buyer.state.json, so we still call StakingClient for those.
- */
-export type BuyerStateOnChainStats = {
-  channelCount: number;
-  ghostCount: number;
-  totalVolumeUsdcMicros: number;
-  lastSettledAtSec: number;
-  fetchedAtMs: number;
-};
-
-async function fetchOnChainEnrichment(
-  peerEvmAddresses: string[],
-  stakingClient: import('@antseed/node').StakingClient,
-  channelsClient: import('@antseed/node').ChannelsClient,
-  buyerStateStatsByPeerId: Map<string, BuyerStateOnChainStats>,
-): Promise<Map<string, OnChainPeerEnrichment>> {
-  const now = Date.now();
-  const out = new Map<string, OnChainPeerEnrichment>();
-  const toFetch: string[] = [];
-
-  for (const addr of peerEvmAddresses) {
-    const cached = onChainEnrichmentCache.get(addr);
-    if (cached && now - cached.fetchedAt < ON_CHAIN_ENRICHMENT_TTL_MS) {
-      out.set(addr, cached.data);
-    } else {
-      toFetch.push(addr);
-    }
-  }
-
-  await Promise.all(toFetch.map(async (addr) => {
-    try {
-      const [agentId, stake] = await Promise.all([
-        stakingClient.getAgentId(addr),
-        stakingClient.getStake(addr),
-      ]);
-      if (agentId === 0) {
-        const sentinel: OnChainPeerEnrichment = {
-          agentId: 0,
-          stakeUsdc: '0',
-          stakedAt: 0,
-          onChainActiveChannelCount: 0,
-          onChainGhostCount: 0,
-          onChainTotalVolumeUsdc: '0',
-          onChainLastSettledAt: 0,
-        };
-        onChainEnrichmentCache.set(addr, { fetchedAt: now, data: sentinel });
-        out.set(addr, sentinel);
-        return;
-      }
-
-      // Prefer values already fetched by the buyer daemon (persisted to
-      // buyer.state.json). We reuse them when they are within the desktop's
-      // own enrichment TTL — the daemon's authoritative on-chain read is the
-      // same one we'd make here, so skipping saves an RPC per peer.
-      const peerId = addr.slice(2).toLowerCase();
-      const fromBuyerState = buyerStateStatsByPeerId.get(peerId);
-      const buyerStateFresh = fromBuyerState
-        && now - fromBuyerState.fetchedAtMs < ON_CHAIN_ENRICHMENT_TTL_MS;
-
-      let stats: { channelCount: number; ghostCount: number; totalVolumeUsdc: bigint; lastSettledAt: number };
-      if (buyerStateFresh && fromBuyerState) {
-        stats = {
-          channelCount: fromBuyerState.channelCount,
-          ghostCount: fromBuyerState.ghostCount,
-          totalVolumeUsdc: BigInt(fromBuyerState.totalVolumeUsdcMicros),
-          lastSettledAt: fromBuyerState.lastSettledAtSec,
-        };
-      } else {
-        stats = await channelsClient.getAgentStats(agentId);
-      }
-
-      const data: OnChainPeerEnrichment = {
-        agentId,
-        stakeUsdc: stake.toString(),
-        stakedAt: 0,
-        onChainActiveChannelCount: stats.channelCount,
-        onChainGhostCount: stats.ghostCount,
-        onChainTotalVolumeUsdc: stats.totalVolumeUsdc.toString(),
-        onChainLastSettledAt: stats.lastSettledAt,
-      };
-      onChainEnrichmentCache.set(addr, { fetchedAt: now, data });
-      out.set(addr, data);
-    } catch {
-      // Preserve Discover inventory when staking/channel RPC is unavailable.
-      // Request routing still performs its own eligibility checks; this view
-      // should not hide services merely because enrichment failed.
-      const sentinel: OnChainPeerEnrichment = {
-        agentId: 0,
-        stakeUsdc: '0',
-        stakedAt: 0,
-        onChainActiveChannelCount: 0,
-        onChainGhostCount: 0,
-        onChainTotalVolumeUsdc: '0',
-        onChainLastSettledAt: 0,
-      };
-      onChainEnrichmentCache.set(addr, { fetchedAt: now, data: sentinel });
-      out.set(addr, sentinel);
-    }
-  }));
-
-  return out;
+  // On-chain enrichment now comes from the buyer daemon's buyer.state.json.
+  // The desktop process intentionally performs no staking/channel RPC here.
 }
 
 async function buildDiscoverRows(
@@ -833,38 +617,37 @@ async function buildDiscoverRows(
     firstSessionAt: number | null;
     lastSessionAt: number | null;
   }>,
-  enrichment: Map<string, OnChainPeerEnrichment>,
-  buyerStateDiscoveredPeers: Record<string, {
-    onChainChannelCount: number | null;
-    providerPricing?: Record<string, { services?: Record<string, { cachedInputUsdPerMillion?: number }> }>;
-  }>,
+  buyerStateDiscoveredPeers: Record<string, BuyerStateDiscoveredPeer>,
   networkStats: Map<number, { requests: bigint; inputTokens: bigint; outputTokens: bigint }>,
 ): Promise<DiscoverRowEntry[]> {
   const rows: DiscoverRowEntry[] = [];
   for (const entry of catalog) {
     const peerId = entry.peerId ?? '';
     if (!peerId) continue;
-    const evmAddress = '0x' + peerId;
-    const enrichmentRow = enrichment.get(evmAddress) ?? {
-      agentId: 0,
-      stakeUsdc: '0',
-      stakedAt: 0,
-      onChainActiveChannelCount: 0,
-      onChainGhostCount: 0,
-      onChainTotalVolumeUsdc: '0',
-      onChainLastSettledAt: 0,
-    };
+    const peerEvmAddress = '0x' + peerId;
+    const peerBlob = buyerStateDiscoveredPeers[peerId];
+    const sellerHex = typeof peerBlob?.sellerContract === 'string' ? peerBlob.sellerContract.trim().toLowerCase().replace(/^0x/, '') : '';
+    const sellerEvmAddress = /^[0-9a-f]{40}$/.test(sellerHex) ? `0x${sellerHex}` : peerEvmAddress;
 
     const stats = peerStats.get(peerId);
-    const peerBlob = buyerStateDiscoveredPeers[peerId];
     const cachedPricingEntry = peerBlob?.providerPricing?.[entry.provider]?.services?.[entry.id];
-    const cachedInputUsdPerMillion = Number.isFinite(cachedPricingEntry?.cachedInputUsdPerMillion)
-      ? cachedPricingEntry!.cachedInputUsdPerMillion!
-      : null;
+    const cachedInputUsdPerMillion = Number.isFinite(entry.cachedInputUsdPerMillion)
+      ? entry.cachedInputUsdPerMillion!
+      : Number.isFinite(cachedPricingEntry?.cachedInputUsdPerMillion)
+        ? cachedPricingEntry!.cachedInputUsdPerMillion!
+        : null;
 
-    const netForAgent = enrichmentRow.agentId > 0
-      ? networkStats.get(enrichmentRow.agentId) ?? null
-      : null;
+    const agentId = peerBlob?.onChainAgentId ?? 0;
+    const stakeUsdc = String(peerBlob?.onChainStakeUsdcMicros ?? 0);
+    const onChainActiveChannelCount = peerBlob?.onChainChannelCount ?? 0;
+    const onChainGhostCount = peerBlob?.onChainGhostCount ?? 0;
+    const onChainTotalVolumeUsdc = String(peerBlob?.onChainTotalVolumeUsdcMicros ?? 0);
+    const onChainLastSettledAt = peerBlob?.onChainLastSettledAtSec ?? 0;
+    const onChainReputationScore = peerBlob?.onChainReputationScore ?? null;
+    const onChainTrustScore = peerBlob?.onChainTrustScore ?? null;
+    const onChainSybilRisk = peerBlob?.onChainSybilRisk ?? null;
+    const onChainSybilFlags = peerBlob?.onChainSybilFlags ?? [];
+    const netForAgent = agentId > 0 ? networkStats.get(agentId) ?? null : null;
     const networkRequests = netForAgent ? netForAgent.requests.toString() : null;
     const networkInputTokens = netForAgent ? netForAgent.inputTokens.toString() : null;
     const networkOutputTokens = netForAgent ? netForAgent.outputTokens.toString() : null;
@@ -877,7 +660,8 @@ async function buildDiscoverRows(
       provider: entry.provider,
       protocol: entry.protocol,
       peerId,
-      peerEvmAddress: evmAddress,
+      peerEvmAddress,
+      sellerEvmAddress,
       peerDisplayName: entry.peerLabel?.split(' (')[0] ?? null,
       peerLabel: entry.peerLabel ?? peerId.slice(0, 12) + '...',
       inputUsdPerMillion: entry.inputUsdPerMillion ?? null,
@@ -890,13 +674,16 @@ async function buildDiscoverRows(
       lifetimeFirstSessionAt: stats?.firstSessionAt ?? null,
       lifetimeLastSessionAt: stats?.lastSessionAt ?? null,
       onChainChannelCount: peerBlob?.onChainChannelCount ?? null,
-      agentId: enrichmentRow.agentId,
-      stakeUsdc: enrichmentRow.stakeUsdc,
-      stakedAt: enrichmentRow.stakedAt,
-      onChainActiveChannelCount: enrichmentRow.onChainActiveChannelCount,
-      onChainGhostCount: enrichmentRow.onChainGhostCount,
-      onChainTotalVolumeUsdc: enrichmentRow.onChainTotalVolumeUsdc,
-      onChainLastSettledAt: enrichmentRow.onChainLastSettledAt,
+      agentId,
+      stakeUsdc,
+      onChainActiveChannelCount,
+      onChainGhostCount,
+      onChainTotalVolumeUsdc,
+      onChainLastSettledAt,
+      onChainReputationScore,
+      onChainTrustScore,
+      onChainSybilRisk,
+      onChainSybilFlags,
       networkRequests,
       networkInputTokens,
       networkOutputTokens,
@@ -1474,6 +1261,9 @@ class PiConversationStore {
     }
 
     const peerData = extractPeerFromEntries(manager);
+    // SessionManager reads the cwd persisted in the session file; restoration
+    // across app restarts depends on that value reflecting the session workspace.
+    const sessionCwd = manager.getCwd() || undefined;
     return {
       id: manager.getSessionId(),
       title: manager.getSessionName() || deriveTitle(messages),
@@ -1485,6 +1275,7 @@ class PiConversationStore {
       usage,
       ...(peerData?.peerId ? { peerId: peerData.peerId } : {}),
       ...(peerData?.peerLabel ? { peerLabel: peerData.peerLabel } : {}),
+      ...(sessionCwd ? { workspacePath: sessionCwd } : {}),
     };
   }
 
@@ -1530,6 +1321,7 @@ class PiConversationStore {
         totalEstimatedCostUsd: deriveCost(conversation.messages),
         ...(conversation.peerId ? { peerId: conversation.peerId } : {}),
         ...(conversation.peerLabel ? { peerLabel: conversation.peerLabel } : {}),
+        ...(conversation.workspacePath ? { workspacePath: conversation.workspacePath } : {}),
       });
     }
 
@@ -1552,6 +1344,7 @@ class PiConversationStore {
         totalEstimatedCostUsd: deriveCost(conversation.messages),
         ...(conversation.peerId ? { peerId: conversation.peerId } : {}),
         ...(conversation.peerLabel ? { peerLabel: conversation.peerLabel } : {}),
+        ...(conversation.workspacePath ? { workspacePath: conversation.workspacePath } : {}),
       });
     }
 
@@ -1960,13 +1753,22 @@ export function registerPiChatHandlers({
     // one-shot session.agent.setSystemPrompt call would be overridden.)
     // Priority: user override (env/config) → AntStation default.
     const userSystemPrompt = await resolveSystemPrompt(configPath);
-    const chatWorkspaceDir = getCurrentChatWorkspaceDir();
+    const sessionWorkspaceDir = sessionManager.getCwd()?.trim();
+    const chatWorkspaceDir = sessionWorkspaceDir && existsSync(sessionWorkspaceDir)
+      ? sessionWorkspaceDir
+      : getCurrentChatWorkspaceDir();
+    if (sessionWorkspaceDir && sessionWorkspaceDir !== chatWorkspaceDir) {
+      appendSystemLog(
+        `Conversation workspace is no longer available: ${sessionWorkspaceDir}. `
+        + `Using current workspace instead: ${chatWorkspaceDir}`,
+      );
+    }
     const settingsManager = SettingsManager.create(chatWorkspaceDir, CHAT_AGENT_DIR);
     const resourceLoader = new DefaultResourceLoader({
       cwd: chatWorkspaceDir,
       agentDir: CHAT_AGENT_DIR,
       settingsManager,
-      systemPrompt: buildAntstationSystemPrompt(userSystemPrompt),
+      systemPrompt: buildAntstationSystemPrompt(userSystemPrompt, chatWorkspaceDir),
     });
     await resourceLoader.reload();
 
@@ -1977,7 +1779,11 @@ export function registerPiChatHandlers({
       authStorage,
       modelRegistry,
       model: proxyModel,
-      customTools: [webFetchTool, browserPreviewTool, startDevServerTool],
+      customTools: [
+        webFetchTool,
+        createBrowserPreviewTool(sendToRenderer),
+        createStartDevServerTool(sendToRenderer),
+      ],
       resourceLoader,
     });
 
@@ -2157,16 +1963,6 @@ export function registerPiChatHandlers({
           details,
         });
 
-        // Auto-open browser preview panel when a preview tool completes successfully
-        if (
-          !event.isError &&
-          (event.toolName === 'open_browser_preview' || event.toolName === 'start_dev_server')
-        ) {
-          const url = typeof details?.url === 'string' ? details.url : undefined;
-          if (url) {
-            sendToRenderer('browser-preview:open', { url });
-          }
-        }
         return;
       }
 
@@ -2499,7 +2295,9 @@ export function registerPiChatHandlers({
 
   ipcMain.handle('chat:ai-list-discover-rows', async () => {
     try {
-      const entries = await refreshServiceCatalogFromNetwork();
+      const buyerMaxPricing = await loadBuyerMaxPricingDefaults(configPath);
+      const entries = (await refreshServiceCatalogFromNetwork())
+        .filter((entry) => isCatalogEntryAllowedByBuyerMax(entry, buyerMaxPricing));
 
       const buyerPort = await resolveProxyPort(configPath);
       const statsMap = new Map<string, {
@@ -2546,11 +2344,7 @@ export function registerPiChatHandlers({
       // Static imports at the top of the file — see note on the
       // `discoverChatServiceCatalog` read for why these must not be
       // dynamic in packaged Windows builds.
-      let discoveredPeersMap: Record<string, {
-        onChainChannelCount: number | null;
-        providerPricing?: Record<string, { services?: Record<string, { cachedInputUsdPerMillion?: number }> }>;
-      }> = {};
-      const buyerStateOnChainStats = new Map<string, BuyerStateOnChainStats>();
+      let discoveredPeersMap: Record<string, BuyerStateDiscoveredPeer> = {};
       try {
         const raw = await readFile(DEFAULT_BUYER_STATE_PATH, 'utf-8');
         const parsed = JSON.parse(raw) as Record<string, unknown>;
@@ -2560,54 +2354,28 @@ export function registerPiChatHandlers({
             const rec = p as Record<string, unknown>;
             const peerId = rec.peerId as string;
             discoveredPeersMap[peerId] = {
+              onChainAgentId: typeof rec.onChainAgentId === 'number' ? rec.onChainAgentId : null,
+              onChainStakeUsdcMicros: typeof rec.onChainStakeUsdcMicros === 'number' ? rec.onChainStakeUsdcMicros : null,
               onChainChannelCount: typeof rec.onChainChannelCount === 'number' ? rec.onChainChannelCount : null,
+              onChainGhostCount: typeof rec.onChainGhostCount === 'number' ? rec.onChainGhostCount : null,
+              onChainTotalVolumeUsdcMicros: typeof rec.onChainTotalVolumeUsdcMicros === 'number' ? rec.onChainTotalVolumeUsdcMicros : null,
+              onChainLastSettledAtSec: typeof rec.onChainLastSettledAtSec === 'number' ? rec.onChainLastSettledAtSec : null,
+              onChainReputationScore: typeof rec.onChainReputationScore === 'number' ? rec.onChainReputationScore : null,
+              onChainTrustScore: typeof rec.onChainTrustScore === 'number' ? rec.onChainTrustScore : null,
+              onChainSybilRisk: typeof rec.onChainSybilRisk === 'number' ? rec.onChainSybilRisk : null,
+              onChainSybilFlags: Array.isArray(rec.onChainSybilFlags)
+                ? rec.onChainSybilFlags.filter((f: unknown): f is string => typeof f === 'string')
+                : [],
+              sellerContract: typeof rec.sellerContract === 'string' ? rec.sellerContract : undefined,
               providerPricing: rec.providerPricing as Record<string, {
                 services?: Record<string, { cachedInputUsdPerMillion?: number }>
               }> | undefined,
             };
-            // Capture the buyer daemon's on-chain stats snapshot so we can
-            // reuse it inside fetchOnChainEnrichment and skip the redundant
-            // `channelsClient.getAgentStats()` RPC per peer.
-            const channelCount = rec.onChainChannelCount;
-            const ghostCount = rec.onChainGhostCount;
-            const volume = rec.onChainTotalVolumeUsdcMicros;
-            const lastSettled = rec.onChainLastSettledAtSec;
-            const fetchedAt = rec.onChainStatsFetchedAt;
-            if (
-              typeof channelCount === 'number' && Number.isFinite(channelCount)
-              && typeof ghostCount === 'number' && Number.isFinite(ghostCount)
-              && typeof volume === 'number' && Number.isFinite(volume)
-              && typeof lastSettled === 'number' && Number.isFinite(lastSettled)
-              && typeof fetchedAt === 'number' && Number.isFinite(fetchedAt)
-            ) {
-              buyerStateOnChainStats.set(peerId.toLowerCase(), {
-                channelCount,
-                ghostCount,
-                totalVolumeUsdcMicros: volume,
-                lastSettledAtSec: lastSettled,
-                fetchedAtMs: fetchedAt,
-              });
-            }
           }
         }
       } catch {
         // No state file yet
       }
-
-      const uniqueAddresses = Array.from(new Set(
-        entries
-          .map((e) => (e.peerId ? '0x' + e.peerId : ''))
-          .filter((a) => a.length === 42)
-      ));
-      const clients = await loadOnChainClients(configPath);
-      const enrichment = clients
-        ? await fetchOnChainEnrichment(
-          uniqueAddresses,
-          clients.stakingClient,
-          clients.channelsClient,
-          buyerStateOnChainStats,
-        )
-        : new Map<string, OnChainPeerEnrichment>();
 
       // Network-wide stats from @antseed/network-stats. On non-mainnet chains and on any
       // failure this returns an empty map and buildDiscoverRows falls back to local stats.
@@ -2627,7 +2395,13 @@ export function registerPiChatHandlers({
         }
       })();
 
-      const rows = await buildDiscoverRows(entries, statsMap, enrichment, discoveredPeersMap, networkStats);
+      const rows = (await buildDiscoverRows(entries, statsMap, discoveredPeersMap, networkStats))
+        .filter((row) => isPriceAllowedByBuyerMax(
+          row.inputUsdPerMillion,
+          row.outputUsdPerMillion,
+          row.cachedInputUsdPerMillion,
+          buyerMaxPricing,
+        ));
       return { ok: true, data: rows };
     } catch (error) {
       return { ok: false, data: [] as DiscoverRowEntry[], error: asErrorMessage(error) };

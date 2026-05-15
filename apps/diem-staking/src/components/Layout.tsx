@@ -13,7 +13,7 @@ import { fmtPct, fmtPrice } from '../lib/format';
 import { useAntstationDownload, ANTSTATION_RELEASES_URL, type Platform } from '../lib/antstation';
 
 const ANTSEED_URL = 'https://antseed.com';
-const DIEM_TERMS_URL = 'https://antseed.com/terms/diem-provider-capacity-program';
+const DIEM_TERMS_URL = 'https://diem.antseed.com/terms-of-service.html';
 const CONTRACT_URL_BASE = 'https://basescan.org/address';
 
 // OS glyph for the primary download button. Matches the mark used in
@@ -351,7 +351,7 @@ export function FAQ() {
           </div>
         </details>
         <details className="faq">
-          <summary>Are there any operator fees?</summary>
+          <summary>Are there any pool fees?</summary>
           <div className="body">
             Yes. A 10% operator fee is currently deducted from gross USDC inflows before
             remaining USDC is allocated according to the Program rules. The fee compensates

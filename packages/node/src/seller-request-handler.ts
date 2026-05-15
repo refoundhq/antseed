@@ -24,6 +24,7 @@ export interface SellerRequestHandlerDeps {
   sessionTracker: SellerSessionTracker | null;
   channelsClient: ChannelsClient | null;
   announcer: PeerAnnouncer | null;
+  maxUploadBodyBytes?: number;
   emit: (event: string, ...args: unknown[]) => boolean;
 }
 
@@ -54,7 +55,9 @@ export class SellerRequestHandler {
     buyerPeerId: string,
     paymentMux: PaymentMux,
   ): { mux: ProxyMux } {
-    const mux = new ProxyMux(conn);
+    const mux = new ProxyMux(conn, {
+      maxUploadBodyBytes: this._deps.maxUploadBodyBytes,
+    });
 
     mux.onProxyRequest(async (request: SerializedHttpRequest) => {
       debugLog(`[SellerHandler] Received request: ${request.method} ${request.path} (reqId=${request.requestId.slice(0, 8)})`);
@@ -171,7 +174,12 @@ export class SellerRequestHandler {
           }
           let accepted = spm.getAcceptedCumulative(session.sessionId);
           const spent = spm.getCumulativeSpend(session.sessionId);
-          if (spent > 0n && spent >= accepted) {
+          const reserveMax = spm.getReserveMax(session.sessionId);
+          // If spend has caught up and there is no headroom left in the reserve,
+          // stop serving before accepting any additional request cost.
+          const isAtExactSpendLimit = spent > 0n && spent === accepted && reserveMax > 0n && accepted >= reserveMax;
+
+          if (spent > 0n && spent > accepted) {
             // Race cover: the buyer's SpendingAuth for the *previous* response's
             // NeedAuth may still be on the wire when this request arrives. The
             // per-buyer mutex in waitForPendingAuths only serializes *in-flight*
@@ -188,18 +196,16 @@ export class SellerRequestHandler {
               debugLog(`[SellerHandler] Caught up before 402 for ${buyerPeerId.slice(0, 12)}... (spent=${spent} accepted=${accepted})`);
             }
           }
-          if (spent > 0n && spent >= accepted) {
-            const reserveMax = spm.getReserveMax(session.sessionId);
+          if (spent > 0n && (spent > accepted || isAtExactSpendLimit)) {
             const providerPricing = this.resolveProviderPricing(provider, request);
             const baseRequirements = spm.getPaymentRequirements(
               request.requestId, buyerPeerId, providerPricing,
             );
-            // Tell the buyer *exactly* how much cumulative signed authorization
-            // the seller needs to unblock further requests. Without this the
-            // buyer can only guess via minBudgetPerRequest and may sign an
-            // amount that is still below `spent`, which the seller would then
-            // reject as underfunded — producing an infinite 402 loop.
-            const target = spent + BigInt(baseRequirements.minBudgetPerRequest);
+            // Tell the buyer exactly how much delivered spend remains unsigned.
+            // Do not add forward headroom here: SpendingAuth is claimable
+            // on-chain, so requiring more than `spent` would authorize payment
+            // for work the seller has not delivered.
+            const target = spent;
             const isFullyExhausted = reserveMax > 0n && (accepted >= reserveMax || target > reserveMax);
             const requirements = {
               ...baseRequirements,
@@ -219,7 +225,8 @@ export class SellerRequestHandler {
                 debugWarn(`[SellerHandler] Failed to close exhausted session: ${err instanceof Error ? err.message : err}`);
               });
             } else {
-              debugLog(`[SellerHandler] Budget exhausted for ${buyerPeerId.slice(0, 12)}... (spent=${spent} >= accepted=${accepted}) — returning 402 with requiredCumulativeAmount=${target}, awaiting higher SpendingAuth`);
+              const comparator = spent > accepted ? '>' : '==';
+              debugLog(`[SellerHandler] Budget exhausted for ${buyerPeerId.slice(0, 12)}... (spent=${spent} ${comparator} accepted=${accepted}) — returning 402 with requiredCumulativeAmount=${target}, awaiting higher SpendingAuth`);
             }
             mux.sendProxyResponse({
               requestId: request.requestId,
@@ -244,13 +251,13 @@ export class SellerRequestHandler {
             // Auto-sign catch-up via NeedAuth so a transient underfund recovers
             // without the 402 round-tripping to the user.
             if (!isFullyExhausted) {
-              paymentMux.sendNeedAuth({
+              this._sendNeedAuthBestEffort(paymentMux, {
                 channelId: session.sessionId,
                 requiredCumulativeAmount: target.toString(),
                 currentAcceptedCumulative: accepted.toString(),
                 deposit: session.authMax ?? '0',
                 requestId: request.requestId,
-              });
+              }, buyerPeerId, 'budget-catch-up');
             }
             return;
           }
@@ -366,9 +373,9 @@ export class SellerRequestHandler {
             debugLog(`[SellerHandler] Cost recorded: buyer=${buyerPeerId.slice(0, 12)}... cost=${costUsdc} cumulative=${cumulativeSpend} (in=${usage.inputTokens} cached=${usage.cachedInputTokens} out=${usage.outputTokens})`);
 
             const accepted = spm.getAcceptedCumulative(session.sessionId);
-            const requiredAmount = cumulativeSpend + costUsdc;
+            const requiredAmount = cumulativeSpend;
             debugLog(`[SellerHandler] Sending NeedAuth: cost=${costUsdc} cumulative=${cumulativeSpend} required=${requiredAmount}`);
-            paymentMux.sendNeedAuth({
+            this._sendNeedAuthBestEffort(paymentMux, {
               channelId: session.sessionId,
               requiredCumulativeAmount: requiredAmount.toString(),
               currentAcceptedCumulative: accepted.toString(),
@@ -380,7 +387,7 @@ export class SellerRequestHandler {
               cachedInputTokens: String(usage.cachedInputTokens),
               freshInputTokens: String(usage.freshInputTokens),
               service: this._extractRequestedService(request) ?? undefined,
-            });
+            }, buyerPeerId, 'post-response');
           }
         }
       } finally {
@@ -540,6 +547,21 @@ export class SellerRequestHandler {
       return provider.handleRequestStream(request, streamCallbacks);
     }
     return provider.handleRequest(request);
+  }
+
+  private _sendNeedAuthBestEffort(
+    paymentMux: PaymentMux,
+    payload: Parameters<PaymentMux['sendNeedAuth']>[0],
+    buyerPeerId: string,
+    phase: 'budget-catch-up' | 'post-response',
+  ): void {
+    try {
+      paymentMux.sendNeedAuth(payload);
+    } catch (err) {
+      debugWarn(
+        `[SellerHandler] NeedAuth send skipped (${phase}) for ${buyerPeerId.slice(0, 12)}...: ${err instanceof Error ? err.message : err}`,
+      );
+    }
   }
 
   private _scheduleMetadataRefresh(): void {

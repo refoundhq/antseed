@@ -190,6 +190,7 @@ function mergeSellerConfig(
       maxConcurrentBuyers: defaults.maxConcurrentBuyers,
       providers: mergeSellerProviders(defaults.providers, undefined),
       publicAddress: defaults.publicAddress,
+      ...(typeof defaults.maxUploadBodyBytes === 'number' ? { maxUploadBodyBytes: defaults.maxUploadBodyBytes } : {}),
       ...(defaults.agentDir ? { agentDir: defaults.agentDir } : {}),
     };
   }
@@ -205,8 +206,18 @@ function mergeSellerConfig(
     publicAddress: typeof value['publicAddress'] === 'string'
       ? value['publicAddress']
       : defaults.publicAddress,
+    ...(typeof value['maxUploadBodyBytes'] === 'number'
+      ? { maxUploadBodyBytes: value['maxUploadBodyBytes'] }
+      : typeof defaults.maxUploadBodyBytes === 'number'
+        ? { maxUploadBodyBytes: defaults.maxUploadBodyBytes }
+        : {}),
     ...(normalizeAgentDir(value['agentDir'], defaults.agentDir)),
   };
+}
+
+function normalizeMinPeerReputation(value: unknown, fallback: number): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return fallback;
+  return value === 50 ? fallback : value;
 }
 
 function mergeBuyerConfig(
@@ -222,9 +233,7 @@ function mergeBuyerConfig(
   }
   return {
     maxPricing: mergeHierarchicalPricing(defaults.maxPricing, value['maxPricing']),
-    minPeerReputation: typeof value['minPeerReputation'] === 'number'
-      ? value['minPeerReputation']
-      : defaults.minPeerReputation,
+    minPeerReputation: normalizeMinPeerReputation(value['minPeerReputation'], defaults.minPeerReputation),
     proxyPort: typeof value['proxyPort'] === 'number'
       ? value['proxyPort']
       : defaults.proxyPort,

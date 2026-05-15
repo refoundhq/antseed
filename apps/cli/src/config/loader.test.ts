@@ -56,6 +56,34 @@ test('loadConfig reads nested seller.providers[name].services[id] shape', async 
   );
 });
 
+test('loadConfig treats legacy buyer minPeerReputation 50 as the new default', async () => {
+  await withTempConfig(
+    JSON.stringify({
+      buyer: {
+        minPeerReputation: 50,
+      },
+    }),
+    async (configPath) => {
+      const config = await loadConfig(configPath);
+      assert.equal(config.buyer.minPeerReputation, 0);
+    }
+  );
+});
+
+test('loadConfig preserves explicit non-default buyer minPeerReputation', async () => {
+  await withTempConfig(
+    JSON.stringify({
+      buyer: {
+        minPeerReputation: 42,
+      },
+    }),
+    async (configPath) => {
+      const config = await loadConfig(configPath);
+      assert.equal(config.buyer.minPeerReputation, 42);
+    }
+  );
+});
+
 test('loadConfig rejects incomplete service pricing', async () => {
   await withTempConfig(
     JSON.stringify({
@@ -162,6 +190,36 @@ test('loadConfig preserves seller publicAddress override', async () => {
     async (configPath) => {
       const config = await loadConfig(configPath);
       assert.equal(config.seller.publicAddress, 'peer.example.com:6882');
+    }
+  );
+});
+
+test('loadConfig preserves seller maxUploadBodyBytes setting', async () => {
+  await withTempConfig(
+    JSON.stringify({
+      seller: {
+        maxUploadBodyBytes: 134217728,
+      },
+    }),
+    async (configPath) => {
+      const config = await loadConfig(configPath);
+      assert.equal(config.seller.maxUploadBodyBytes, 134217728);
+    }
+  );
+});
+
+test('loadConfig rejects invalid seller maxUploadBodyBytes setting', async () => {
+  await withTempConfig(
+    JSON.stringify({
+      seller: {
+        maxUploadBodyBytes: 123,
+      },
+    }),
+    async (configPath) => {
+      await assert.rejects(
+        async () => loadConfig(configPath),
+        /seller\.maxUploadBodyBytes/
+      );
     }
   );
 });

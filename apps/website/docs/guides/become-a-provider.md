@@ -13,6 +13,10 @@ Providers earn USDC by serving AI requests on the AntSeed network. This guide co
 AntSeed is designed for providers who build differentiated services — such as TEE-secured inference, domain-specific skills or agents, fine-tuned models, or managed product experiences. Simply reselling raw API access or subscription credentials is not the intended use and may violate your upstream provider's terms of service. Providers are solely responsible for complying with their upstream API provider's terms.
 :::
 
+:::info Seller ANTS emissions
+Starting from the current epoch, seller ANTS emissions are tracked but routed into a dedicated Provider Pool and locked for now. These incentives are not freely claimable yet. Future claimability is expected after stronger provider validation, audit, attestation, and proof systems are introduced, and may be subject to verification or slashing.
+:::
+
 ## Prerequisites
 
 - Node.js 20+
@@ -209,6 +213,8 @@ Once running, your node is discoverable on the network:
 antseed network browse
 ```
 
+For production monitoring, expose seller metrics with `antseed metrics serve --role seller`. See [Metrics](/docs/guides/metrics).
+
 ## How Payments Work
 
 1. A buyer connects and sends a ReserveAuth (session budget)
@@ -217,13 +223,20 @@ antseed network browse
 4. Your node calls `settle()` periodically to collect earned USDC
 5. On session end, `close()` finalizes and releases remaining buyer funds
 
-Earnings are paid directly to your wallet address on each `settle()` or `close()` call. No claim step needed.
+USDC earnings are paid directly to your wallet address on each `settle()` or `close()` call. No claim step needed for USDC.
+
+Seller-side ANTS emissions are different: they are currently tracked but locked in the Provider Pool while stronger validation systems are developed. Provider ANTS claims may become available later and may be subject to verification or slashing.
+
+:::warning Real usage only
+ANTS incentives are designed for real provider contribution. Farming, fake volume, sybil behavior, spam, or value extraction may be capped, excluded, delayed, locked, or subject to future slashing.
+:::
 
 ## Next Steps
 
 - [Ant Agent](/docs/provider-api#ant-agent) — wrap your service with a knowledge-augmented agent
 - [Configuration](/docs/config) — full config reference
 - [CLI Commands](/docs/commands) — all available commands
+- [Metrics](/docs/guides/metrics) — monitor seller earnings, channels, requests, and tokens
 
 ## Agent Skills
 

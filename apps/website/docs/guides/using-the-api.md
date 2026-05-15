@@ -40,7 +40,7 @@ Extra buyer config is optional. Add it only for advanced customization such as p
 ```json
 {
   "buyer": {
-    "minPeerReputation": 50,
+    "minPeerReputation": 0,
     "maxPricing": {
       "defaults": {
         "inputUsdPerMillion": 25,
@@ -86,11 +86,7 @@ Claude Code sends requests to `/v1/messages` and the proxy routes them to the be
 
 ## Codex
 
-```bash
-export OPENAI_BASE_URL=http://localhost:8377/v1
-export OPENAI_API_KEY=unused
-codex
-```
+Recent Codex versions (0.40+) ignore `OPENAI_BASE_URL` and `OPENAI_API_KEY` and only read `~/.codex/config.toml`. See the [Codex integration page](/integrations/codex) for the profile-based setup, the routing-verification check, and known gotchas (project-local configs, `-c` flag pitfalls).
 
 ## curl
 
@@ -148,6 +144,16 @@ When you send a request:
 ## No API Key Needed
 
 The proxy does not require an API key. Authentication and payments are handled by the protocol using your node's identity key and on-chain USDC deposits. Tools that require an API key (like Codex) can use any placeholder value.
+
+## Monitor Buyer Usage
+
+Expose buyer metrics with:
+
+```bash
+antseed metrics serve --role buyer
+```
+
+See [Metrics](/docs/guides/metrics) for buyer spend, channel, request, token, and per-peer metrics.
 
 ## Agent Skills
 

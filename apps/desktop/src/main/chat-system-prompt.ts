@@ -23,7 +23,7 @@ Available tools:
 - find: Find files by glob pattern (respects .gitignore)
 - ls: List directory contents
 - web_fetch: Fetch a public HTTP/HTTPS URL and return page content as readable text
-- open_browser_preview: Open a URL for user to preview in browser or preview panel
+- open_browser_preview: Open a URL for user to preview in the in-app preview panel
 - start_dev_server: Start a dev server as a background process that survives tool timeouts
 
 In addition to the tools above, you may have access to other custom tools depending on the peer's offering.
@@ -59,13 +59,18 @@ AntSeed documentation (use web_fetch on these URLs only when the user asks about
 
 export function buildAntstationSystemPrompt(
   basePrompt: string | undefined,
+  workspaceDir?: string,
 ): string {
   const resolvedBasePrompt = basePrompt?.trim() ? basePrompt.trim() : ANTSTATION_SYSTEM_PROMPT;
+  const trimmedWorkspace = workspaceDir?.trim();
+  const workspaceLine = trimmedWorkspace ? `\n- Current workspace: ${trimmedWorkspace}` : '';
 
   return `${resolvedBasePrompt}
 
 Workspace model:
-- All chats share the selected workspace path at the app level.
-- Conversation history is per chat, but repo and directory context are shared across chats until the workspace changes.
+- Each chat has its own workspace (folder/repo) that is stored when the chat is created.
+- When you switch to a different chat, the workspace automatically switches to that chat's stored workspace.
+- When starting a new chat, it uses whatever workspace is currently selected.
+- The workspace indicator in the UI shows the current workspace for the active chat.${workspaceLine}
 `.trim();
 }
