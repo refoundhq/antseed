@@ -147,8 +147,8 @@ export function FlowDiagram() {
           <rect x="40" y="90" width="220" height="110" rx="16" fill="rgba(31,216,122,0.08)" stroke="#1FD87A" strokeWidth="2" />
           <g transform="translate(72 142)"><use href="#diem-coin-svg" /></g>
           <text x="105" y="135" fontFamily="'Space Grotesk', system-ui, sans-serif" fontSize="18" fontWeight={700} fill="#1a1a1a">$DIEM</text>
-          <text x="105" y="156" fontFamily="'Space Grotesk', system-ui, sans-serif" fontSize="15" fontWeight={600} fill="#1a1a1a">Pool</text>
-          <text x="105" y="180" fontFamily="'JetBrains Mono', monospace" fontSize="10" fill="#6b7280" letterSpacing="0.6">stakers deposit</text>
+          <text x="105" y="156" fontFamily="'Space Grotesk', system-ui, sans-serif" fontSize="15" fontWeight={600} fill="#1a1a1a">Capacity</text>
+          <text x="105" y="180" fontFamily="'JetBrains Mono', monospace" fontSize="10" fill="#6b7280" letterSpacing="0.6">participants lock</text>
           <text x="55" y="108" fontFamily="'JetBrains Mono', monospace" fontSize="9" fontWeight={700} fill="#16a863" opacity="0.8" letterSpacing="1">01</text>
         </g>
 
@@ -240,8 +240,8 @@ function FlowMobile() {
       <div className="flow-mobile-pool">
         <div className="flow-mobile-pool-logo"><DiemLogo size={44} /></div>
         <div className="flow-mobile-pool-text">
-          <h3>$DIEM Pool</h3>
-          <span>USDC streams in live · $ANTS every epoch</span>
+          <h3>$DIEM Capacity</h3>
+          <span>USDC allocations vary · $ANTS if eligible</span>
         </div>
       </div>
 
@@ -287,8 +287,8 @@ function FlowMobile() {
           <AntsTokenLogo size={38} />
         </div>
         <div className="flow-mobile-source-txt">
-          <h4>$ANTS · every epoch</h4>
-          <span className="flow-mobile-source-sub">emissions rewards to stakers</span>
+          <h4>$ANTS · if eligible</h4>
+          <span className="flow-mobile-source-sub">incentives under Program rules</span>
         </div>
       </div>
     </div>

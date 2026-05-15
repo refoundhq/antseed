@@ -1,11 +1,13 @@
 # @antseed/diem-staking
 
-Static web app for the DIEM staking portal at
+Static web app for the DIEM Provider Capacity Program portal at
 [`diem.antseed.com`](https://diem.antseed.com).
 
-Users stake Venice's DIEM token (on Base) into the `DiemStakingProxy` contract
-and earn real USDC yield from AI inference demand on the AntSeed network, plus
-$ANTS token emissions.
+Users lock Venice's DIEM token (on Base) into the `DiemStakingProxy` contract
+to participate in provider capacity. If connected provider infrastructure
+processes paid inference requests, eligible participants may receive USDC
+allocations and $ANTS incentives according to Program rules. Allocations are
+variable, not guaranteed, and may be zero.
 
 ## Stack
 
@@ -48,12 +50,12 @@ Every display value is on-chain live except two:
 
 | Source | What |
 |---|---|
-| **On-chain (wagmi `useReadContract` / `useReadContracts`, polled every ~12s)** | Pool TVL (`totalStaked`), distinct stakers (`stakerCount`), USDC distributed all-time (`totalUsdcDistributedEver`), pool cap (`maxTotalStake`), reward baseline (`firstRewardEpoch` / `syncedRewardEpoch` / `finalizedRewardEpoch`), Venice cooldown (`DIEM.cooldownDuration`), user wallet DIEM, user stake, user claimable USDC (`earnedUsdc`), user pending ANTS (`pendingAntsForEpoch` summed), per-epoch claim flags (`userEpochClaimed`), unstake queue state (`currentUnstakeBatch` / `oldestUnclaimedUnstakeBatch` / `unstakeBatches(id)` / `unstakeBatchUserAmount`). |
-| **Off-chain** | DIEM price from CoinGecko (`useDiemPrice`). Falls back to "—" on miss; APY degrades to 0. APY uses all-time distributed USDC divided by pool age in days, annualized by 365, then divided by live pool TVL; TVL is current staked $DIEM valued at the live $DIEM price. Pool age is computed from the `POOL_GENESIS_UNIX` constant in `src/lib/hooks.ts` (the timestamp of the first `Staked` event on the deployed proxy) — no log query needed at runtime. Authoritative claimability still comes from `finalizedRewardEpoch()` on-chain. |
+| **On-chain (wagmi `useReadContract` / `useReadContracts`, polled every ~12s)** | Program TVL (`totalStaked`), distinct participants (`stakerCount`), USDC allocated all-time (`totalUsdcDistributedEver`), Program cap (`maxTotalStake`), incentive baseline (`firstRewardEpoch` / `syncedRewardEpoch` / `finalizedRewardEpoch`), Venice cooldown (`DIEM.cooldownDuration`), user wallet DIEM, user locked DIEM, user claimable USDC (`earnedUsdc`), user pending ANTS (`pendingAntsForEpoch` summed), per-epoch claim flags (`userEpochClaimed`), withdrawal queue state (`currentUnstakeBatch` / `oldestUnclaimedUnstakeBatch` / `unstakeBatches(id)` / `unstakeBatchUserAmount`). |
+| **Off-chain** | DIEM price from CoinGecko (`useDiemPrice`). Falls back to "—" on miss; the historical activity rate degrades to 0. The rate uses all-time allocated USDC divided by Program age in days, annualized by 365, then divided by live Program TVL; TVL is current locked $DIEM valued at the live $DIEM price. Program age is computed from the `POOL_GENESIS_UNIX` constant in `src/lib/hooks.ts` (the timestamp of the first `Staked` event on the deployed proxy) — no log query needed at runtime. Authoritative claimability still comes from `finalizedRewardEpoch()` on-chain. |
 
-## Unstake UX
+## Withdrawal UX
 
-The proxy's unstake flow is three on-chain steps (`initiateUnstake` → `flush`
+The proxy's withdrawal flow is three on-chain steps (`initiateUnstake` → `flush`
 → `claimUnstakeBatch`) but the UI presents one smart action button per user state:
 
 - **Queued** — batch not yet flushed. Button: "Start cooldown" (calls
@@ -63,16 +65,16 @@ The proxy's unstake flow is three on-chain steps (`initiateUnstake` → `flush`
 - **Claimable** — ready to withdraw. Button: "Withdraw N $DIEM" (calls
   `claimUnstakeBatch`, pays everyone in the batch).
 
-This is honest — any user in the batch can advance each step, so users
-often find theirs already moved. No keeper service required.
+Any user in the batch can advance each step, so users often find theirs already
+moved. No keeper service required.
 
-## ANTS reward epochs
+## ANTS incentive epochs
 
-The proxy no longer relies on an operator tick to decide reward boundaries.
-Reward epochs are aligned to `AntseedEmissions.currentEpoch()`:
+The proxy no longer relies on an operator tick to decide incentive boundaries.
+Incentive epochs are aligned to `AntseedEmissions.currentEpoch()`:
 
 - `firstRewardEpoch` pins the emissions epoch at proxy deployment.
-- `syncedRewardEpoch` is the next reward epoch that still needs a local
+- `syncedRewardEpoch` is the next incentive epoch that still needs a local
   `RewardEpochClosed` checkpoint.
 - `finalizedRewardEpoch()` reads the emissions contract's current epoch; epochs
   below it are finalized and can be synced/claimed.
@@ -97,18 +99,11 @@ For ABI consumers migrating from the earlier proxy surface:
 
 ## Site metadata
 
-`index.html` mirrors antseed.com's final rendered metadata (which Docusaurus
-composes from its `title` + `tagline` + `metadata` config). Same shape as the
-parent site:
+`index.html` uses DIEM Provider Capacity Program specific metadata:
 
-- `<title>` and `og:title` follow the `{tagline} | {brand variant}` pattern.
-  On antseed.com that's `The open market for AI inference. No gatekeepers. |
-  AntSeed`; here the brand variant is extended to `AntSeed DIEM Staking`.
-- `twitter:title` drops the brand suffix but keeps a short page identifier
-  (`... | DIEM Staking`), matching Docusaurus's convention of shorter twitter
-  titles while still giving unfurls page context.
-- `description` / `og:description` prepend the same brand tagline, then
-  suffix the DIEM-specific staking purpose.
+- `<title>`, `og:title`, and `twitter:title`: `DIEM Provider Capacity Program | AntSeed`.
+- `description`, `og:description`, and `twitter:description` describe DIEM locking,
+  variable USDC allocations, and variable $ANTS incentives without APY/yield phrasing.
 - `canonical` is `https://diem.antseed.com/`.
 
 Everything else — keywords, `og:type`, `og:image` / `twitter:image`,
@@ -120,7 +115,7 @@ Static assets copied from the website:
   verbatim from `apps/website/static/logo.svg`; keep the two in sync.
 - **Fonts**: same Google Fonts stylesheet (Space Grotesk + JetBrains Mono).
 - **`og:image` / `twitter:image`**: `https://antseed.com/og-image.jpg` — the
-  parent site's card. If a dedicated DIEM staking hero card is ever designed,
+  parent site's card. If a dedicated DIEM capacity hero card is ever designed,
   drop it at `public/og-image.jpg` and update the two URLs here.
 - **`robots.txt`**: copied from `apps/website/static/robots.txt` — same AI
   crawler allowlist, minus the parent-site sitemap directive.
@@ -134,8 +129,8 @@ The website also ships `google-site-verification` and a JSON-LD
   token for the `diem.antseed.com` subdomain. Add one to `index.html` when
   the subdomain is verified.
 - The `SoftwareApplication` JSON-LD describes the AntStation desktop app —
-  wrong schema for a staking page. If structured data is wanted here, the
-  right shape is `FinancialProduct` or `InvestmentFund`.
+  wrong schema for this page. Avoid adding financial-product structured data
+  unless reviewed for the Program's current legal and regulatory posture.
 
 ## Contract reference
 

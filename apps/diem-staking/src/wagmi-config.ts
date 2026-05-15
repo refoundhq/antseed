@@ -44,7 +44,7 @@ const connectors = connectorsForWallets(
     },
   ],
   {
-    appName: 'AntSeed DIEM Staking',
+    appName: 'AntSeed DIEM Capacity',
     projectId,
   },
 );

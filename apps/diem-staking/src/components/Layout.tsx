@@ -13,6 +13,7 @@ import { fmtPct, fmtPrice } from '../lib/format';
 import { useAntstationDownload, ANTSTATION_RELEASES_URL, type Platform } from '../lib/antstation';
 
 const ANTSEED_URL = 'https://antseed.com';
+const DIEM_TERMS_URL = 'https://diem.antseed.com/terms-of-service.html';
 const CONTRACT_URL_BASE = 'https://basescan.org/address';
 
 // OS glyph for the primary download button. Matches the mark used in
@@ -78,7 +79,7 @@ export function Nav() {
           <span className="seed">SEED</span>
         </span>
         <span className="slash">/</span>
-        <span className="diem">Diem Staking</span>
+        <span className="diem">Diem Capacity</span>
       </a>
       <div className="nav-links">
         <a href="#how" onClick={scrollTo('how')} className="link hide-sm">How it works</a>
@@ -98,19 +99,20 @@ export function Nav() {
 export function Hero({ diemPrice, apy }: { diemPrice: number | null; apy: number }) {
   return (
     <section className="hero" id="stake">
-      <span className="eyebrow"><span className="pulse" /> Live on Base mainnet</span>
-      <h1 className="hero-title">Your $DIEM, now <em>earning</em> USDC.</h1>
+      <span className="eyebrow"><span className="pulse" /> Provider Capacity Program on Base</span>
+      <h1 className="hero-title">Lock $DIEM to participate in provider capacity.</h1>
       <p className="hero-sub">
-        Stake $DIEM into the AntSeed pool on Base. USDC from AI inference requests
-        streams into the contract in real time; $ANTS emissions land every epoch.
-        No lockups, fully on-chain.
+        Lock DIEM into the Provider Capacity Program on Base. If the connected provider
+        infrastructure processes paid inference requests, eligible participants may receive
+        USDC allocations according to the program rules. Allocations are variable, not
+        guaranteed, and may be zero.
       </p>
       <div className="hero-meta">
         <span className="live-badge">$DIEM ${fmtPrice(diemPrice)}</span>
         <span className="dot" />
-        <span><strong>{fmtPct(apy)}</strong> <span className="apr-sub">USDC APY · ALL-TIME AVG</span></span>
+        <span><strong>{fmtPct(apy)}</strong> <span className="apr-sub">historical USDC activity · all-time avg</span></span>
         <span className="dot" />
-        <span>+ <strong>$ANTS</strong> every epoch</span>
+        <span><strong>$ANTS</strong> incentives may be available</span>
       </div>
     </section>
   );
@@ -125,9 +127,9 @@ export function ClaimBanner() {
           <span className="eyebrow"><span className="pulse" /> AntStation required for $ANTS</span>
           <h2>Download <em>AntStation</em> to claim your $ANTS.</h2>
           <p>
-            This staking page handles $DIEM and USDC. Your $ANTS claim lives in AntStation —
+            This page handles DIEM locking, withdrawal requests, and USDC claims. Your $ANTS claim lives in AntStation —
             the AntSeed desktop app. Install it, open the Payments portal, connect the same
-            wallet you stake with, and claim your $ANTS there.
+            wallet you participate with, and claim eligible $ANTS there.
           </p>
           <div className="claim-path" aria-label="How to claim ANTS">
             <span><strong>1</strong> Install AntStation</span>
@@ -171,7 +173,7 @@ export function ClaimBanner() {
         <div className="claim-mock">
           <div className="line"><span className="comment"># AntStation app › Payments</span></div>
           <div className="line"><span className="key">claim location</span><span className="num">AntStation</span></div>
-          <div className="line"><span className="key">wallet</span><span className="num">same as staking</span></div>
+          <div className="line"><span className="key">wallet</span><span className="num">same as Program</span></div>
           <div className="line"><span className="key">$ANTS pending</span><span className="num">ready to claim</span></div>
           <hr />
           <div className="line"><span className="comment"># spend on any model →</span></div>
@@ -191,29 +193,28 @@ export function HowItWorks() {
       <span className="sec-label">How it works</span>
       <h2 className="sec-title">Four steps. <em>Fully on-chain.</em></h2>
       <p className="sec-sub">
-        Your $DIEM stays in an audited smart contract on Base. USDC from inference streams
-        straight into the pool as it happens; $ANTS emissions land every epoch.
+        Your $DIEM stays in a smart contract on Base. USDC allocations, if any, depend on
+        paid inference activity processed by the connected provider infrastructure, after
+        applicable operator fees and program rules.
       </p>
 
       <div className="steps">
-        <Step num="01" label="Stake" title="Deposit your $DIEM">
-          Connect your wallet and deposit $DIEM into the staking contract on Base. One
-          transaction. Your tokens, your keys, your control.
+        <Step num="01" label="Lock" title="Lock your $DIEM">
+          Connect your wallet and lock DIEM into the Program contract on Base. Your participation
+          is governed by smart-contract state and the published Program parameters.
         </Step>
-        <Step num="02" label="Flow" title="AI demand earns fees">
-          Your pooled $DIEM powers AI inference across the AntSeed network. Every request
-          settles a USDC micropayment on-chain, paid from the AntSeed payment channel
-          into the staking contract.
+        <Step num="02" label="Capacity" title="Support provider capacity">
+          Locked DIEM is used as capacity support for connected provider infrastructure serving
+          AntSeed inference requests. Usage depends on buyer demand, uptime, pricing, and operations.
         </Step>
-        <Step num="03" label="USDC" title="USDC streams in real time">
-          Your share of every inflow credits to your position the moment it lands. No epoch
-          wait, no distribution cycle — just a pro-rata stream. Claim to your wallet whenever.
+        <Step num="03" label="USDC" title="USDC allocations, if any">
+          If paid requests are processed, eligible participants may receive USDC allocations after
+          applicable operator fees and Program rules. Allocations are not guaranteed and may be zero.
         </Step>
-        <Step num="04" label="$ANTS" title="Claim $ANTS in the payments portal">
-          $ANTS emissions accrue every epoch. Install{' '}
+        <Step num="04" label="$ANTS" title="Claim eligible $ANTS in the payments portal">
+          $ANTS incentives may accrue by epoch if available under the Program rules. Install{' '}
           <a href={href} target="_blank" rel="noopener noreferrer">AntStation</a>{' '}
-          or the CLI, open the payments portal, and claim them with the same wallet you
-          stake from.
+          or the CLI, open the payments portal, and claim with the same wallet you use here.
         </Step>
       </div>
 
@@ -234,17 +235,18 @@ function Step(props: { num: string; label: string; title: string; children: Reac
 
 function Why() {
   const items = [
-    { h: 'Real revenue, not emissions', p: 'USDC yield comes from actual AI requests on the AntSeed network. If demand grows, your yield grows with it.' },
-    { h: 'Your $DIEM never leaves Base', p: 'Funds stay in an audited smart contract. No bridges, no centralized custody, no rehypothecation.' },
-    { h: 'Two income streams', p: 'USDC for cash yield today. $ANTS for upside in the network tomorrow. Long-term stakers earn a bigger share of both.' },
-    { h: 'Protocol-aligned fees', p: 'The 10% DIEM pool fee flows to the Protocol Reserve; the remaining USDC flows through the pool to stakers pro-rata.' },
+    { h: 'Usage-based USDC allocations', p: 'USDC allocations depend on actual paid usage, pricing, uptime, costs, competition, operator performance, and Program rules. Past activity does not predict future allocations.' },
+    { h: 'Your $DIEM stays on Base', p: 'DIEM is locked in a Base smart contract. Participation still involves smart-contract, token, liquidity, operator, tax, and regulatory risks.' },
+    { h: 'USDC allocations and token incentives', p: 'Eligible participants may receive USDC allocations from paid provider activity and may receive $ANTS incentives if available under the Program rules. Neither is guaranteed.' },
+    { h: 'Transparent operator fee', p: 'A 10% operator fee is currently deducted from gross USDC inflows before remaining USDC is allocated according to the Program rules.' },
   ];
   return (
     <div className="why-block">
-      <h3 className="why-subtitle">Yield backed by <em>real demand</em>.</h3>
+      <h3 className="why-subtitle">USDC allocations depend on <em>actual provider usage</em>.</h3>
       <p className="why-lead">
-        This isn't farming. It isn't printed rewards. It's USDC that real developers and AI
-        agents pay for inference, flowing back to stakers after operations.
+        USDC allocations, if any, come from paid inference requests processed by the connected
+        provider infrastructure, after applicable operator fees and Program rules. Usage may
+        fluctuate and allocations may be zero.
       </p>
       <div className="why-grid">
         {items.map((it) => (
@@ -291,34 +293,30 @@ export function FAQ() {
       <h2 className="sec-title">Common questions.</h2>
       <div className="faqs">
         <details className="faq" open>
-          <summary>Where does the USDC yield actually come from?</summary>
+          <summary>Where do USDC allocations come from?</summary>
           <div className="body">
-            AntSeed is a peer-to-peer network where developers and AI agents buy inference,
-            skills, and other services. Every request settles a USDC micropayment on Base,
-            and the AntSeed payment channel pays the staking contract directly — the
-            contract is the seller. No operator holds user stake. The 10% DIEM pool fee
-            flows to the Protocol Reserve to strengthen the AntSeed ecosystem and ANTS;
-            the remaining USDC credits to stakers pro-rata as it reaches the pool.
+            USDC allocations, if any, come from paid inference requests processed by the
+            connected provider infrastructure and settled through AntSeed smart contracts.
+            After applicable operator fees and Program deductions, remaining USDC is allocated
+            according to the Program rules. No allocation is guaranteed, and future usage may be zero.
           </div>
         </details>
         <details className="faq">
-          <summary>How is the current APY calculated?</summary>
+          <summary>How is the historical activity rate calculated?</summary>
           <div className="body">
-            The APY shown is realized, not projected. We take all USDC that has flowed into
-            the pool so far, divide by the number of days the pool has existed, annualize
-            that daily average (× 365), then divide by live pool TVL. TVL is the current
-            amount of staked $DIEM valued at the live $DIEM price. It's backward-looking:
-            real yield tracks actual AI demand on the network. The contract only ever pays
-            out what it actually received. Effective APY is denominated in USDC. $ANTS are
-            extra on top.
+            The displayed rate is backward-looking and informational only. It takes all USDC
+            that has flowed into the Program so far, divides by the number of days the Program
+            has existed, annualizes that daily average (× 365), then divides by live Program TVL.
+            It is not a forecast, target, promise, APY, or guaranteed return. Future USDC
+            allocations may be lower or zero.
           </div>
         </details>
         <details className="faq">
-          <summary>How does unstaking work?</summary>
+          <summary>How does withdrawing work?</summary>
           <div className="body">
-            From Venice's side the proxy is a single staker, so every unstake would reset
-            the cooldown for the whole pool. To avoid that we batch: unstakes queue into
-            the currently-open unstake batch on-chain. You'll see three states in the app:
+            From Venice's side the proxy is a single participant, so every withdrawal would reset
+            the cooldown for the whole Program. To avoid that we batch: withdrawal requests queue into
+            the currently-open withdrawal batch on-chain. You'll see three states in the app:
             <strong>queued</strong> (your amount is in the open batch, accrual stopped
             instantly) → <strong>cooling down</strong> (batch flushed to Venice in one call,
             waiting for Venice's native cooldown) → <strong>claimable</strong> (your DIEM is
@@ -333,33 +331,32 @@ export function FAQ() {
           </div>
         </details>
         <details className="faq">
-          <summary>How do I claim my $ANTS rewards?</summary>
+          <summary>How do I claim eligible $ANTS incentives?</summary>
           <div className="body">
-            $ANTS are distributed every epoch to the same wallet you staked with. To claim
+            Eligible $ANTS incentives may be available by epoch for the same wallet you use in the Program. To claim
             them, install{' '}
             <a href={href} target="_blank" rel="noopener noreferrer">AntStation</a>{' '}
             or the AntSeed CLI and open the local payments portal. Claim from there using
-            the same wallet, then spend $ANTS inside AntStation on any model on the network.
+            the same wallet, then use $ANTS inside AntStation on supported network services.
           </div>
         </details>
         <details className="faq">
-          <summary>What's an epoch and how often is USDC paid out?</summary>
+          <summary>What's an epoch and how often can USDC be claimed?</summary>
           <div className="body">
-            <strong>USDC streams in real time</strong> — every inference request pays the
-            staking contract directly and credits your share in the same transaction.
-            There's no epoch wait for USDC; claim to your wallet whenever. <strong>$ANTS</strong>
-            are distributed per weekly epoch using the same revenue-share math: your epoch
-            share follows the USDC revenue credited to your stake during that epoch. You can
-            still claim $ANTS for epochs you contributed to even after fully unstaking.
+            USDC allocations, if any, are credited by the contract when paid inference activity
+            settles and Program conditions are met. There is no epoch wait for claimable USDC;
+            claim to your wallet whenever available. <strong>$ANTS</strong> incentives are
+            calculated by weekly epoch if available under Program rules and may be subject to
+            eligibility, validation, caps, delays, or other restrictions.
           </div>
         </details>
         <details className="faq">
           <summary>Are there any pool fees?</summary>
           <div className="body">
-            Yes. The DIEM pool has a 10% fee before USDC reaches the staking pool.
-            That fee flows to the Protocol Reserve to strengthen the AntSeed ecosystem
-            and ANTS. The remaining USDC flows to stakers pro-rata. Your wallet
-            transactions still require Base gas, typically a few cents.
+            Yes. A 10% operator fee is currently deducted from gross USDC inflows before
+            remaining USDC is allocated according to the Program rules. The fee compensates
+            provider infrastructure operation and related costs. Your wallet transactions
+            still require Base gas.
           </div>
         </details>
       </div>
@@ -386,8 +383,8 @@ export function Footer({ proxyAddress }: { proxyAddress: string | null }) {
         <a href={ANTSEED_URL}>antseed.com</a>
         <a href={antstationHref} target="_blank" rel="noopener noreferrer">AntStation</a>
         <a href={contractHref} target="_blank" rel="noopener noreferrer">Contract</a>
-        <a href="/terms-of-service.html">Terms</a>
-        <a href="#stake">Stake</a>
+        <a href="#stake">Lock DIEM</a>
+        <a href={DIEM_TERMS_URL} target="_blank" rel="noopener noreferrer">Terms</a>
       </div>
       <div>Live on Base · v0.1</div>
     </footer>
