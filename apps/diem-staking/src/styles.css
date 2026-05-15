@@ -380,6 +380,14 @@ h1.hero-title em { font-style: italic; color: var(--brand); }
   letter-spacing: -0.4px;
 }
 .reward-summary-card.accent strong { color: var(--brand-dark); }
+.reward-summary-note {
+  margin: 12px 0 0;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 10px;
+  line-height: 1.5;
+  letter-spacing: 0.35px;
+}
 @media (max-width: 720px) {
   .reward-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
@@ -431,6 +439,7 @@ h1.hero-title em { font-style: italic; color: var(--brand); }
   margin-bottom: 14px;
 }
 .claim-note strong { color: var(--ink-soft); }
+.claim-note a { color: var(--brand-darker); font-weight: 700; text-decoration: underline; text-underline-offset: 2px; }
 .unstake-flow-card {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 250px;

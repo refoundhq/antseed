@@ -39,6 +39,7 @@ import { DAYS_PER_YEAR } from '../lib/epoch';
 type Tab = 'stake' | 'unstake' | 'claim';
 
 const DEFAULT_STAKE_AMOUNT = parseEther('10');
+const DIEM_TERMS_URL = 'https://antseed.com/terms/diem-provider-capacity-program';
 
 function formatDiemInput(value: bigint): string {
   const formatted = formatEther(value);
@@ -125,24 +126,24 @@ export function StakeCard({ diemPrice, poolAgeDays, apy }: StakeCardProps) {
     <div className="stake-wrap">
       <div className="stake-card">
         <div className="stake-head">
-          <h2>Stake &amp; earn</h2>
+          <h2>Lock DIEM</h2>
           <div className="pool">
-            Pool TVL · <strong>{pool.totalStaked != null ? fmtNum(poolDiem) : '—'} $DIEM</strong>
+            Program TVL · <strong>{pool.totalStaked != null ? fmtNum(poolDiem) : '—'} $DIEM</strong>
           </div>
         </div>
 
         <div className="epoch-ribbon">
           <div className="er-dot" />
           <div className="er-text">
-            <span className="er-lbl">Next $ANTS distribution · USDC streams live</span>
+            <span className="er-lbl">Next $ANTS epoch · USDC allocations vary</span>
             <span className="er-val">{countdown}</span>
           </div>
           <div className="er-epoch">Epoch <strong>#{epoch}</strong></div>
         </div>
 
         <div className="stake-tabs">
-          <button className={tab === 'stake' ? 'on' : ''} onClick={() => onChangeTab('stake')}>Stake</button>
-          <button className={tab === 'unstake' ? 'on' : ''} onClick={() => onChangeTab('unstake')}>Unstake</button>
+          <button className={tab === 'stake' ? 'on' : ''} onClick={() => onChangeTab('stake')}>Lock</button>
+          <button className={tab === 'unstake' ? 'on' : ''} onClick={() => onChangeTab('unstake')}>Withdraw</button>
           <button className={tab === 'claim' ? 'on' : ''} onClick={() => onChangeTab('claim')}>Claim</button>
         </div>
 
@@ -279,7 +280,7 @@ function StakePanel(props: StakePanelProps) {
   return (
     <div className="panel-v2 stake-panel-v2">
       <InputField
-        label="You stake"
+        label="You lock"
         balanceLabel="Wallet"
         balanceValue={props.isConnected ? `${fmtDiem(toDiemNumber(props.walletDiem))} $DIEM` : 'Connect'}
         amt={props.amt}
@@ -290,12 +291,12 @@ function StakePanel(props: StakePanelProps) {
 
       <div className="stake-reward-summary">
         <div className="reward-summary-head">
-          <span>Projected rewards</span>
-          <strong>All-time daily avg</strong>
+          <span>Historical estimate</span>
+          <strong>Based on past activity</strong>
         </div>
         <div className="reward-summary-grid">
           <div className="reward-summary-card primary">
-            <span>USDC / week</span>
+            <span>USDC / week*</span>
             <strong>{props.usdcPerWeek != null ? fmtUSD(props.usdcPerWeek) : '—'}</strong>
           </div>
           <div className="reward-summary-card">
@@ -307,15 +308,26 @@ function StakePanel(props: StakePanelProps) {
             <strong>{props.usdcPerYear != null ? fmtUSD(props.usdcPerYear) : '—'}</strong>
           </div>
           <div className="reward-summary-card accent">
-            <span>USDC APY</span>
+            <span>Historical rate</span>
             <strong>{fmtPct(props.apy)}</strong>
           </div>
         </div>
+        <p className="reward-summary-note">
+          *Informational only. Not a forecast, target, promise, APY, or guaranteed return.
+          Future USDC allocations may be lower or zero.
+        </p>
+      </div>
+
+      <div className="claim-note">
+        DIEM participation is experimental. USDC allocations are not guaranteed and may be zero.
+        Participation involves smart-contract risk, operator risk, token volatility, liquidity risk,
+        regulatory risk, and tax risk. By continuing, you agree to the{' '}
+        <a href={DIEM_TERMS_URL} target="_blank" rel="noopener noreferrer">DIEM Provider Capacity Program Terms</a>.
       </div>
 
       {capExceeded && (
         <div className="claim-note">
-          <strong>Over pool cap.</strong> Only {fmtDiem(toDiemNumber(capRemaining))} $DIEM of headroom remaining before the owner-set cap.
+          <strong>Over Program cap.</strong> Only {fmtDiem(toDiemNumber(capRemaining))} $DIEM of headroom remaining before the owner-set cap.
         </div>
       )}
 
@@ -340,11 +352,11 @@ function StakePanel(props: StakePanelProps) {
               props.setAmt('0');
             }}
           >
-            {stake.isPending ? 'Staking…' : `Stake ${props.amt || '0'} $DIEM →`}
+            {stake.isPending ? 'Locking…' : `Lock ${props.amt || '0'} $DIEM →`}
           </button>
         )
       ) : (
-        <ConnectCta label="Connect wallet to stake →" />
+        <ConnectCta label="Connect wallet to lock DIEM →" />
       )}
 
       {(stake.error || approve.error) && (
@@ -387,29 +399,29 @@ function UnstakePanel(props: UnstakePanelProps) {
       <div className="unstake-flow-card">
         <div className="unstake-flow-copy">
           <span className="panel-kicker">Withdraw $DIEM</span>
-          <h3>Unstake through a shared batch.</h3>
+          <h3>Withdraw through a shared batch.</h3>
           <p>
-            Unstakes move through three on-chain states. Anyone in the batch can advance
-            it, so the cost is shared instead of every staker paying alone.
+            Withdrawal requests move through three on-chain states. Anyone in the batch can advance
+            it, so the cost is shared instead of every participant paying alone.
           </p>
           <div className="unstake-timing">
             <span>Batch window · <strong>{props.minUnstakeBatchOpenSecs != null ? fmtDuration(props.minUnstakeBatchOpenSecs) : '—'}</strong></span>
             <span>Venice cooldown · <strong>{props.diemCooldownSecs != null ? fmtDuration(props.diemCooldownSecs) : '—'}</strong></span>
           </div>
         </div>
-        <ol className="unstake-steps" aria-label="Unstake flow">
+        <ol className="unstake-steps" aria-label="Withdrawal flow">
           <li><span>01</span><strong>Queued</strong><em>Join the open batch</em></li>
           <li><span>02</span><strong>Cooling</strong><em>Sent to Venice</em></li>
           <li><span>03</span><strong>Claimable</strong><em>Withdraw to wallet</em></li>
         </ol>
       </div>
 
-      {/* Input only makes sense while the user has no active unstake in flight. */}
+      {/* Input only makes sense while the user has no active withdrawal in flight. */}
       {state.status === 'none' && (
         <>
           <InputField
-            label="You unstake"
-            balanceLabel="Staked"
+            label="You withdraw"
+            balanceLabel="Locked"
             balanceValue={props.isConnected ? `${fmtDiem(stakedNum)} $DIEM` : 'Connect'}
             amt={props.amt}
             setAmt={props.setAmt}
@@ -433,10 +445,10 @@ function UnstakePanel(props: UnstakePanelProps) {
                 props.setAmt('0');
               }}
             >
-              {initiate.isPending ? 'Queuing…' : 'Request unstake →'}
+              {initiate.isPending ? 'Queuing…' : 'Request withdrawal →'}
             </button>
           ) : (
-            <ConnectCta label="Connect wallet to unstake →" />
+            <ConnectCta label="Connect wallet to withdraw →" />
           )}
           {initiate.error && (
             <div className="claim-note" style={{ color: '#c62828' }}>
@@ -486,7 +498,7 @@ function UnstakeStateView({
         'Waiting for the previous batch to finish claiming before your batch can start the cooldown. Anyone in that batch can click their Claim button to advance it.';
     } else if (waitingForWindow) {
       message =
-        'Batch is still in its open window so other stakers can join before it leaves for Venice. The counter below is the earliest time anyone can flush it — including you.';
+        'Batch is still in its open window so other participants can join before it leaves for Venice. The counter below is the earliest time anyone can flush it — including you.';
     } else {
       message =
         'Your batch is ready to be sent to Venice. Click below to start the cooldown. Anyone in your batch can do this — pay once for the whole group.';
@@ -542,7 +554,7 @@ function UnstakeStateView({
           <span className="val">{fmtDuration(remaining)}</span>
         </div>
         <p style={{ margin: '12px 0 0', fontSize: 13, color: 'var(--muted)' }}>
-          Venice's native unstake cooldown is counting down. Nothing to do — refresh when the timer hits zero.
+          Venice's native withdrawal cooldown is counting down. Nothing to do — refresh when the timer hits zero.
         </p>
       </div>
     );
@@ -555,7 +567,7 @@ function UnstakeStateView({
         <span className="val">{amountDiem} <span className="unit">$DIEM</span></span>
       </div>
       <p style={{ margin: '12px 0 14px', fontSize: 13, color: 'var(--muted)' }}>
-        Your DIEM is ready. Clicking below finalises the unstake for your whole batch in one tx — this is cheaper than everyone paying individually.
+        Your DIEM is ready. Clicking below finalises the withdrawal for your whole batch in one tx — this is cheaper than everyone paying individually.
       </p>
       <button
         className="stake-cta brand-fill"
@@ -592,27 +604,27 @@ function ClaimPanel(props: ClaimPanelProps) {
   return (
     <div className="claim-panel-v2">
       <div className="claim-intro">
-        <span className="claim-intro-kicker">Rewards destination</span>
+        <span className="claim-intro-kicker">Claims destination</span>
         <h3>Claim USDC here. Claim $ANTS in AntStation.</h3>
         <p>
-          Your wallet has two reward streams. USDC is paid by the staking contract on this
-          page; $ANTS are claimed from the AntSeed desktop app’s Payments portal.
+          Your wallet may have two allocation types. USDC is claimed from this Program page;
+          eligible $ANTS incentives are claimed from the AntSeed desktop app’s Payments portal.
         </p>
       </div>
 
       <div className="claim-destination-card usdc-destination">
         <div className="claim-destination-top">
           <span className="destination-tag">This page</span>
-          <span className="destination-type">USDC stream</span>
+          <span className="destination-type">USDC allocation</span>
         </div>
         <div className="destination-main">
           <div>
             <span className="destination-label">Claimable USDC</span>
             <strong>{pendingUsdcNum.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}</strong>
-            <span className="destination-sub">Accrues in real time · claim anytime</span>
+            <span className="destination-sub">Variable · claim when available</span>
           </div>
           <div className="mini-route" aria-hidden="true">
-            <span>staking</span>
+            <span>program</span>
             <i />
             <span>wallet</span>
           </div>
@@ -669,7 +681,7 @@ function ClaimPanel(props: ClaimPanelProps) {
         <div className="antstation-window" aria-hidden="true">
           <div className="window-bar"><span /><span /><span /></div>
           <div className="window-title">AntStation · Payments</div>
-          <div className="window-row"><span>wallet</span><strong>same as staking</strong></div>
+          <div className="window-row"><span>wallet</span><strong>same as Program</strong></div>
           <div className="window-row"><span>$ANTS</span><strong>ready</strong></div>
           <div className="window-claim">claim emissions →</div>
         </div>
@@ -775,12 +787,12 @@ function Metrics(props: {
   return (
     <div className="metrics">
       <div className="metric">
-        <div className="lbl">Total staked</div>
+        <div className="lbl">Total locked</div>
         <div className="val">{props.pool.totalStaked != null ? fmtDiemPrecise(toDiemNumber(props.pool.totalStaked)) : '—'}</div>
         <div className="delta">$DIEM</div>
       </div>
       <div className="metric">
-        <div className="lbl">USDC distributed</div>
+        <div className="lbl">USDC allocated</div>
         <div className="val">
           {props.pool.totalUsdcDistributedEver != null
             ? fmtUSD(toUsdcNumber(props.pool.totalUsdcDistributedEver))
@@ -789,14 +801,14 @@ function Metrics(props: {
         <div className="delta">all time</div>
       </div>
       <div className="metric">
-        <div className="lbl">USDC APY</div>
+        <div className="lbl">Historical rate</div>
         <div className="val" style={{ color: 'var(--brand-dark)' }}>{fmtPct(props.apy)}</div>
         <div className="delta">
-          {props.poolAgeDays != null ? `All-time avg · ${fmtNum(props.poolAgeDays, 1)}d` : 'Warming up'}
+          {props.poolAgeDays != null ? `Past activity · ${fmtNum(props.poolAgeDays, 1)}d` : 'Warming up'}
         </div>
       </div>
       <div className="metric">
-        <div className="lbl">Active stakers</div>
+        <div className="lbl">Active participants</div>
         <div className="val">{props.pool.stakerCount != null ? fmtNum(props.pool.stakerCount) : '—'}</div>
         <div className="delta">live</div>
       </div>
