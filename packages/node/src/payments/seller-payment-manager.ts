@@ -248,6 +248,37 @@ export class SellerPaymentManager {
   }
 
   /**
+   * Restore a persisted SpendingAuth after in-memory cleanup. This prevents the
+   * timeout checker from mistaking an active channel with a durable signed auth
+   * for a zero-auth zombie and closing it at the already-settled amount.
+   */
+  private _restorePersistedSpendingAuth(channel: StoredChannel): bigint | null {
+    const persistedCumulative = BigInt(channel.authMax || '0');
+    if (persistedCumulative <= 0n || !channel.latestSpendingAuthSig) {
+      return null;
+    }
+
+    this._acceptedCumulative.set(channel.sessionId, persistedCumulative);
+    this._latestAuth.set(channel.sessionId, {
+      spendingAuthSig: channel.latestSpendingAuthSig,
+      cumulativeAmount: persistedCumulative,
+      metadataHash: '',
+      metadata: channel.latestMetadata ?? '',
+    });
+    this._spent.set(channel.sessionId, BigInt(channel.tokensDelivered || '0'));
+
+    const storedReserveMax = BigInt(channel.previousConsumption || '0');
+    if (storedReserveMax > 0n) {
+      this._reserveMax.set(channel.sessionId, storedReserveMax);
+    }
+
+    this._hydratedChannelIds.delete(channel.sessionId);
+    this._notifyAcceptedUpdate(channel.sessionId, persistedCumulative);
+    debugLog(`[SellerPayment] Restored persisted SpendingAuth for ${channel.sessionId.slice(0, 18)}... cumulative=${persistedCumulative}`);
+    return persistedCumulative;
+  }
+
+  /**
    * Block until `acceptedCumulative(channelId)` reaches `target`, or `timeoutMs`
    * elapses. Returns true if the target was reached, false on timeout. Used by
    * the request handler to wait out the buyer's NeedAuth → SpendingAuth round
@@ -950,7 +981,10 @@ export class SellerPaymentManager {
     const activeChannels = this._channelStore.getActiveChannels('seller');
 
     for (const channel of activeChannels) {
-      const accepted = this._acceptedCumulative.get(channel.sessionId) ?? 0n;
+      let accepted = this._acceptedCumulative.get(channel.sessionId) ?? 0n;
+      if (accepted === 0n) {
+        accepted = this._restorePersistedSpendingAuth(channel) ?? accepted;
+      }
 
       try {
         // Validate on-chain state — evict if channel no longer exists

@@ -550,6 +550,57 @@ describe('SellerPaymentManager', () => {
     expect(manager.hasSession('nonexistent-peer')).toBe(false);
   });
 
+  it('checkTimeouts restores persisted SpendingAuth before zombie close fallback', async () => {
+    const channelId = makeChannelId(69);
+    const reserve = await buildSpendingAuth(buyerIdentity, sellerIdentity, channelId, {
+      isReserve: true,
+      reserveMaxAmount: '1000000',
+      deadline: Math.floor(Date.now() / 1000) - 1,
+    });
+    await manager.handleSpendingAuth(buyerIdentity.peerId, reserve, mux);
+
+    const auth = await buildSpendingAuth(buyerIdentity, sellerIdentity, channelId, {
+      cumulativeAmount: 300_000n,
+      cumulativeInputTokens: 10n,
+      cumulativeOutputTokens: 20n,
+      reserveMaxAmount: '1000000',
+    });
+    await manager.handleSpendingAuth(buyerIdentity.peerId, auth, mux);
+    manager.recordSpend(channelId, 300_000n);
+
+    const closeSpy = manager.channelsClient.close as ReturnType<typeof vi.fn>;
+    closeSpy.mockRejectedValueOnce(new Error('estimate failed')).mockResolvedValue('0xclose-hash');
+
+    manager.onBuyerDisconnect(buyerIdentity.peerId);
+    while (closeSpy.mock.calls.length === 0) {
+      await new Promise<void>((r) => setImmediate(r));
+    }
+    await new Promise<void>((r) => setImmediate(r));
+
+    expect(store.getChannel(channelId)!.status).toBe('active');
+    expect(manager.hasSession(buyerIdentity.peerId)).toBe(false);
+    expect(manager.getAcceptedCumulative(channelId)).toBe(0n);
+
+    vi.spyOn(manager.channelsClient, 'getSession').mockResolvedValue(
+      makeOnChainChannel(buyerIdentity, sellerIdentity, {
+        deposit: 1_000_000n,
+        settled: 0n,
+        status: 1,
+      }),
+    );
+
+    await manager.checkTimeouts();
+
+    expect(closeSpy).toHaveBeenCalledTimes(2);
+    const retryArgs = closeSpy.mock.calls[1]!;
+    expect(retryArgs[1]).toBe(channelId);
+    expect(retryArgs[2]).toBe(300_000n);
+    expect(retryArgs[3]).toBe(auth.metadata);
+    expect(retryArgs[4]).toBe(auth.spendingAuthSig);
+    expect(store.getChannel(channelId)!.status).toBe('settled');
+    expect(store.getChannel(channelId)!.settledAmount).toBe('300000');
+  });
+
   it('checkTimeouts closes zombie channels on-chain without a SpendingAuth', async () => {
     const channelId = makeChannelId(70);
     const reserve = await buildSpendingAuth(buyerIdentity, sellerIdentity, channelId, {
