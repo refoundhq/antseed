@@ -211,6 +211,27 @@ describe('SellerPaymentManager — CloseRequested handling', () => {
     expect(manager.hasSession(buyerIdentity.peerId)).toBe(true);
   });
 
+  it('drops pending top-up state after CloseRequested cleanup', async () => {
+    const channelId = makeChannelId(4);
+    await setupActiveChannel(manager, buyerIdentity, mux, channelId, 900_000n, 900_000n);
+
+    vi.spyOn(manager.channelsClient, 'topUp').mockRejectedValue(new Error('TopUpThresholdNotMet'));
+
+    const topUp = await buildSpendingAuth(buyerIdentity, channelId, {
+      isReserve: true,
+      reserveMaxAmount: '20000000',
+      salt: '0x' + '09'.repeat(32),
+    });
+    expect(await manager.handleSpendingAuth(buyerIdentity.peerId, topUp, mux)).toBe('accepted');
+    expect(manager.hasPendingTopUp(channelId)).toBe(true);
+
+    await manager.handleCloseRequested(channelId);
+
+    expect(manager.hasPendingTopUp(channelId)).toBe(false);
+    expect(manager.getEffectiveReserveMax(channelId)).toBe(0n);
+    expect(manager.hasSession(buyerIdentity.peerId)).toBe(false);
+  });
+
   it('ignores CloseRequested for unknown channels', async () => {
     const unknownChannelId = makeChannelId(99);
 

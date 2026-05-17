@@ -33,12 +33,27 @@ function makeProvider(inputUsdPerMillion: number, outputUsdPerMillion: number, o
   };
 }
 
+function makeSpmMock(overrides: Record<string, unknown> = {}): any {
+  return {
+    hasSession: () => true,
+    getChannelByPeer: () => ({ sessionId: 'session-1', authMax: '1000000' }),
+    recordSpend: vi.fn(),
+    getCumulativeSpend: () => 0n,
+    getAcceptedCumulative: () => 0n,
+    getReserveMax: () => 1_000_000n,
+    getEffectiveReserveMax() {
+      return this.getReserveMax();
+    },
+    getPaymentRequirements: () => ({ minBudgetPerRequest: '10000', suggestedAmount: '1000000' }),
+    waitForPendingAuths: async () => {},
+    awaitAcceptedAtLeast: async () => false,
+    settleSession: vi.fn(async () => {}),
+    ...overrides,
+  };
+}
+
 describe('SellerRequestHandler payment pricing selection', () => {
   it('routes GET /v1/models to the local handler even when a query string is appended', async () => {
-    // Codex CLI calls `GET /v1/models?client_version=…` at startup. The
-    // local-models fast path used to compare `request.path === "/v1/models"`,
-    // which fails once a query string is present, so the request fell through
-    // to the model-matching branch and 400'd.
     const provider = makeProvider(1, 1, {
       name: 'openai',
       services: ['gpt-5.4', 'gpt-5.5'],
@@ -53,15 +68,8 @@ describe('SellerRequestHandler payment pricing selection', () => {
     });
 
     const sentFrames: Uint8Array[] = [];
-    const conn = {
-      send(frame: Uint8Array) {
-        sentFrames.push(frame);
-      },
-    } as any;
-    const paymentMux = {
-      sendNeedAuth: vi.fn(),
-      sendPaymentRequired: vi.fn(),
-    } as any;
+    const conn = { send(frame: Uint8Array) { sentFrames.push(frame); } } as any;
+    const paymentMux = { sendNeedAuth: vi.fn(), sendPaymentRequired: vi.fn() } as any;
     const { mux } = handler.handleConnection(conn, 'b'.repeat(40), paymentMux);
 
     await mux.handleFrame({
@@ -100,11 +108,7 @@ describe('SellerRequestHandler payment pricing selection', () => {
     });
 
     const sentFrames: Uint8Array[] = [];
-    const conn = {
-      send(frame: Uint8Array) {
-        sentFrames.push(frame);
-      },
-    } as any;
+    const conn = { send(frame: Uint8Array) { sentFrames.push(frame); } } as any;
     const paymentMux = { sendNeedAuth: vi.fn(), sendPaymentRequired: vi.fn() } as any;
     const { mux } = handler.handleConnection(conn, 'b'.repeat(40), paymentMux);
 
@@ -160,28 +164,18 @@ describe('SellerRequestHandler payment pricing selection', () => {
         'content-type': 'application/json',
         'x-antseed-provider': 'openai',
       },
-      body: new TextEncoder().encode(JSON.stringify({
-        model: 'local-test',
-      })),
+      body: new TextEncoder().encode(JSON.stringify({ model: 'local-test' })),
     };
 
     const matched = handler.matchProvider(request);
-    const pricing = matched
-      ? handler.resolveProviderPricing(matched, request)
-      : undefined;
+    const pricing = matched ? handler.resolveProviderPricing(matched, request) : undefined;
 
     expect(matched?.name).toBe('openai');
-    expect(pricing).toEqual({
-      inputUsdPerMillion: 0.05,
-      outputUsdPerMillion: 0.1,
-    });
+    expect(pricing).toEqual({ inputUsdPerMillion: 0.05, outputUsdPerMillion: 0.1 });
   });
 
   it('does not add a paid auth headroom for zero-cost responses', async () => {
-    const provider = makeProvider(0, 0, {
-      name: 'free-tier',
-      services: ['local-test'],
-    });
+    const provider = makeProvider(0, 0, { name: 'free-tier', services: ['local-test'] });
     provider.handleRequest = vi.fn(async (req) => ({
       requestId: req.requestId,
       statusCode: 200,
@@ -198,16 +192,7 @@ describe('SellerRequestHandler payment pricing selection', () => {
     const sendNeedAuth = vi.fn();
     const handler = new SellerRequestHandler({
       providers: [provider],
-      sellerPaymentManager: {
-        hasSession: () => true,
-        getChannelByPeer: () => ({ sessionId: 'session-1', authMax: '1000000' }),
-        recordSpend: vi.fn(),
-        getCumulativeSpend: () => 0n,
-        getAcceptedCumulative: () => 0n,
-        getReserveMax: () => 1_000_000n,
-        getPaymentRequirements: () => ({ minBudgetPerRequest: '0', suggestedAmount: '0' }),
-        waitForPendingAuths: async () => {},
-      } as any,
+      sellerPaymentManager: makeSpmMock({ getPaymentRequirements: () => ({ minBudgetPerRequest: '0', suggestedAmount: '0' }) }),
       sessionTracker: null,
       channelsClient: {} as any,
       announcer: null,
@@ -215,40 +200,15 @@ describe('SellerRequestHandler payment pricing selection', () => {
     });
 
     const sentFrames: Uint8Array[] = [];
-    const conn = {
-      send(frame: Uint8Array) {
-        sentFrames.push(frame);
-      },
-    } as any;
-    const paymentMux = {
-      sendNeedAuth,
-      sendPaymentRequired: vi.fn(),
-    } as any;
+    const conn = { send(frame: Uint8Array) { sentFrames.push(frame); } } as any;
+    const paymentMux = { sendNeedAuth, sendPaymentRequired: vi.fn() } as any;
 
     const { mux } = handler.handleConnection(conn, 'b'.repeat(40), paymentMux);
-
-    const request: SerializedHttpRequest = {
-      requestId: 'req-zero-cost',
-      method: 'POST',
-      path: '/v1/chat/completions',
-      headers: { 'content-type': 'application/json' },
-      body: new TextEncoder().encode(JSON.stringify({ model: 'local-test' })),
-    };
-
-    await mux.handleFrame({
-      type: MessageType.HttpRequest,
-      messageId: 1,
-      payload: encodeHttpRequest(request),
-    });
+    await mux.handleFrame({ type: MessageType.HttpRequest, messageId: 1, payload: encodeHttpRequest({ requestId: 'req-zero-cost', method: 'POST', path: '/v1/chat/completions', headers: { 'content-type': 'application/json' }, body: new TextEncoder().encode(JSON.stringify({ model: 'local-test' })) }) });
 
     expect(sentFrames.length).toBeGreaterThan(0);
     expect(sendNeedAuth).toHaveBeenCalledOnce();
-    expect(sendNeedAuth).toHaveBeenCalledWith(expect.objectContaining({
-      requestId: request.requestId,
-      lastRequestCost: '0',
-      currentAcceptedCumulative: '0',
-      requiredCumulativeAmount: '0',
-    }));
+    expect(sendNeedAuth).toHaveBeenCalledWith(expect.objectContaining({ requestId: 'req-zero-cost', lastRequestCost: '0', currentAcceptedCumulative: '0', requiredCumulativeAmount: '0' }));
   });
 
   it('uses cumulative spend as NeedAuth required amount without double-counting the latest request', async () => {
@@ -256,45 +216,23 @@ describe('SellerRequestHandler payment pricing selection', () => {
       name: 'openai-responses',
       services: ['gpt-5.3-codex-spark'],
       servicePricing: {
-        'gpt-5.3-codex-spark': {
-          inputUsdPerMillion: 5,
-          outputUsdPerMillion: 30,
-          cachedInputUsdPerMillion: 1,
-        },
+        'gpt-5.3-codex-spark': { inputUsdPerMillion: 5, outputUsdPerMillion: 30, cachedInputUsdPerMillion: 1 },
       },
     });
     provider.handleRequest = vi.fn(async (req) => ({
       requestId: req.requestId,
       statusCode: 200,
       headers: { 'content-type': 'application/json' },
-      body: new TextEncoder().encode(JSON.stringify({
-        usage: {
-          prompt_tokens: 30426,
-          completion_tokens: 108,
-          prompt_tokens_details: { cached_tokens: 1920 },
-        },
-      })),
+      body: new TextEncoder().encode(JSON.stringify({ usage: { prompt_tokens: 30426, completion_tokens: 108, prompt_tokens_details: { cached_tokens: 1920 } } })),
     }));
 
     const costUsdc = 147_690n;
     let cumulativeSpend = 0n;
     const sendNeedAuth = vi.fn();
-    const recordSpend = vi.fn((_sessionId: string, cost: bigint) => {
-      cumulativeSpend += cost;
-    });
+    const recordSpend = vi.fn((_sessionId: string, cost: bigint) => { cumulativeSpend += cost; });
     const handler = new SellerRequestHandler({
       providers: [provider],
-      sellerPaymentManager: {
-        hasSession: () => true,
-        getChannelByPeer: () => ({ sessionId: 'session-1', authMax: '1000000' }),
-        recordSpend,
-        getCumulativeSpend: () => cumulativeSpend,
-        getAcceptedCumulative: () => 0n,
-        getReserveMax: () => 1_000_000n,
-        getPaymentRequirements: () => ({ minBudgetPerRequest: '10000', suggestedAmount: '1000000' }),
-        waitForPendingAuths: async () => {},
-        awaitAcceptedAtLeast: async () => true,
-      } as any,
+      sellerPaymentManager: makeSpmMock({ recordSpend, getCumulativeSpend: () => cumulativeSpend, awaitAcceptedAtLeast: async () => true }),
       sessionTracker: null,
       channelsClient: {} as any,
       announcer: null,
@@ -302,44 +240,16 @@ describe('SellerRequestHandler payment pricing selection', () => {
     });
 
     const sentFrames: Uint8Array[] = [];
-    const conn = {
-      send(frame: Uint8Array) {
-        sentFrames.push(frame);
-      },
-    } as any;
-    const paymentMux = {
-      sendNeedAuth,
-      sendPaymentRequired: vi.fn(),
-    } as any;
-
+    const conn = { send(frame: Uint8Array) { sentFrames.push(frame); } } as any;
+    const paymentMux = { sendNeedAuth, sendPaymentRequired: vi.fn() } as any;
     const { mux } = handler.handleConnection(conn, 'b'.repeat(40), paymentMux);
 
-    const request: SerializedHttpRequest = {
-      requestId: 'req-codex-cost',
-      method: 'POST',
-      path: '/v1/responses',
-      headers: { 'content-type': 'application/json' },
-      body: new TextEncoder().encode(JSON.stringify({ model: 'gpt-5.3-codex-spark' })),
-    };
-
-    await mux.handleFrame({
-      type: MessageType.HttpRequest,
-      messageId: 1,
-      payload: encodeHttpRequest(request),
-    });
+    await mux.handleFrame({ type: MessageType.HttpRequest, messageId: 1, payload: encodeHttpRequest({ requestId: 'req-codex-cost', method: 'POST', path: '/v1/responses', headers: { 'content-type': 'application/json' }, body: new TextEncoder().encode(JSON.stringify({ model: 'gpt-5.3-codex-spark' })) }) });
 
     expect(sentFrames.length).toBeGreaterThan(0);
     expect(recordSpend).toHaveBeenCalledWith('session-1', costUsdc);
     expect(sendNeedAuth).toHaveBeenCalledOnce();
-    expect(sendNeedAuth).toHaveBeenCalledWith(expect.objectContaining({
-      requestId: request.requestId,
-      lastRequestCost: costUsdc.toString(),
-      requiredCumulativeAmount: costUsdc.toString(),
-      inputTokens: '30426',
-      cachedInputTokens: '1920',
-      freshInputTokens: '28506',
-      outputTokens: '108',
-    }));
+    expect(sendNeedAuth).toHaveBeenCalledWith(expect.objectContaining({ requestId: 'req-codex-cost', lastRequestCost: costUsdc.toString(), requiredCumulativeAmount: costUsdc.toString(), inputTokens: '30426', cachedInputTokens: '1920', freshInputTokens: '28506', outputTokens: '108' }));
   });
 
   it('keeps post-response NeedAuth below the reserve ceiling when cumulative spend is still covered', async () => {
@@ -347,24 +257,14 @@ describe('SellerRequestHandler payment pricing selection', () => {
       name: 'openai-responses',
       services: ['gpt-5.3-codex-spark'],
       servicePricing: {
-        'gpt-5.3-codex-spark': {
-          inputUsdPerMillion: 5,
-          outputUsdPerMillion: 30,
-          cachedInputUsdPerMillion: 1,
-        },
+        'gpt-5.3-codex-spark': { inputUsdPerMillion: 5, outputUsdPerMillion: 30, cachedInputUsdPerMillion: 1 },
       },
     });
     provider.handleRequest = vi.fn(async (req) => ({
       requestId: req.requestId,
       statusCode: 200,
       headers: { 'content-type': 'application/json' },
-      body: new TextEncoder().encode(JSON.stringify({
-        usage: {
-          prompt_tokens: 32048,
-          completion_tokens: 136,
-          prompt_tokens_details: { cached_tokens: 1920 },
-        },
-      })),
+      body: new TextEncoder().encode(JSON.stringify({ usage: { prompt_tokens: 32048, completion_tokens: 136, prompt_tokens_details: { cached_tokens: 1920 } } })),
     }));
 
     const existingSpend = 835_714n;
@@ -375,19 +275,15 @@ describe('SellerRequestHandler payment pricing selection', () => {
     const sendNeedAuth = vi.fn();
     const handler = new SellerRequestHandler({
       providers: [provider],
-      sellerPaymentManager: {
-        hasSession: () => true,
+      sellerPaymentManager: makeSpmMock({
         getChannelByPeer: () => ({ sessionId: 'session-1', authMax: reserveMax.toString() }),
-        recordSpend: vi.fn((_sessionId: string, cost: bigint) => {
-          cumulativeSpend += cost;
-        }),
+        recordSpend: vi.fn((_sessionId: string, cost: bigint) => { cumulativeSpend += cost; }),
         getCumulativeSpend: () => cumulativeSpend,
         getAcceptedCumulative: () => existingSpend + 1n,
         getReserveMax: () => reserveMax,
         getPaymentRequirements: () => ({ minBudgetPerRequest: '10000', suggestedAmount: reserveMax.toString() }),
-        waitForPendingAuths: async () => {},
         awaitAcceptedAtLeast: async () => true,
-      } as any,
+      }),
       sessionTracker: null,
       channelsClient: {} as any,
       announcer: null,
@@ -395,61 +291,26 @@ describe('SellerRequestHandler payment pricing selection', () => {
     });
 
     const sentFrames: Uint8Array[] = [];
-    const conn = {
-      send(frame: Uint8Array) {
-        sentFrames.push(frame);
-      },
-    } as any;
-    const paymentMux = {
-      sendNeedAuth,
-      sendPaymentRequired: vi.fn(),
-    } as any;
-
+    const conn = { send(frame: Uint8Array) { sentFrames.push(frame); } } as any;
+    const paymentMux = { sendNeedAuth, sendPaymentRequired: vi.fn() } as any;
     const { mux } = handler.handleConnection(conn, 'b'.repeat(40), paymentMux);
 
-    await mux.handleFrame({
-      type: MessageType.HttpRequest,
-      messageId: 1,
-      payload: encodeHttpRequest({
-        requestId: 'req-near-reserve',
-        method: 'POST',
-        path: '/v1/responses',
-        headers: { 'content-type': 'application/json' },
-        body: new TextEncoder().encode(JSON.stringify({ model: 'gpt-5.3-codex-spark' })),
-      }),
-    });
+    await mux.handleFrame({ type: MessageType.HttpRequest, messageId: 1, payload: encodeHttpRequest({ requestId: 'req-near-reserve', method: 'POST', path: '/v1/responses', headers: { 'content-type': 'application/json' }, body: new TextEncoder().encode(JSON.stringify({ model: 'gpt-5.3-codex-spark' })) }) });
 
     expect(cumulativeAfterRequest).toBeLessThan(reserveMax);
-    expect(sendNeedAuth).toHaveBeenCalledWith(expect.objectContaining({
-      lastRequestCost: costUsdc.toString(),
-      requiredCumulativeAmount: cumulativeAfterRequest.toString(),
-    }));
+    expect(sendNeedAuth).toHaveBeenCalledWith(expect.objectContaining({ lastRequestCost: costUsdc.toString(), requiredCumulativeAmount: cumulativeAfterRequest.toString() }));
     expect(BigInt(sendNeedAuth.mock.calls[0]![0].requiredCumulativeAmount)).toBeLessThanOrEqual(reserveMax);
   });
 
   it('skips the 402 / ReserveAuth handshake when the service is free', async () => {
-    const provider = makeProvider(0, 0, {
-      name: 'free-tier',
-      services: ['local-test'],
-    });
-    provider.handleRequest = vi.fn(async (req) => ({
-      requestId: req.requestId,
-      statusCode: 200,
-      headers: { 'content-type': 'application/json' },
-      body: new TextEncoder().encode(JSON.stringify({ ok: true })),
-    }));
+    const provider = makeProvider(0, 0, { name: 'free-tier', services: ['local-test'] });
+    provider.handleRequest = vi.fn(async (req) => ({ requestId: req.requestId, statusCode: 200, headers: { 'content-type': 'application/json' }, body: new TextEncoder().encode(JSON.stringify({ ok: true })) }));
 
     const sendPaymentRequired = vi.fn();
     const sendNeedAuth = vi.fn();
     const handler = new SellerRequestHandler({
       providers: [provider],
-      // No active session — this is the "first request" condition that
-      // previously triggered 402 → ReserveAuth → on-chain reserve().
-      sellerPaymentManager: {
-        hasSession: () => false,
-        getChannelByPeer: () => undefined,
-        getPaymentRequirements: () => ({ minBudgetPerRequest: '0', suggestedAmount: '0' }),
-      } as any,
+      sellerPaymentManager: makeSpmMock({ hasSession: () => false, getChannelByPeer: () => undefined, getPaymentRequirements: () => ({ minBudgetPerRequest: '0', suggestedAmount: '0' }) }),
       sessionTracker: null,
       channelsClient: {} as any,
       announcer: null,
@@ -457,74 +318,30 @@ describe('SellerRequestHandler payment pricing selection', () => {
     });
 
     const sentFrames: Uint8Array[] = [];
-    const conn = {
-      send(frame: Uint8Array) {
-        sentFrames.push(frame);
-      },
-    } as any;
-    const paymentMux = {
-      sendNeedAuth,
-      sendPaymentRequired,
-    } as any;
-
+    const conn = { send(frame: Uint8Array) { sentFrames.push(frame); } } as any;
+    const paymentMux = { sendNeedAuth, sendPaymentRequired } as any;
     const { mux } = handler.handleConnection(conn, 'b'.repeat(40), paymentMux);
 
-    const request: SerializedHttpRequest = {
-      requestId: 'req-free-service',
-      method: 'POST',
-      path: '/v1/chat/completions',
-      headers: { 'content-type': 'application/json' },
-      body: new TextEncoder().encode(JSON.stringify({ model: 'local-test' })),
-    };
+    await mux.handleFrame({ type: MessageType.HttpRequest, messageId: 1, payload: encodeHttpRequest({ requestId: 'req-free-service', method: 'POST', path: '/v1/chat/completions', headers: { 'content-type': 'application/json' }, body: new TextEncoder().encode(JSON.stringify({ model: 'local-test' })) }) });
 
-    await mux.handleFrame({
-      type: MessageType.HttpRequest,
-      messageId: 1,
-      payload: encodeHttpRequest(request),
-    });
-
-    // Provider handled the request — not blocked by payment handshake.
     expect(provider.handleRequest).toHaveBeenCalledOnce();
-    // No 402, no PaymentRequired, no NeedAuth — free services bypass the
-    // channel handshake entirely so the seller never calls reserve().
     expect(sendPaymentRequired).not.toHaveBeenCalled();
     expect(sendNeedAuth).not.toHaveBeenCalled();
-
-    const responseFrames = sentFrames
-      .map((f) => decodeFrame(f))
-      .filter((d) => d?.message.type === MessageType.HttpResponse);
+    const responseFrames = sentFrames.map((f) => decodeFrame(f)).filter((d) => d?.message.type === MessageType.HttpResponse);
     expect(responseFrames).toHaveLength(1);
     const response = decodeHttpResponse(responseFrames[0]!.message.payload);
     expect(response.statusCode).toBe(200);
   });
 
   it('continues serving when delivered spend exactly matches the last accepted auth', async () => {
-    const provider = makeProvider(1, 1, {
-      name: 'paid-tier',
-      services: ['local-test'],
-    });
-    provider.handleRequest = vi.fn(async (req) => ({
-      requestId: req.requestId,
-      statusCode: 200,
-      headers: { 'content-type': 'application/json' },
-      body: new TextEncoder().encode(JSON.stringify({ ok: true })),
-    }));
+    const provider = makeProvider(1, 1, { name: 'paid-tier', services: ['local-test'] });
+    provider.handleRequest = vi.fn(async (req) => ({ requestId: req.requestId, statusCode: 200, headers: { 'content-type': 'application/json' }, body: new TextEncoder().encode(JSON.stringify({ ok: true })) }));
 
     const sendPaymentRequired = vi.fn();
     const sendNeedAuth = vi.fn();
     const handler = new SellerRequestHandler({
       providers: [provider],
-      sellerPaymentManager: {
-        hasSession: () => true,
-        getChannelByPeer: () => ({ sessionId: 'session-1', authMax: '1000000' }),
-        recordSpend: vi.fn(),
-        getCumulativeSpend: () => 2_184n,
-        getAcceptedCumulative: () => 2_184n,
-        getReserveMax: () => 1_000_000n,
-        getPaymentRequirements: () => ({ minBudgetPerRequest: '50000', suggestedAmount: '1000000' }),
-        waitForPendingAuths: async () => {},
-        awaitAcceptedAtLeast: async () => false,
-      } as any,
+      sellerPaymentManager: makeSpmMock({ getCumulativeSpend: () => 2_184n, getAcceptedCumulative: () => 2_184n }),
       sessionTracker: null,
       channelsClient: {} as any,
       announcer: null,
@@ -532,70 +349,30 @@ describe('SellerRequestHandler payment pricing selection', () => {
     });
 
     const sentFrames: Uint8Array[] = [];
-    const conn = {
-      send(frame: Uint8Array) {
-        sentFrames.push(frame);
-      },
-    } as any;
-    const paymentMux = {
-      sendNeedAuth,
-      sendPaymentRequired,
-    } as any;
-
+    const conn = { send(frame: Uint8Array) { sentFrames.push(frame); } } as any;
+    const paymentMux = { sendNeedAuth, sendPaymentRequired } as any;
     const { mux } = handler.handleConnection(conn, 'b'.repeat(40), paymentMux);
 
-    await mux.handleFrame({
-      type: MessageType.HttpRequest,
-      messageId: 1,
-      payload: encodeHttpRequest({
-        requestId: 'req-exactly-covered',
-        method: 'POST',
-        path: '/v1/chat/completions',
-        headers: { 'content-type': 'application/json' },
-        body: new TextEncoder().encode(JSON.stringify({ model: 'local-test' })),
-      }),
-    });
+    await mux.handleFrame({ type: MessageType.HttpRequest, messageId: 1, payload: encodeHttpRequest({ requestId: 'req-exactly-covered', method: 'POST', path: '/v1/chat/completions', headers: { 'content-type': 'application/json' }, body: new TextEncoder().encode(JSON.stringify({ model: 'local-test' })) }) });
 
     expect(provider.handleRequest).toHaveBeenCalledOnce();
     expect(sendPaymentRequired).not.toHaveBeenCalled();
     expect(sendNeedAuth).toHaveBeenCalledOnce();
-
-    const responseFrames = sentFrames
-      .map((f) => decodeFrame(f))
-      .filter((d) => d?.message.type === MessageType.HttpResponse);
+    const responseFrames = sentFrames.map((f) => decodeFrame(f)).filter((d) => d?.message.type === MessageType.HttpResponse);
     expect(responseFrames).toHaveLength(1);
     const response = decodeHttpResponse(responseFrames[0]!.message.payload);
     expect(response.statusCode).toBe(200);
   });
 
   it('stops serving when delivered spend is already at the reserve ceiling', async () => {
-    const provider = makeProvider(1, 1, {
-      name: 'paid-tier',
-      services: ['local-test'],
-    });
-    provider.handleRequest = vi.fn(async (req) => ({
-      requestId: req.requestId,
-      statusCode: 200,
-      headers: { 'content-type': 'application/json' },
-      body: new TextEncoder().encode(JSON.stringify({ ok: true })),
-    }));
+    const provider = makeProvider(1, 1, { name: 'paid-tier', services: ['local-test'] });
+    provider.handleRequest = vi.fn(async (req) => ({ requestId: req.requestId, statusCode: 200, headers: { 'content-type': 'application/json' }, body: new TextEncoder().encode(JSON.stringify({ ok: true })) }));
 
     const settleSession = vi.fn(async () => {});
     const sendPaymentRequired = vi.fn();
     const handler = new SellerRequestHandler({
       providers: [provider],
-      sellerPaymentManager: {
-        hasSession: () => true,
-        getChannelByPeer: () => ({ sessionId: 'session-1', authMax: '1000000' }),
-        recordSpend: vi.fn(),
-        getCumulativeSpend: () => 1_000_000n,
-        getAcceptedCumulative: () => 1_000_000n,
-        getReserveMax: () => 1_000_000n,
-        getPaymentRequirements: () => ({ minBudgetPerRequest: '50000', suggestedAmount: '1000000' }),
-        waitForPendingAuths: async () => {},
-        awaitAcceptedAtLeast: async () => false,
-        settleSession,
-      } as any,
+      sellerPaymentManager: makeSpmMock({ getCumulativeSpend: () => 1_000_000n, getAcceptedCumulative: () => 1_000_000n, settleSession }),
       sessionTracker: null,
       channelsClient: {} as any,
       announcer: null,
@@ -603,29 +380,11 @@ describe('SellerRequestHandler payment pricing selection', () => {
     });
 
     const sentFrames: Uint8Array[] = [];
-    const conn = {
-      send(frame: Uint8Array) {
-        sentFrames.push(frame);
-      },
-    } as any;
-    const paymentMux = {
-      sendNeedAuth: vi.fn(),
-      sendPaymentRequired,
-    } as any;
-
+    const conn = { send(frame: Uint8Array) { sentFrames.push(frame); } } as any;
+    const paymentMux = { sendNeedAuth: vi.fn(), sendPaymentRequired } as any;
     const { mux } = handler.handleConnection(conn, 'b'.repeat(40), paymentMux);
 
-    await mux.handleFrame({
-      type: MessageType.HttpRequest,
-      messageId: 1,
-      payload: encodeHttpRequest({
-        requestId: 'req-ceiling',
-        method: 'POST',
-        path: '/v1/chat/completions',
-        headers: { 'content-type': 'application/json' },
-        body: new TextEncoder().encode(JSON.stringify({ model: 'local-test' })),
-      }),
-    });
+    await mux.handleFrame({ type: MessageType.HttpRequest, messageId: 1, payload: encodeHttpRequest({ requestId: 'req-ceiling', method: 'POST', path: '/v1/chat/completions', headers: { 'content-type': 'application/json' }, body: new TextEncoder().encode(JSON.stringify({ model: 'local-test' })) }) });
 
     expect(provider.handleRequest).not.toHaveBeenCalled();
     expect(sendPaymentRequired).toHaveBeenCalledOnce();
@@ -633,39 +392,17 @@ describe('SellerRequestHandler payment pricing selection', () => {
     const response = decodeHttpResponse(decodeFrame(sentFrames[0]!)!.message.payload);
     const body = JSON.parse(new TextDecoder().decode(response.body));
     expect(response.statusCode).toBe(402);
-    expect(body).toMatchObject({
-      code: PAYMENT_CODE_CHANNEL_EXHAUSTED,
-      requiredCumulativeAmount: '1000000',
-      reserveMaxAmount: '1000000',
-    });
+    expect(body).toMatchObject({ code: PAYMENT_CODE_CHANNEL_EXHAUSTED, requiredCumulativeAmount: '1000000', reserveMaxAmount: '1000000' });
   });
 
   it('stops serving once delivered spend is ahead of the last accepted auth', async () => {
-    const provider = makeProvider(1, 1, {
-      name: 'paid-tier',
-      services: ['local-test'],
-    });
-    provider.handleRequest = vi.fn(async (req) => ({
-      requestId: req.requestId,
-      statusCode: 200,
-      headers: { 'content-type': 'application/json' },
-      body: new TextEncoder().encode(JSON.stringify({ ok: true })),
-    }));
+    const provider = makeProvider(1, 1, { name: 'paid-tier', services: ['local-test'] });
+    provider.handleRequest = vi.fn(async (req) => ({ requestId: req.requestId, statusCode: 200, headers: { 'content-type': 'application/json' }, body: new TextEncoder().encode(JSON.stringify({ ok: true })) }));
 
     const sendPaymentRequired = vi.fn();
     const handler = new SellerRequestHandler({
       providers: [provider],
-      sellerPaymentManager: {
-        hasSession: () => true,
-        getChannelByPeer: () => ({ sessionId: 'session-1', authMax: '1000000' }),
-        recordSpend: vi.fn(),
-        getCumulativeSpend: () => 2_184n,
-        getAcceptedCumulative: () => 0n,
-        getReserveMax: () => 1_000_000n,
-        getPaymentRequirements: () => ({ minBudgetPerRequest: '50000', suggestedAmount: '1000000' }),
-        waitForPendingAuths: async () => {},
-        awaitAcceptedAtLeast: async () => false,
-      } as any,
+      sellerPaymentManager: makeSpmMock({ getCumulativeSpend: () => 2_184n, getAcceptedCumulative: () => 0n }),
       sessionTracker: null,
       channelsClient: {} as any,
       announcer: null,
@@ -673,36 +410,15 @@ describe('SellerRequestHandler payment pricing selection', () => {
     });
 
     const sentFrames: Uint8Array[] = [];
-    const conn = {
-      send(frame: Uint8Array) {
-        sentFrames.push(frame);
-      },
-    } as any;
-    const paymentMux = {
-      sendNeedAuth: vi.fn(),
-      sendPaymentRequired,
-    } as any;
-
+    const conn = { send(frame: Uint8Array) { sentFrames.push(frame); } } as any;
+    const paymentMux = { sendNeedAuth: vi.fn(), sendPaymentRequired } as any;
     const { mux } = handler.handleConnection(conn, 'b'.repeat(40), paymentMux);
 
-    const request: SerializedHttpRequest = {
-      requestId: 'req-exhausted-budget',
-      method: 'POST',
-      path: '/v1/chat/completions',
-      headers: { 'content-type': 'application/json' },
-      body: new TextEncoder().encode(JSON.stringify({ model: 'local-test' })),
-    };
-
-    await mux.handleFrame({
-      type: MessageType.HttpRequest,
-      messageId: 1,
-      payload: encodeHttpRequest(request),
-    });
+    await mux.handleFrame({ type: MessageType.HttpRequest, messageId: 1, payload: encodeHttpRequest({ requestId: 'req-exhausted-budget', method: 'POST', path: '/v1/chat/completions', headers: { 'content-type': 'application/json' }, body: new TextEncoder().encode(JSON.stringify({ model: 'local-test' })) }) });
 
     expect(provider.handleRequest).not.toHaveBeenCalled();
     expect(sendPaymentRequired).toHaveBeenCalledOnce();
     expect(sentFrames).toHaveLength(1);
-
     const decoded = decodeFrame(sentFrames[0]!);
     expect(decoded?.message.type).toBe(MessageType.HttpResponse);
     const response = decodeHttpResponse(decoded!.message.payload);
@@ -710,34 +426,20 @@ describe('SellerRequestHandler payment pricing selection', () => {
   });
 
   it('closes and flags the channel when unsigned delivered spend exceeds the reserve ceiling', async () => {
-    const provider = makeProvider(1, 1, {
-      name: 'paid-tier',
-      services: ['local-test'],
-    });
-    provider.handleRequest = vi.fn(async (req) => ({
-      requestId: req.requestId,
-      statusCode: 200,
-      headers: { 'content-type': 'application/json' },
-      body: new TextEncoder().encode(JSON.stringify({ ok: true })),
-    }));
+    const provider = makeProvider(1, 1, { name: 'paid-tier', services: ['local-test'] });
+    provider.handleRequest = vi.fn(async (req) => ({ requestId: req.requestId, statusCode: 200, headers: { 'content-type': 'application/json' }, body: new TextEncoder().encode(JSON.stringify({ ok: true })) }));
 
     const sendPaymentRequired = vi.fn();
     const sendNeedAuth = vi.fn();
     const settleSession = vi.fn(async () => {});
     const handler = new SellerRequestHandler({
       providers: [provider],
-      sellerPaymentManager: {
-        hasSession: () => true,
+      sellerPaymentManager: makeSpmMock({
         getChannelByPeer: () => ({ sessionId: 'session-1', authMax: '950001' }),
-        recordSpend: vi.fn(),
         getCumulativeSpend: () => 1_000_001n,
         getAcceptedCumulative: () => 950_001n,
-        getReserveMax: () => 1_000_000n,
-        getPaymentRequirements: () => ({ minBudgetPerRequest: '50000', suggestedAmount: '1000000' }),
-        waitForPendingAuths: async () => {},
-        awaitAcceptedAtLeast: async () => false,
         settleSession,
-      } as any,
+      }),
       sessionTracker: null,
       channelsClient: {} as any,
       announcer: null,
@@ -745,53 +447,57 @@ describe('SellerRequestHandler payment pricing selection', () => {
     });
 
     const sentFrames: Uint8Array[] = [];
-    const conn = {
-      send(frame: Uint8Array) {
-        sentFrames.push(frame);
-      },
-    } as any;
-    const paymentMux = {
-      sendNeedAuth,
-      sendPaymentRequired,
-    } as any;
-
+    const conn = { send(frame: Uint8Array) { sentFrames.push(frame); } } as any;
+    const paymentMux = { sendNeedAuth, sendPaymentRequired } as any;
     const { mux } = handler.handleConnection(conn, 'b'.repeat(40), paymentMux);
 
-    const request: SerializedHttpRequest = {
-      requestId: 'req-near-ceiling',
-      method: 'POST',
-      path: '/v1/chat/completions',
-      headers: { 'content-type': 'application/json' },
-      body: new TextEncoder().encode(JSON.stringify({ model: 'local-test' })),
-    };
-
-    await mux.handleFrame({
-      type: MessageType.HttpRequest,
-      messageId: 1,
-      payload: encodeHttpRequest(request),
-    });
+    await mux.handleFrame({ type: MessageType.HttpRequest, messageId: 1, payload: encodeHttpRequest({ requestId: 'req-near-ceiling', method: 'POST', path: '/v1/chat/completions', headers: { 'content-type': 'application/json' }, body: new TextEncoder().encode(JSON.stringify({ model: 'local-test' })) }) });
 
     expect(provider.handleRequest).not.toHaveBeenCalled();
     expect(sendNeedAuth).not.toHaveBeenCalled();
     expect(settleSession).toHaveBeenCalledOnce();
     expect(settleSession.mock.calls[0]?.[0]).toBe('b'.repeat(40));
     expect(settleSession.mock.calls[0]?.[1]?.settleOnly).not.toBe(true);
-
-    expect(sendPaymentRequired).toHaveBeenCalledWith(expect.objectContaining({
-      code: PAYMENT_CODE_CHANNEL_EXHAUSTED,
-      requiredCumulativeAmount: '1000001',
-      reserveMaxAmount: '1000000',
-    }));
-
+    expect(sendPaymentRequired).toHaveBeenCalledWith(expect.objectContaining({ code: PAYMENT_CODE_CHANNEL_EXHAUSTED, requiredCumulativeAmount: '1000001', reserveMaxAmount: '1000000' }));
     const decoded = decodeFrame(sentFrames[0]!);
     expect(decoded?.message.type).toBe(MessageType.HttpResponse);
     const response = decodeHttpResponse(decoded!.message.payload);
     expect(response.statusCode).toBe(402);
     const body = JSON.parse(new TextDecoder().decode(response.body));
-    expect(body).toMatchObject({
-      code: PAYMENT_CODE_CHANNEL_EXHAUSTED,
-      requiredCumulativeAmount: '1000001',
-      reserveMaxAmount: '1000000',
+    expect(body).toMatchObject({ code: PAYMENT_CODE_CHANNEL_EXHAUSTED, requiredCumulativeAmount: '1000001', reserveMaxAmount: '1000000' });
+  });
+
+  it('continues serving when spend reached the on-chain ceiling but a higher topUp is pending', async () => {
+    const provider = makeProvider(1, 1, { name: 'paid-tier', services: ['local-test'] });
+    provider.handleRequest = vi.fn(async (req) => ({ requestId: req.requestId, statusCode: 200, headers: { 'content-type': 'application/json' }, body: new TextEncoder().encode(JSON.stringify({ ok: true })) }));
+
+    const sendPaymentRequired = vi.fn();
+    const sendNeedAuth = vi.fn();
+    const handler = new SellerRequestHandler({
+      providers: [provider],
+      sellerPaymentManager: makeSpmMock({
+        getCumulativeSpend: () => 1_000_000n,
+        getAcceptedCumulative: () => 1_000_000n,
+        getReserveMax: () => 1_000_000n,
+        getEffectiveReserveMax: () => 2_000_000n,
+      }),
+      sessionTracker: null,
+      channelsClient: {} as any,
+      announcer: null,
+      emit: () => false,
     });
+
+    const sentFrames: Uint8Array[] = [];
+    const conn = { send(frame: Uint8Array) { sentFrames.push(frame); } } as any;
+    const paymentMux = { sendNeedAuth, sendPaymentRequired } as any;
+    const { mux } = handler.handleConnection(conn, 'b'.repeat(40), paymentMux);
+
+    await mux.handleFrame({ type: MessageType.HttpRequest, messageId: 1, payload: encodeHttpRequest({ requestId: 'req-pending-topup', method: 'POST', path: '/v1/chat/completions', headers: { 'content-type': 'application/json' }, body: new TextEncoder().encode(JSON.stringify({ model: 'local-test' })) }) });
+
+    expect(provider.handleRequest).toHaveBeenCalledOnce();
+    expect(sendPaymentRequired).not.toHaveBeenCalled();
+    expect(sendNeedAuth).toHaveBeenCalledOnce();
+    const response = decodeHttpResponse(decodeFrame(sentFrames[0]!)!.message.payload);
+    expect(response.statusCode).toBe(200);
   });
 });

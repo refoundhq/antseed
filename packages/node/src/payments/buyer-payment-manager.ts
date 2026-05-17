@@ -28,9 +28,11 @@ import { estimateCostFromBytes, computeCostUsdc, type ServicePricing } from './p
 
 /** Default tolerance: accept seller claims up to 1.4x buyer's estimate. */
 const DEFAULT_COST_TOLERANCE = 1.4;
-/** Fraction of reserve ceiling at which to signal a top-up is needed. */
-/** Must match or exceed contract's TOP_UP_SETTLED_THRESHOLD_BPS (85%). */
-const DEFAULT_TOPUP_THRESHOLD = 0.85;
+/** Fraction of reserve ceiling at which to signal a top-up is needed.
+ *  Trigger well before the contract's TOP_UP_SETTLED_THRESHOLD_BPS (85%)
+ *  so that by the time the seller calls topUp() on-chain, enough has been
+ *  settled to pass the threshold check. */
+const DEFAULT_TOPUP_THRESHOLD = 0.65;
 
 export interface BuyerPaymentConfig {
   rpcUrl: string;
@@ -256,37 +258,7 @@ export class BuyerPaymentManager {
 
     const currentCumulative = this._cumulativeAmount.get(sellerPeerId) ?? BigInt(session.authMax);
     let maxSignable = this._maxSignable(sellerPeerId);
-
-    // Overdraft-window unblock: when the buyer has already signed up to
-    // `verified + maxPerRequest` and the seller returned 402 because `spent`
-    // caught up, advance `verifiedCost` to the current signed cumulative so
-    // the window reopens. The buyer has already committed to pay
-    // `currentCumulative` via the signed SpendingAuth, so the seller can
-    // already claim that much on-chain — advancing verified to match doesn't
-    // expose new funds, it just reclaims overdraft headroom.
-    //
-    // SECURITY: the trust anchor here is `currentCumulative`, NOT the
-    // seller-supplied `targetCumulative`. A malicious seller could set
-    // `requiredCumulativeAmount` in the 402 body to the full reserve ceiling
-    // (pretending it spent that much) in an attempt to drain the channel in
-    // one signature. We defend by only ever using `targetCumulative` as a
-    // *destination hint* bounded by `maxSignable = verifiedCost +
-    // maxPerRequestUsdc`. Per-request cost validation still happens
-    // tolerance-checked in `handleNeedAuth`; nothing in the 402 body feeds
-    // `verifiedCost`. The worst a seller can extract per 402 round trip is
-    // one `maxPerRequestUsdc` window beyond what the buyer already signed —
-    // identical to the non-catchup trust model before this PR.
-    if (maxSignable <= currentCumulative) {
-      const previousVerified = this._verifiedCost.get(sellerPeerId) ?? 0n;
-      if (currentCumulative > previousVerified) {
-        this._verifiedCost.set(sellerPeerId, currentCumulative);
-        maxSignable = this._maxSignable(sellerPeerId);
-        debugLog(
-          `[BuyerPayment] extendCurrentSpendingAuth: advanced verifiedCost ${previousVerified} → ${currentCumulative} ` +
-          `to unblock overdraft window for ${sellerPeerId.slice(0, 12)}...`,
-        );
-      }
-    }
+    maxSignable = this._reopenOverdraftWindowIfCollapsed(sellerPeerId, currentCumulative, maxSignable, 'extendCurrentSpendingAuth');
 
     const ceiling = this._getCeiling(sellerPeerId);
     // Prefer the seller-supplied target when present — a raw
@@ -297,13 +269,13 @@ export class BuyerPaymentManager {
       ? targetCumulative
       : minAdvance;
 
-    if (requestedAmount > maxSignable && maxSignable >= ceiling) {
-      await this.topUpReserve(sellerPeerId, paymentMux);
-      maxSignable = this._maxSignable(sellerPeerId);
-    }
-
     const nextCumulative = requestedAmount < maxSignable ? requestedAmount : maxSignable;
+    const extendNeedsTopUp = this._needsCeilingAdvance(requestedAmount, maxSignable, ceiling);
     if (nextCumulative <= currentCumulative) {
+      // Nothing to sign at current ceiling — try topUp anyway for next round
+      if (extendNeedsTopUp) {
+        await this._topUpAfterSpendAuthBestEffort(sellerPeerId, paymentMux, 'extendCurrentSpendingAuth');
+      }
       debugWarn(
         `[BuyerPayment] Cannot extend active session for ${sellerPeerId.slice(0, 12)}... ` +
         `(current=${currentCumulative} maxSignable=${maxSignable} target=${targetCumulative ?? 'n/a'})`,
@@ -312,30 +284,13 @@ export class BuyerPaymentManager {
     }
 
     const currentMeta = this._metadata.get(sellerPeerId) ?? ZERO_METADATA;
-    const metadataHashHex = computeMetadataHash(currentMeta);
-    const encodedMetadata = encodeMetadata(currentMeta);
+    await this._sendUpdatedSpendingAuth(session, sellerPeerId, nextCumulative, currentMeta, paymentMux);
 
-    const metadataMsg: SpendingAuthMessage = {
-      channelId: session.sessionId,
-      cumulativeAmount: nextCumulative,
-      metadataHash: metadataHashHex,
-    };
-    const spendingAuthSig = await signSpendingAuth(this._signer, this._channelsDomain, metadataMsg);
-
-    this._cumulativeAmount.set(sellerPeerId, nextCumulative);
-    this._channelStore.upsertChannel({
-      ...session,
-      authMax: nextCumulative.toString(),
-      updatedAt: Date.now(),
-    });
-
-    paymentMux.sendSpendingAuth({
-      channelId: session.sessionId,
-      cumulativeAmount: nextCumulative.toString(),
-      metadataHash: metadataHashHex,
-      metadata: encodedMetadata,
-      spendingAuthSig,
-    });
+    // Send topUp AFTER the SpendingAuth so the seller processes the higher
+    // cumulative first, meeting the on-chain settle threshold for topUp.
+    if (extendNeedsTopUp) {
+      await this._topUpAfterSpendAuthBestEffort(sellerPeerId, paymentMux, 'extendCurrentSpendingAuth');
+    }
 
     return session.sessionId;
   }
@@ -374,6 +329,89 @@ export class BuyerPaymentManager {
     });
 
     return session.sessionId;
+  }
+
+  private _reopenOverdraftWindowIfCollapsed(
+    sellerPeerId: string,
+    currentCumulative: bigint,
+    maxSignable: bigint,
+    context: 'extendCurrentSpendingAuth' | 'handleNeedAuth',
+  ): bigint {
+    // Overdraft-window unblock: when the buyer has already signed up to
+    // `verified + maxPerRequest` and the seller returned 402 because `spent`
+    // caught up, advance `verifiedCost` to the current signed cumulative so
+    // the window reopens. The buyer has already committed to pay
+    // `currentCumulative` via the signed SpendingAuth, so the seller can
+    // already claim that much on-chain — advancing verified to match doesn't
+    // expose new funds, it just reclaims overdraft headroom.
+    //
+    // SECURITY: the trust anchor here is `currentCumulative`, NOT any
+    // seller-supplied target. A malicious seller could overstate required
+    // spend in a 402 / NeedAuth path in an attempt to drain the reserve. We
+    // defend by only advancing verifiedCost to the amount the buyer has
+    // already signed. Seller-provided values remain destination hints bounded
+    // by `verifiedCost + maxPerRequestUsdc` and are never used to mint new
+    // trust directly.
+    if (maxSignable > currentCumulative) return maxSignable;
+
+    const previousVerified = this._verifiedCost.get(sellerPeerId) ?? 0n;
+    if (currentCumulative <= previousVerified) return maxSignable;
+
+    this._verifiedCost.set(sellerPeerId, currentCumulative);
+    const reopened = this._maxSignable(sellerPeerId);
+    debugLog(
+      `[BuyerPayment] ${context}: advanced verifiedCost ${previousVerified} → ${currentCumulative} ` +
+      `to unblock overdraft window for ${sellerPeerId.slice(0, 12)}...`,
+    );
+    return reopened;
+  }
+
+  private _needsCeilingAdvance(requestedAmount: bigint, maxSignable: bigint, ceiling: bigint): boolean {
+    return requestedAmount > maxSignable && maxSignable >= ceiling;
+  }
+
+  private async _sendUpdatedSpendingAuth(
+    session: StoredChannel,
+    sellerPeerId: string,
+    cumulativeAmount: bigint,
+    metadata: SpendingAuthMetadata,
+    paymentMux: PaymentMux,
+  ): Promise<void> {
+    const metadataHashHex = computeMetadataHash(metadata);
+    const encodedMetadata = encodeMetadata(metadata);
+    const metadataMsg: SpendingAuthMessage = {
+      channelId: session.sessionId,
+      cumulativeAmount,
+      metadataHash: metadataHashHex,
+    };
+    const spendingAuthSig = await signSpendingAuth(this._signer, this._channelsDomain, metadataMsg);
+
+    this._cumulativeAmount.set(sellerPeerId, cumulativeAmount);
+    this._channelStore.upsertChannel({
+      ...session,
+      authMax: cumulativeAmount.toString(),
+      updatedAt: Date.now(),
+    });
+
+    paymentMux.sendSpendingAuth({
+      channelId: session.sessionId,
+      cumulativeAmount: cumulativeAmount.toString(),
+      metadataHash: metadataHashHex,
+      metadata: encodedMetadata,
+      spendingAuthSig,
+    });
+  }
+
+  private async _topUpAfterSpendAuthBestEffort(
+    sellerPeerId: string,
+    paymentMux: PaymentMux,
+    context: 'extendCurrentSpendingAuth' | 'handleNeedAuth',
+  ): Promise<void> {
+    try {
+      await this.topUpReserve(sellerPeerId, paymentMux);
+    } catch (err) {
+      debugWarn(`[BuyerPayment] ${context}: topUpReserve failed: ${err instanceof Error ? err.message : err}`);
+    }
   }
 
   // ── Spending Authorization ────────────────────────────────────
@@ -855,27 +893,38 @@ export class BuyerPaymentManager {
     // This prevents a malicious seller from claiming a small cost but requesting the full reserve.
     let maxSignable = this._maxSignable(sellerPeerId);
     const ceiling = this._getCeiling(sellerPeerId);
-    if (requiredCumulativeAmount > maxSignable && maxSignable >= ceiling) {
-      try {
-        await this.topUpReserve(sellerPeerId, paymentMux);
-      } catch (err) {
-        debugWarn(`[BuyerPayment] NeedAuth: topUpReserve failed: ${err instanceof Error ? err.message : err}`);
+    let needsTopUp = this._needsCeilingAdvance(requiredCumulativeAmount, maxSignable, ceiling);
+    if (maxSignable <= currentCumulative && !needsTopUp) {
+      maxSignable = this._reopenOverdraftWindowIfCollapsed(sellerPeerId, currentCumulative, maxSignable, 'handleNeedAuth');
+      needsTopUp = this._needsCeilingAdvance(requiredCumulativeAmount, maxSignable, ceiling);
+      if (maxSignable <= currentCumulative && !needsTopUp) {
+        debugWarn(
+          `[BuyerPayment] NeedAuth: maxSignable=${maxSignable} <= currentCumulative=${currentCumulative} — overdraft limit reached`,
+        );
+        return;
       }
-      maxSignable = this._maxSignable(sellerPeerId);
     }
-    if (maxSignable <= currentCumulative) {
+
+    // When a topUp is needed, first sign at the current ceiling so the seller
+    // has a high-enough settled amount to pass the on-chain TopUpThresholdNotMet
+    // check (contract requires 85% of deposit to be settleable before topUp).
+    // We cap at the old ceiling here; the topUp is sent AFTER so the seller
+    // processes the SpendingAuth first, then the topUp with adequate settle amount.
+    const effectiveAmount = needsTopUp
+      ? (maxSignable > currentCumulative ? maxSignable : currentCumulative)
+      : (requiredCumulativeAmount < maxSignable ? requiredCumulativeAmount : maxSignable);
+    if (effectiveAmount <= currentCumulative) {
+      // Nothing to sign — trigger topUp anyway to extend ceiling for next round
+      if (needsTopUp) {
+        await this._topUpAfterSpendAuthBestEffort(sellerPeerId, paymentMux, 'handleNeedAuth');
+      }
       debugWarn(
-        `[BuyerPayment] NeedAuth: maxSignable=${maxSignable} <= currentCumulative=${currentCumulative} — overdraft limit reached`,
+        `[BuyerPayment] NeedAuth: effectiveAmount=${effectiveAmount} <= currentCumulative=${currentCumulative} — cannot advance`,
       );
       return;
     }
 
-    const effectiveAmount = requiredCumulativeAmount < maxSignable ? requiredCumulativeAmount : maxSignable;
-
     debugLog(`[BuyerPayment] NeedAuth: channel=${session.sessionId.slice(0, 18)}... required=${requiredCumulativeAmount} effective=${effectiveAmount}`);
-
-    // Update cumulative amount
-    this._cumulativeAmount.set(sellerPeerId, effectiveAmount);
 
     // Advance cumulative metadata. requestCount always increments so the
     // on-chain metadata stays consistent even when older sellers omit token
@@ -888,37 +937,20 @@ export class BuyerPaymentManager {
     };
     this._metadata.set(sellerPeerId, newMeta);
 
-    // Sign SpendingAuth with the effective amount and updated metadata
-    const metadataHashHex = computeMetadataHash(newMeta);
-    const encodedMetadata = encodeMetadata(newMeta);
-
-    const channelsDomain = this._channelsDomain;
-    const metadataMsg: SpendingAuthMessage = {
-      channelId: session.sessionId,
-      cumulativeAmount: effectiveAmount,
-      metadataHash: metadataHashHex,
-    };
-    const spendingAuthSig = await signSpendingAuth(this._signer, channelsDomain, metadataMsg);
-
-    // Persist updated values
-    this._channelStore.upsertChannel({
-      ...session,
-      authMax: effectiveAmount.toString(),
-      updatedAt: Date.now(),
-    });
-
     // Send via PaymentMux
     try {
-      paymentMux.sendSpendingAuth({
-        channelId: session.sessionId,
-        cumulativeAmount: effectiveAmount.toString(),
-        metadataHash: metadataHashHex,
-        metadata: encodedMetadata,
-        spendingAuthSig,
-      });
+      await this._sendUpdatedSpendingAuth(session, sellerPeerId, effectiveAmount, newMeta, paymentMux);
       debugLog(`[BuyerPayment] NeedAuth responded: new cumulativeAmount=${effectiveAmount}`);
     } catch {
       debugLog(`[BuyerPayment] NeedAuth: connection closed before SpendingAuth could be sent`);
+    }
+
+    // Send topUp AFTER the SpendingAuth so the seller processes the higher
+    // cumulative first — this ensures the on-chain settle amount meets the
+    // contract's TopUpThresholdNotMet requirement (85% of deposit must be
+    // settleable before topUp is allowed).
+    if (needsTopUp) {
+      await this._topUpAfterSpendAuthBestEffort(sellerPeerId, paymentMux, 'handleNeedAuth');
     }
   }
 
