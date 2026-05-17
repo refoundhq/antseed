@@ -292,6 +292,80 @@ describe('SellerPaymentManager', () => {
     expect(topUpSpy.mock.calls[1]?.[5]).toBe(3_000_000n);
   });
 
+  it('rejects a top-up that fails because buyer deposits are insufficient', async () => {
+    const channelId = makeChannelId(103);
+
+    const reservePayload = await buildSpendingAuth(buyerIdentity, sellerIdentity, channelId, {
+      isReserve: true,
+      reserveMaxAmount: '1000000',
+    });
+    await manager.handleSpendingAuth(buyerIdentity.peerId, reservePayload, mux);
+
+    const auth900k = await buildSpendingAuth(buyerIdentity, sellerIdentity, channelId, {
+      cumulativeAmount: 900_000n,
+      reserveMaxAmount: '1000000',
+    });
+    await manager.handleSpendingAuth(buyerIdentity.peerId, auth900k, mux);
+    manager.recordSpend(channelId, 900_000n);
+
+    vi.spyOn(manager.channelsClient, 'topUp').mockRejectedValue(new Error('execution reverted: InsufficientBalance'));
+
+    const topUp2m = await buildSpendingAuth(buyerIdentity, sellerIdentity, channelId, {
+      isReserve: true,
+      reserveMaxAmount: '2000000',
+      salt: '0x' + '05'.repeat(32),
+    });
+
+    expect(await manager.handleSpendingAuth(buyerIdentity.peerId, topUp2m, mux)).toBe('rejected');
+    expect(manager.hasPendingTopUp(channelId)).toBe(false);
+    expect(manager.getEffectiveReserveMax(channelId)).toBe(1_000_000n);
+    expect(manager.getReserveMax(channelId)).toBe(1_000_000n);
+  });
+
+  it('rejects an over-ceiling SpendingAuth if the deferred top-up retry fails permanently', async () => {
+    const channelId = makeChannelId(104);
+
+    const reservePayload = await buildSpendingAuth(buyerIdentity, sellerIdentity, channelId, {
+      isReserve: true,
+      reserveMaxAmount: '1000000',
+    });
+    await manager.handleSpendingAuth(buyerIdentity.peerId, reservePayload, mux);
+
+    const auth900k = await buildSpendingAuth(buyerIdentity, sellerIdentity, channelId, {
+      cumulativeAmount: 900_000n,
+      reserveMaxAmount: '1000000',
+    });
+    await manager.handleSpendingAuth(buyerIdentity.peerId, auth900k, mux);
+    manager.recordSpend(channelId, 900_000n);
+
+    const topUpSpy = vi.spyOn(manager.channelsClient, 'topUp')
+      .mockRejectedValueOnce(new Error('TopUpThresholdNotMet'))
+      .mockRejectedValueOnce(new Error('execution reverted: InsufficientBalance'));
+
+    const topUp2m = await buildSpendingAuth(buyerIdentity, sellerIdentity, channelId, {
+      isReserve: true,
+      reserveMaxAmount: '2000000',
+      salt: '0x' + '06'.repeat(32),
+    });
+    expect(await manager.handleSpendingAuth(buyerIdentity.peerId, topUp2m, mux)).toBe('accepted');
+    expect(manager.hasPendingTopUp(channelId)).toBe(true);
+
+    const overCeiling = await buildSpendingAuth(buyerIdentity, sellerIdentity, channelId, {
+      cumulativeAmount: 1_500_000n,
+      reserveMaxAmount: '2000000',
+    });
+    delete overCeiling.reserveSalt;
+    delete overCeiling.reserveMaxAmount;
+    delete overCeiling.reserveDeadline;
+    expect(await manager.handleSpendingAuth(buyerIdentity.peerId, overCeiling, mux)).toBe('rejected');
+
+    expect(topUpSpy).toHaveBeenCalledTimes(2);
+    expect(manager.hasPendingTopUp(channelId)).toBe(false);
+    expect(manager.getReserveMax(channelId)).toBe(1_000_000n);
+    expect(manager.getEffectiveReserveMax(channelId)).toBe(1_000_000n);
+    expect(manager.getAcceptedCumulative(channelId)).toBe(900_000n);
+  });
+
   it('serializes a burst of concurrent SpendingAuth updates and ends at the latest cumulative amount', async () => {
     const channelId = makeChannelId(101);
 
