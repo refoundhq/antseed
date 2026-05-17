@@ -587,6 +587,59 @@ describe('BuyerPaymentManager', () => {
     expect(reserveSecond.reserveMaxAmount).toBe('2000000');
   });
 
+  it('keeps expensive concurrent NeedAuth waves monotonic under multiple conversations on one channel', async () => {
+    const expensivePricing = { inputUsdPerMillion: 10, outputUsdPerMillion: 100 };
+
+    store.close();
+    store = new ChannelStore(tempDir);
+    manager = new BuyerPaymentManager(
+      identity,
+      makeConfig(tempDir, { maxReserveAmountUsdc: 1_000_000n, maxPerRequestUsdc: 500_000n }),
+      store,
+    );
+    manager.setSigner(Wallet.createRandom());
+    mux = createMockPaymentMux();
+
+    const sellerPeerId = fakePeerId('seller-concurrent-expensive-conversations');
+    const channelId = await manager.authorizeSpending(sellerPeerId, mux, 10_000n, expensivePricing);
+
+    (manager as unknown as { _verifiedCost: Map<string, bigint> })._verifiedCost.set(sellerPeerId, 950_000n);
+    mux.sentSpendingAuths.length = 0;
+
+    const payload = {
+      channelId,
+      requiredCumulativeAmount: '1100000',
+      currentAcceptedCumulative: '950000',
+      deposit: '1000000',
+      lastRequestCost: '950000',
+      inputTokens: '50000',
+      freshInputTokens: '50000',
+      outputTokens: '4500',
+      cachedInputTokens: '0',
+    } as const;
+
+    await Promise.all([
+      manager.handleNeedAuth(sellerPeerId, payload, mux),
+      manager.handleNeedAuth(sellerPeerId, payload, mux),
+      manager.handleNeedAuth(sellerPeerId, payload, mux),
+      manager.handleNeedAuth(sellerPeerId, payload, mux),
+      manager.handleNeedAuth(sellerPeerId, payload, mux),
+    ]);
+
+    const cumulatives = mux.sentSpendingAuths
+      .map((message) => message as Record<string, unknown>)
+      .map((message) => BigInt(message.cumulativeAmount as string));
+    const reserveRaises = mux.sentSpendingAuths
+      .map((message) => message as Record<string, unknown>)
+      .filter((message) => message.reserveMaxAmount != null)
+      .map((message) => BigInt(message.reserveMaxAmount as string));
+
+    expect(cumulatives.every((value) => value >= 1_000_000n)).toBe(true);
+    expect(reserveRaises.every((value) => value >= 2_000_000n)).toBe(true);
+    expect(manager.getCumulativeAmount(sellerPeerId)).toBe(1_000_000n);
+    expect(manager.getReserveCeiling(sellerPeerId)).toBeGreaterThanOrEqual(2_000_000n);
+  });
+
   it('handleNeedAuth allows more after verified cost increases', async () => {
     const sellerPeerId = fakePeerId('seller-needauth-v');
     const channelId = await manager.authorizeSpending(sellerPeerId, mux, 10_000n, TEST_PRICING);
