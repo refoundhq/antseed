@@ -20,6 +20,7 @@ import { setupShutdownHandler } from '../../shutdown.js'
 import { loadProviderPlugin, buildPluginConfig, getPackageVersions } from '../../../plugins/loader.js'
 import { ensurePluginsUpToDate } from '../../../plugins/drift.js'
 import { resolveEffectiveSellerConfig, type SellerRuntimeOverrides } from '../../../config/effective.js'
+import { ensureDerivedIdentityDisplayName } from '../../../config/identity-display-name.js'
 import type { SellerCLIConfig } from '../../../config/types.js'
 import { AntAgentProvider, loadAntAgent, type AntAgentDefinition } from '@antseed/ant-agent'
 import { resolvePluginPackage } from '../../../plugins/registry.js'
@@ -315,6 +316,11 @@ export function registerSellerStartCommand(sellerCmd: Command): void {
     .action(async (options) => {
       const globalOpts = getGlobalOptions(sellerCmd)
       const config = await loadConfig(globalOpts.config)
+      await ensureDerivedIdentityDisplayName({
+        config,
+        configPath: globalOpts.config,
+        dataDir: globalOpts.dataDir,
+      })
       let baseRpcUrlOverride: string | undefined
       try {
         baseRpcUrlOverride = resolveBaseRpcUrlOverride({

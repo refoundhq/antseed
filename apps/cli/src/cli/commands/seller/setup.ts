@@ -6,11 +6,12 @@ import { loadOrCreateIdentity } from '@antseed/node';
 import { checkSellerReadiness } from '@antseed/node/payments';
 import { getGlobalOptions } from '../types.js';
 import { loadConfig, saveConfig } from '../../../config/loader.js';
+import { ensureDerivedIdentityDisplayName } from '../../../config/identity-display-name.js';
 import { assertValidConfig } from '../../../config/validation.js';
 import { TRUSTED_PLUGINS } from '../../../plugins/registry.js';
 import { installPlugin } from '../../../plugins/manager.js';
-import type { SellerProviderConfig, SellerServiceConfig } from '../../../config/types.js';
-import { createIdentityClient, createStakingClient } from '../../payment-utils.js';
+import type { AntseedConfig, SellerProviderConfig, SellerServiceConfig } from '../../../config/types.js';
+import { createIdentityClient, createStakingClient, normalizeHttpRpcUrl } from '../../payment-utils.js';
 
 export function buildSellerSetupProviderEntry(input: {
   plugin: string;
@@ -33,6 +34,19 @@ export function buildSellerSetupProviderEntry(input: {
         }
       : {}),
   };
+}
+
+export function applySellerSetupRpcUrl(config: AntseedConfig, input: string): void {
+  const value = input.trim();
+  if (!value) return;
+
+  config.payments.crypto = config.payments.crypto ?? { chainId: 'base-mainnet' };
+  if (value === '-') {
+    delete config.payments.crypto.rpcUrl;
+    return;
+  }
+
+  config.payments.crypto.rpcUrl = normalizeHttpRpcUrl(value, 'Base RPC URL');
 }
 
 async function printReadinessCheck(dataDir: string, configPath: string): Promise<void> {
@@ -83,10 +97,28 @@ export function registerSellerSetupCommand(sellerCmd: Command): void {
     .action(async () => {
       const globalOpts = getGlobalOptions(sellerCmd);
       const config = await loadConfig(globalOpts.config);
+      await ensureDerivedIdentityDisplayName({
+        config,
+        configPath: globalOpts.config,
+        dataDir: globalOpts.dataDir,
+      });
       const rl = createInterface({ input: process.stdin, output: process.stdout });
 
       try {
         console.log(chalk.bold('\nAntSeed Seller Setup\n'));
+
+        const currentRpcUrl = config.payments.crypto?.rpcUrl;
+        const rpcPrompt = currentRpcUrl
+          ? `Custom Base network RPC URL [${currentRpcUrl}] (blank to keep, "-" to clear): `
+          : 'Custom Base network RPC URL (optional, leave empty for default): ';
+        const rpcUrlInput = await rl.question(rpcPrompt);
+        try {
+          applySellerSetupRpcUrl(config, rpcUrlInput);
+        } catch (err) {
+          console.error(chalk.red(`\nError: ${(err as Error).message}`));
+          return;
+        }
+        console.log('');
 
         const providers = TRUSTED_PLUGINS.filter((plugin) => plugin.type === 'provider');
         console.log(chalk.bold('Available provider plugins:\n'));

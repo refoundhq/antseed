@@ -3,11 +3,7 @@ import chalk from 'chalk';
 import ora from 'ora';
 import { getGlobalOptions } from '../types.js';
 import { loadConfig } from '../../../config/loader.js';
-import {
-  loadOrCreateIdentity,
-  DepositsClient,
-  resolveChainConfig,
-} from '@antseed/node';
+import { loadCryptoContext, createDepositsClient } from '../../payment-utils.js';
 
 export function registerBuyerWithdrawCommand(buyerCmd: Command): void {
   buyerCmd
@@ -31,18 +27,8 @@ export function registerBuyerWithdrawCommand(buyerCmd: Command): void {
       }
 
       const amountBaseUnits = BigInt(Math.round(amountFloat * 1_000_000));
-      const identity = await loadOrCreateIdentity(globalOpts.dataDir);
-      const wallet = identity.wallet;
-      const address = identity.wallet.address;
-
-      const resolvedChain = resolveChainConfig({ chainId: payments.crypto.chainId });
-      const depositsClient = new DepositsClient({
-        rpcUrl: payments.crypto.rpcUrl,
-        ...(payments.crypto.fallbackRpcUrls ? { fallbackRpcUrls: payments.crypto.fallbackRpcUrls } : {}),
-        contractAddress: payments.crypto.depositsContractAddress,
-        usdcAddress: payments.crypto.usdcContractAddress,
-        evmChainId: resolvedChain.evmChainId,
-      });
+      const { wallet, address } = await loadCryptoContext(globalOpts.dataDir);
+      const depositsClient = createDepositsClient(config);
 
       console.log(chalk.dim(`Wallet: ${address}`));
       console.log(chalk.dim(`Amount: ${amountFloat} USDC (${amountBaseUnits} base units)`));

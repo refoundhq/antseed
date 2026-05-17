@@ -6,6 +6,8 @@ import type { AntseedConfig } from './types.js';
 export function createDefaultConfig(): AntseedConfig {
   return {
     identity: {
+      // Replaced with a deterministic peer-derived name when the CLI creates
+      // or loads an identity (for example, `antseed seller setup/start`).
       displayName: 'Antseed Node',
     },
     seller: {
@@ -27,6 +29,9 @@ export function createDefaultConfig(): AntseedConfig {
     payments: {
       preferredMethod: 'crypto',
       platformFeeRate: 0.05,
+      crypto: {
+        chainId: 'base-mainnet',
+      },
     },
     network: {
       bootstrapNodes: [],
