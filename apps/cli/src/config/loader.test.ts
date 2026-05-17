@@ -4,6 +4,8 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { loadConfig } from './loader.js';
+import { createDefaultConfig } from './defaults.js';
+import { deriveDisplayNameFromPeerId, shouldDeriveDisplayName } from './identity-display-name.js';
 
 async function withTempConfig(contents: string, fn: (configPath: string) => Promise<void>): Promise<void> {
   const dir = await mkdtemp(join(tmpdir(), 'antseed-cli-config-'));
@@ -15,6 +17,22 @@ async function withTempConfig(contents: string, fn: (configPath: string) => Prom
     await rm(dir, { recursive: true, force: true });
   }
 }
+
+test('deriveDisplayNameFromPeerId returns deterministic peer-specific names', () => {
+  const peerId = '1234567890abcdef1234567890abcdef12345678';
+
+  assert.equal(deriveDisplayNameFromPeerId(peerId), deriveDisplayNameFromPeerId(peerId));
+  assert.match(deriveDisplayNameFromPeerId(peerId), /^antseed-[a-z]+-[a-z]+-[0-9a-f]{4}$/);
+  assert.notEqual(deriveDisplayNameFromPeerId(peerId), deriveDisplayNameFromPeerId('abcdef1234567890abcdef1234567890abcdef12'));
+  assert.equal(shouldDeriveDisplayName('Antseed Node'), true);
+  assert.equal(shouldDeriveDisplayName('custom seller'), false);
+});
+
+test('createDefaultConfig includes a Base mainnet crypto payment default', () => {
+  const config = createDefaultConfig();
+
+  assert.deepEqual(config.payments.crypto, { chainId: 'base-mainnet' });
+});
 
 test('loadConfig reads nested seller.providers[name].services[id] shape', async () => {
   await withTempConfig(

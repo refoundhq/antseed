@@ -31,7 +31,7 @@ export interface CryptoConfigOverrides {
   env?: NodeJS.ProcessEnv;
 }
 
-function normalizeRpcUrl(value: string | undefined): string | undefined {
+export function normalizeHttpRpcUrl(value: string | undefined, label = ANTSEED_BASE_RPC_URL_ENV): string | undefined {
   const trimmed = value?.trim();
   if (!trimmed) return undefined;
 
@@ -39,14 +39,18 @@ function normalizeRpcUrl(value: string | undefined): string | undefined {
   try {
     parsed = new URL(trimmed);
   } catch {
-    throw new Error(`${ANTSEED_BASE_RPC_URL_ENV} must be a valid http(s) URL`);
+    throw new Error(`${label} must be a valid http(s) URL`);
   }
 
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-    throw new Error(`${ANTSEED_BASE_RPC_URL_ENV} must use http:// or https://`);
+    throw new Error(`${label} must use http:// or https://`);
   }
 
   return trimmed;
+}
+
+function normalizeRpcUrl(value: string | undefined): string | undefined {
+  return normalizeHttpRpcUrl(value, ANTSEED_BASE_RPC_URL_ENV);
 }
 
 /**
@@ -90,6 +94,18 @@ export interface CryptoContext {
   address: string;
 }
 
+type ResolvedCryptoConfig = NonNullable<AntseedConfig['payments']['crypto']> & {
+  rpcUrl: string;
+  depositsContractAddress: string;
+  channelsContractAddress: string;
+  usdcContractAddress: string;
+  stakingContractAddress?: string;
+  identityRegistryAddress?: string;
+  emissionsContractAddress?: string;
+  subPoolContractAddress?: string;
+  evmChainId: number;
+};
+
 /**
  * Load identity and derive EVM wallet + address. Shared across all payment commands.
  */
@@ -107,7 +123,7 @@ export async function loadCryptoContext(dataDir: string): Promise<CryptoContext>
 export function requireCryptoConfig(
   config: AntseedConfig,
   overrides: CryptoConfigOverrides = {},
-): NonNullable<AntseedConfig['payments']['crypto']> & { evmChainId: number } {
+): ResolvedCryptoConfig {
   const crypto = config.payments?.crypto;
   if (!crypto) {
     throw new Error('No crypto payment configuration found. Configure payments.crypto in your config file.');
