@@ -42,6 +42,16 @@ interface LastResponseCost {
   service?: string;
 }
 
+class InsufficientBuyerDepositsError extends Error {
+  constructor(
+    readonly available: bigint,
+    readonly required: bigint,
+  ) {
+    super(`Buyer deposits available=${available} are below required reserve=${required}`);
+    this.name = 'InsufficientBuyerDepositsError';
+  }
+}
+
 function parsePaymentRequiredBody(body: Uint8Array): Record<string, unknown> | null {
   try {
     const parsed = JSON.parse(new TextDecoder().decode(body)) as Record<string, unknown>;
@@ -245,6 +255,25 @@ export class BuyerPaymentNegotiator {
       : await this._awaitPaymentRequired(peer.peerId, conn, waitMs);
     if (buffered) this._bufferedPaymentRequired.delete(peer.peerId);
 
+    const bodyRequirements: PaymentRequiredPayload | null = responseAlreadyHasRequirements && directPaymentBody != null
+      ? {
+        minBudgetPerRequest: String(directPaymentBody.minBudgetPerRequest ?? '10000'),
+        suggestedAmount: String(directPaymentBody.suggestedAmount ?? '100000'),
+        requestId: req.requestId,
+        ...(directPaymentBody.inputUsdPerMillion != null ? { inputUsdPerMillion: Number(directPaymentBody.inputUsdPerMillion) } : {}),
+        ...(directPaymentBody.outputUsdPerMillion != null ? { outputUsdPerMillion: Number(directPaymentBody.outputUsdPerMillion) } : {}),
+        ...(directPaymentBody.cachedInputUsdPerMillion != null ? { cachedInputUsdPerMillion: Number(directPaymentBody.cachedInputUsdPerMillion) } : {}),
+      }
+      : null;
+    const paymentRequirements = buffered ?? bodyRequirements;
+
+    const requestedReserveAmount = (() => {
+      if (!paymentRequirements) return null;
+      const suggested = safeBigInt(paymentRequirements.suggestedAmount);
+      if (suggested == null || suggested <= 0n) return null;
+      return suggested > this._bpm.maxReserveAmountUsdc ? this._bpm.maxReserveAmountUsdc : suggested;
+    })();
+
     // Stable machine-readable codes for the 402 body. Kept deliberately small
     // so callers (desktop UI, other SDK consumers) can switch on them without
     // being coupled to internal debug strings.
@@ -385,12 +414,21 @@ export class BuyerPaymentNegotiator {
       );
     }
 
-    // Check on-chain balance
+    // Check on-chain balance before sending ReserveAuth. The seller locks the full
+    // reserve ceiling on-chain, so a positive-but-too-small available balance would
+    // otherwise make reserve()/topUp() revert with InsufficientBalance and trigger a
+    // noisy 402/auth-rejection retry loop.
     try {
       const buyerAddr = this._identity.wallet.address;
       const balance = await this._depositsClient.getBuyerBalance(buyerAddr);
       if (balance.available <= 0n) {
         return returnPaymentRequired('insufficient_deposits', 'buyer deposits balance is zero');
+      }
+      if (requestedReserveAmount != null && balance.available < requestedReserveAmount) {
+        return returnPaymentRequired(
+          'insufficient_deposits',
+          `buyer available deposits ${balance.available} are below requested reserve ${requestedReserveAmount}`,
+        );
       }
     } catch (err) {
       debugWarn(`[BuyerNegotiator] Failed to check buyer balance: ${err instanceof Error ? err.message : err}`);
@@ -399,15 +437,7 @@ export class BuyerPaymentNegotiator {
     // Re-buffer the PaymentRequired so _doNegotiatePayment can consume it
     if (buffered) {
       this._bufferedPaymentRequired.set(peer.peerId, buffered);
-    } else if (responseAlreadyHasRequirements && directPaymentBody) {
-      const bodyRequirements: PaymentRequiredPayload = {
-        minBudgetPerRequest: String(directPaymentBody.minBudgetPerRequest ?? '10000'),
-        suggestedAmount: String(directPaymentBody.suggestedAmount ?? '100000'),
-        requestId: req.requestId,
-        ...(directPaymentBody.inputUsdPerMillion != null ? { inputUsdPerMillion: Number(directPaymentBody.inputUsdPerMillion) } : {}),
-        ...(directPaymentBody.outputUsdPerMillion != null ? { outputUsdPerMillion: Number(directPaymentBody.outputUsdPerMillion) } : {}),
-        ...(directPaymentBody.cachedInputUsdPerMillion != null ? { cachedInputUsdPerMillion: Number(directPaymentBody.cachedInputUsdPerMillion) } : {}),
-      };
+    } else if (bodyRequirements) {
       this._bufferedPaymentRequired.set(peer.peerId, bodyRequirements);
     }
 
@@ -418,6 +448,12 @@ export class BuyerPaymentNegotiator {
       return { action: 'retry' };
     } catch (err) {
       this._lockedPeers.delete(peer.peerId);
+      if (err instanceof InsufficientBuyerDepositsError) {
+        return returnPaymentRequired(
+          'insufficient_deposits',
+          `buyer available deposits ${err.available} are below requested reserve ${err.required}`,
+        );
+      }
       throw err;
     }
   }
@@ -689,6 +725,18 @@ export class BuyerPaymentNegotiator {
     }
     if (amount <= 0n) {
       throw new Error(`Invalid reserve amount for payment to ${peer.peerId.slice(0, 12)}...`);
+    }
+
+    if (this._depositsClient) {
+      try {
+        const balance = await this._depositsClient.getBuyerBalance(this._identity.wallet.address);
+        if (balance.available < amount) {
+          throw new InsufficientBuyerDepositsError(balance.available, amount);
+        }
+      } catch (err) {
+        if (err instanceof InsufficientBuyerDepositsError) throw err;
+        debugWarn(`[BuyerNegotiator] Failed to re-check buyer balance before reserve: ${err instanceof Error ? err.message : err}`);
+      }
     }
 
     const sellerEvmAddr = await this._resolveSellerAddr(peer);
