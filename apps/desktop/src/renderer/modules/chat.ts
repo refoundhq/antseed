@@ -241,6 +241,12 @@ export function initChatModule({
 
   type ChatRequestOptions = {
     editLastUserMessage?: boolean;
+    /**
+     * Edit-regenerate branches the persisted session before sending the edited
+     * user message. Once that branch is prepared, retries must use the normal
+     * send endpoint so they don't branch one parent farther back.
+     */
+    editBranchPrepared?: boolean;
   };
 
   type ChatRetryContext = {
@@ -253,12 +259,16 @@ export function initChatModule({
 
   const chatRetryTimers = new Map<string, ReturnType<typeof setTimeout>>();
   const chatRetryAttempts = new Map<string, number>();
+  const paymentRetryContexts = new Map<string, ChatRetryContext>();
+  const activeRequestContexts = new Map<string, ChatRetryContext>();
 
   function clearPaymentRetry(convId: string): void {
     const timer = chatRetryTimers.get(convId);
     if (timer) clearTimeout(timer);
     chatRetryTimers.delete(convId);
     chatRetryAttempts.delete(convId);
+    paymentRetryContexts.delete(convId);
+    activeRequestContexts.delete(convId);
   }
 
   function scheduleChatRetry(
@@ -294,6 +304,10 @@ export function initChatModule({
       if (ctx?.content != null) {
         setConversationSending(convId, true);
         dispatchChatRequest(convId, ctx.content, ctx.attachments, ctx.selection, ctx.options);
+      } else if (paymentRetryContexts.has(convId)) {
+        const retryCtx = paymentRetryContexts.get(convId)!;
+        setConversationSending(convId, true);
+        dispatchChatRequest(convId, retryCtx.content ?? ' ', retryCtx.attachments, retryCtx.selection, retryCtx.options);
       } else if (convId === uiState.chatActiveConversation) {
         retryAfterPayment();
       } else {
@@ -323,6 +337,9 @@ export function initChatModule({
       return;
     }
 
+    if (retryCtx) {
+      paymentRetryContexts.set(retryCtx.convId, retryCtx);
+    }
     showPaymentApprovalCard(amountBaseUnits);
   }
 
@@ -1948,6 +1965,9 @@ export function initChatModule({
   }
 
   function extractPreparedAttachmentsFromContent(content: unknown): PreparedChatAttachment[] {
+    // `file.attachment` is the canonical prepared attachment reference used
+    // for edit/regenerate retries. Image blocks may carry renderer/model
+    // payloads, but they are not durable attachment sources.
     const attachments: PreparedChatAttachment[] = [];
     if (!Array.isArray(content)) return attachments;
     for (const block of content as ContentBlock[]) {
@@ -2114,6 +2134,7 @@ export function initChatModule({
 
     const selection = selectionOverride ?? getConversationServiceSelection(convId);
     const requestStartedAt = Date.now();
+    activeRequestContexts.set(convId, { convId, content, attachments, selection, options });
     streamCompletedAtByConversation.delete(convId);
     streamFailedAtByConversation.delete(convId);
 
@@ -2123,16 +2144,27 @@ export function initChatModule({
       return;
     }
 
-    if (options?.editLastUserMessage && !bridge.chatAiEditLastUserMessage) {
+    if (options?.editLastUserMessage && !options.editBranchPrepared && !bridge.chatAiEditLastUserMessage) {
       reportChatError('Editing messages is not available in this build.', 'Request failed');
+      setConversationSending(convId, false);
+      return;
+    }
+    if (options?.editBranchPrepared && !bridge.chatAiSendStream) {
+      reportChatError('Streaming chat is not available in this build.', 'Request failed');
       setConversationSending(convId, false);
       return;
     }
 
     if (bridge.chatAiSendStream || options?.editLastUserMessage) {
+      let editBranchPrepared = Boolean(options?.editBranchPrepared);
+      const getRetryOptions = (): ChatRequestOptions | undefined => (
+        options?.editLastUserMessage
+          ? { ...options, editBranchPrepared: true }
+          : options
+      );
       const sendStreamRequest = async () => {
-        if (options?.editLastUserMessage) {
-          return await bridge.chatAiEditLastUserMessage!(
+        if (options?.editLastUserMessage && !editBranchPrepared) {
+          const result = await bridge.chatAiEditLastUserMessage!(
             convId,
             content || ' ',
             selection.id || undefined,
@@ -2140,6 +2172,8 @@ export function initChatModule({
             attachments,
             selection.peerId,
           );
+          editBranchPrepared = true;
+          return result;
         }
         return await bridge.chatAiSendStream!(
           convId,
@@ -2185,7 +2219,7 @@ export function initChatModule({
                 content,
                 attachments,
                 selection,
-                options,
+                options: getRetryOptions(),
               });
             } else if (errorMsg === 'Request aborted') {
               // User-initiated abort: the stream-error handler has already
@@ -2197,7 +2231,7 @@ export function initChatModule({
               setConversationSending(convId, false);
             } else {
               scheduleChatRetry(
-                { convId, content, attachments, selection, options },
+                { convId, content, attachments, selection, options: getRetryOptions() },
                 'request',
                 result.stopReason?.message ?? result.error,
               );
@@ -2214,7 +2248,7 @@ export function initChatModule({
             return;
           }
 
-          scheduleChatRetry({ convId, content, attachments, selection, options }, 'request', err);
+          scheduleChatRetry({ convId, content, attachments, selection, options: getRetryOptions() }, 'request', err);
           setConversationSending(convId, false);
         }
       })();
@@ -2292,10 +2326,26 @@ export function initChatModule({
     uiState.chatError = null;
     notifyUiStateChanged();
 
+    const convId = uiState.chatActiveConversation;
+    if (!convId) return;
+
+    const preservedRetryCtx = paymentRetryContexts.get(convId);
+    if (preservedRetryCtx?.content != null) {
+      setConversationSending(convId, true);
+      dispatchChatRequest(
+        convId,
+        preservedRetryCtx.content,
+        preservedRetryCtx.attachments,
+        preservedRetryCtx.selection,
+        preservedRetryCtx.options,
+      );
+      return;
+    }
+
     // Find the last user message to resend
     type MsgShape = { role?: string; content?: unknown };
     const lastUserMsg = ([...uiState.chatMessages] as MsgShape[]).reverse().find(m => m.role === 'user');
-    if (!lastUserMsg || !uiState.chatActiveConversation) return;
+    if (!lastUserMsg) return;
 
     const content = typeof lastUserMsg.content === 'string'
       ? lastUserMsg.content
@@ -2309,7 +2359,6 @@ export function initChatModule({
 
     const attachments = extractPreparedAttachmentsFromContent(lastUserMsg.content);
 
-    const convId = uiState.chatActiveConversation;
     setConversationSending(convId, true);
     dispatchChatRequest(convId, content, attachments.length > 0 ? attachments : undefined);
   }
@@ -2450,11 +2499,18 @@ export function initChatModule({
           const errStr = typeof data.error === 'string' ? data.error : '';
           const paymentMatch = /^payment_required:(\d+)$/i.exec(errStr);
           if (paymentMatch) {
-            void handlePaymentRequired(paymentMatch[1], { convId: data.conversationId });
+            void handlePaymentRequired(
+              paymentMatch[1],
+              activeRequestContexts.get(data.conversationId) ?? { convId: data.conversationId },
+            );
           } else if (data.error === 'Request aborted') {
             clearPaymentRetry(data.conversationId);
           } else {
-            scheduleChatRetry({ convId: data.conversationId }, 'request', data.error);
+            scheduleChatRetry(
+              activeRequestContexts.get(data.conversationId) ?? { convId: data.conversationId },
+              'request',
+              data.error,
+            );
             appendSystemLog(`AI Chat error: ${data.error}`);
           }
         }
@@ -2921,14 +2977,17 @@ export function initChatModule({
             const errStr = typeof data.error === 'string' ? data.error : '';
             const paymentMatch = /^payment_required:(\d+)$/i.exec(errStr);
             if (paymentMatch) {
-              void handlePaymentRequired(paymentMatch[1], { convId: data.conversationId });
+              void handlePaymentRequired(
+                paymentMatch[1],
+                activeRequestContexts.get(data.conversationId) ?? { convId: data.conversationId },
+              );
               if (bridge.chatAiAbort) void bridge.chatAiAbort(data.conversationId).catch(() => {});
             } else if (stopReason?.retryable === false) {
               clearPaymentRetry(data.conversationId);
               reportChatError(stopReason.message || data.error, 'Request failed');
             } else {
               scheduleChatRetry(
-                { convId: data.conversationId },
+                activeRequestContexts.get(data.conversationId) ?? { convId: data.conversationId },
                 'request',
                 stopReason?.message ?? data.error,
               );
