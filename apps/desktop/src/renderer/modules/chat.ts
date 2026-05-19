@@ -2249,10 +2249,6 @@ export function initChatModule({
     }
     uiState.chatSelectedPeerId = peerId;
 
-    // Resolve the (service, provider) pair the user just picked. The option
-    // catalog is the source of truth when available; otherwise decode the
-    // encoded value directly. Decoding is what handles the Discover
-    // card-click case where the chosen entry may not be in the catalog yet.
     const decoded = decodeChatServiceSelection(value);
     const nextServiceId = normalizeChatServiceId(selectedOption?.id ?? decoded.id);
     const nextProvider = normalizeProviderId(selectedOption?.provider ?? decoded.provider);
@@ -2261,26 +2257,11 @@ export function initChatModule({
       activeConversation.peerId = peerId || undefined;
       activeConversation.peerLabel = selectedOption?.peerDisplayName || selectedOption?.peerLabel || undefined;
 
-      // CRITICAL: also persist the new (service, provider) onto the active
-      // conversation. dispatchChatRequest() resolves the model via
-      // getConversationServiceSelection(), which prefers conversation.service
-      // over chatSelectedServiceValue — by design, so background catalog
-      // refreshes can't silently rebind an open thread to a different
-      // model. The flip side is that explicit user switches MUST update the
-      // conversation fields, otherwise the dropdown shows the new model
-      // but the next send still goes to the old one.
-      //
-      // Guarded: only write when we actually decoded a non-empty service id
-      // (clearing peer with an empty value must not wipe the conversation's
-      // bound model).
       if (nextServiceId) {
         activeConversation.service = nextServiceId;
         activeConversation.provider = nextProvider ?? '';
       }
 
-      // Mirror onto the conversation summary the sidebar renders from, so
-      // the chat-list row reflects the new model immediately rather than
-      // waiting for the next chatAiListConversations() refresh.
       const convId = activeConversation.id;
       if (convId && Array.isArray(uiState.chatConversations)) {
         const list = uiState.chatConversations as ChatConversationSummary[];

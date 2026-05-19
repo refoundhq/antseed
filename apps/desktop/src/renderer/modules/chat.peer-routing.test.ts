@@ -835,14 +835,6 @@ test('opening a conversation does not switch workspace if it matches the current
 });
 
 test('switching service mid-conversation routes the next send to the new model', async () => {
-  // Regression: handleServiceChange used to update only the dropdown value
-  // and the conversation's peerId, leaving conversation.service pointing at
-  // the original model. dispatchChatRequest() resolves via
-  // getConversationServiceSelection(), which prefers conversation.service
-  // over chatSelectedServiceValue (by design, to keep background catalog
-  // refreshes from silently rebinding an open thread). The combined effect
-  // was: user picks model B in the dropdown, but the next send still goes
-  // out as model A. This test pins the fix.
   installDomTimers();
 
   const uiState = createInitialUiState();
@@ -906,7 +898,6 @@ test('switching service mid-conversation routes the next send to the new model',
   await api.refreshChatConversations();
   await api.openConversation('conv-a');
 
-  // First send: original model. Sanity check.
   api.sendMessage('hello from model a');
   await waitFor(() => sends.length === 1);
   assert.deepEqual(sends[0], {
@@ -917,20 +908,15 @@ test('switching service mid-conversation routes the next send to the new model',
     peerId: 'peer-a',
   });
 
-  // Close out the first send so the conversation isn't marked as having a
-  // request in progress — otherwise the second sendMessage below would
-  // be rejected by isConversationSending(convId).
   for (const handler of streamDoneHandlers) {
     handler({ conversationId: 'conv-a' });
   }
   await waitFor(() => uiState.chatSendingConversationIds.length === 0);
 
-  // User switches to model B from the dropdown while conv-a is open.
   api.handleServiceChange(`openai${SEP}model-b${SEP}peer-b`, 'peer-b');
   assert.equal(uiState.chatSelectedServiceValue, `openai${SEP}model-b${SEP}peer-b`);
   assert.equal(uiState.chatSelectedPeerId, 'peer-b');
 
-  // Second send on the SAME conversation: must go to model B + peer B.
   api.sendMessage('hello from model b');
   await waitFor(() => sends.length === 2);
   assert.deepEqual(sends[1], {
@@ -941,8 +927,6 @@ test('switching service mid-conversation routes the next send to the new model',
     peerId: 'peer-b',
   });
 
-  // The sidebar summary should also reflect the new binding so the chat
-  // list row stops showing the stale model name.
   const summary = (uiState.chatConversations as { id: string; service?: string; peerId?: string }[])
     .find((c) => c.id === 'conv-a');
   assert.equal(summary?.service, 'model-b');
