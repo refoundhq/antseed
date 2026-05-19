@@ -878,8 +878,15 @@ function CopyResponseButton({ content }: { content: unknown }) {
   );
 }
 
-function ReplyReference({ replyTo, onJumpToMessage }: { replyTo: ChatReplyReference; onJumpToMessage?: (messageId: string) => void }) {
-  const canJump = Boolean(onJumpToMessage && replyTo.messageId);
+function ReplyReference({
+  replyTo,
+  canJump,
+  onJumpToReply,
+}: {
+  replyTo: ChatReplyReference;
+  canJump?: boolean;
+  onJumpToReply?: (replyTo: ChatReplyReference) => void;
+}) {
   const content = (
     <>
       <span className={styles.replyReferenceLabel}>Replying to {replyTo.senderLabel}</span>
@@ -892,7 +899,7 @@ function ReplyReference({ replyTo, onJumpToMessage }: { replyTo: ChatReplyRefere
       <button
         type="button"
         className={styles.replyReference}
-        onClick={() => onJumpToMessage?.(replyTo.messageId)}
+        onClick={() => onJumpToReply?.(replyTo)}
         title="Jump to original message"
       >
         {content}
@@ -908,7 +915,8 @@ type ChatBubbleProps = {
   streaming?: boolean;
   onOpenPreview?: (url: string) => void;
   onReply?: (message: ChatMessage) => void;
-  onJumpToMessage?: (messageId: string) => void;
+  canJumpToReply?: (replyTo: ChatReplyReference) => boolean;
+  onJumpToReply?: (replyTo: ChatReplyReference) => void;
   /** Identifies the surrounding conversation so file-block previews can
    *  build `antseed-attachment://<conversationId>/<attachmentId>` URLs. */
   conversationId?: string;
@@ -916,7 +924,7 @@ type ChatBubbleProps = {
   searchActive?: boolean;
 };
 
-export function ChatBubble({ message, streaming = false, onOpenPreview, onReply, onJumpToMessage, conversationId, searchQuery, searchActive }: ChatBubbleProps) {
+export function ChatBubble({ message, streaming = false, onOpenPreview, onReply, canJumpToReply, onJumpToReply, conversationId, searchQuery, searchActive }: ChatBubbleProps) {
   const [metaExpanded, setMetaExpanded] = useState(false);
   const metaParts = useMemo(() => buildChatMetaParts(message), [message]);
   const hasStreamingBlocks = useMemo(
@@ -962,7 +970,13 @@ export function ChatBubble({ message, streaming = false, onOpenPreview, onReply,
   return (
     <div className={`${styles.chatBubble} ${message.role === 'user' ? styles.own : styles.other}`}>
       {bubbleMeta}
-      {message.replyTo ? <ReplyReference replyTo={message.replyTo} onJumpToMessage={onJumpToMessage} /> : null}
+      {message.replyTo ? (
+        <ReplyReference
+          replyTo={message.replyTo}
+          canJump={canJumpToReply?.(message.replyTo) ?? false}
+          onJumpToReply={onJumpToReply}
+        />
+      ) : null}
       <div>{content}</div>
       {!isStreamingBubble ? (
         <div className={styles.messageActions}>
