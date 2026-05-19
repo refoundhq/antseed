@@ -975,7 +975,25 @@ export class BuyerPaymentManager {
 
     const prevCeiling = this._getCeiling(sellerPeerId);
     const newCeiling = prevCeiling + this._config.maxReserveAmountUsdc;
+    const additionalReserve = newCeiling - prevCeiling;
     const deadline = Math.floor(Date.now() / 1000) + this._config.defaultAuthDurationSecs;
+
+    try {
+      const balance = await this.getBalance();
+      if (balance.available < additionalReserve) {
+        throw new Error(
+          `Insufficient buyer deposits for reserve top-up: available=${balance.available} required=${additionalReserve}`,
+        );
+      }
+    } catch (err) {
+      if (err instanceof Error && err.message.startsWith('Insufficient buyer deposits')) {
+        throw err;
+      }
+      debugWarn(
+        `[BuyerPayment] topUpReserve: unable to verify buyer deposits before signing top-up: ` +
+        `${err instanceof Error ? err.message : err}`,
+      );
+    }
 
     debugLog(`[BuyerPayment] topUpReserve: channel=${session.sessionId.slice(0, 18)}... ceiling ${prevCeiling} → ${newCeiling}`);
 
