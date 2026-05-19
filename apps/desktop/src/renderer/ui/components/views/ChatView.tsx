@@ -28,7 +28,7 @@ import { LowReputationDialog } from '../chat/LowReputationDialog';
 import { ServiceSwitchTooltip } from '../chat/ServiceSwitchTooltip';
 import { AttachmentViewer, type ViewerAttachment } from '../chat/AttachmentViewer';
 import { BrowserPreview } from '../BrowserPreview';
-import type { ChatMessage } from '../chat/chat-shared';
+import type { ChatMessage, ChatReplyReference } from '../chat/chat-shared';
 import { buildDisplayMessages } from '../chat/chat-shared';
 import type { ChatWorkspaceGitStatus, RawChatAttachment } from '../../../types/bridge';
 import { AntStationStackedLogo } from '../AntStationLogo';
@@ -71,6 +71,7 @@ function getMessageContentKey(content: unknown): string {
 }
 
 function getMessageKey(message: ChatMessage, index: number): string {
+  if (message.id) return message.id;
   const routeRequestId =
     typeof message.meta?.routeRequestId === 'string' ? message.meta.routeRequestId : '';
   if (routeRequestId) {
@@ -106,6 +107,18 @@ function collectSearchableText(value: unknown, depth = 0): string {
 
 function getSearchableMessageText(message: ChatMessage): string {
   return collectSearchableText(message.content);
+}
+
+function getReplySenderLabel(message: ChatMessage): string {
+  if (message.role === 'user') return 'You';
+  const model = typeof message.meta?.model === 'string' ? message.meta.model.trim() : '';
+  return model || 'Assistant';
+}
+
+function getReplyExcerpt(message: ChatMessage): string {
+  const text = getSearchableMessageText(message).replace(/\s+/g, ' ').trim();
+  if (!text) return '(attachment or tool output)';
+  return text.length > 180 ? `${text.slice(0, 180).trimEnd()}...` : text;
 }
 
 function getNormalizedSearchQuery(query: string): string {
@@ -187,6 +200,7 @@ export function ChatView({ active, onSelectView }: ChatViewProps) {
   const actions = useActions();
   const [inputValue, setInputValue] = useState('');
   const [attachedFiles, setAttachedFiles] = useState<RawChatAttachment[]>([]);
+  const [replyTarget, setReplyTarget] = useState<ChatReplyReference | null>(null);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [attachmentWarning, setAttachmentWarning] = useState<string | null>(null);
   const [voiceError, setVoiceError] = useState<string | null>(null);
@@ -205,6 +219,7 @@ export function ChatView({ active, onSelectView }: ChatViewProps) {
   const [pendingLowReputationSend, setPendingLowReputationSend] = useState<{
     text: string;
     attachments: RawChatAttachment[];
+    replyTo: ChatReplyReference | null;
   } | null>(null);
   // While the LLM is streaming we still let the user type/paste.
   // Drafts the user confirms (Enter / Send) are parked in this queue as
@@ -215,6 +230,7 @@ export function ChatView({ active, onSelectView }: ChatViewProps) {
     conversationId: string | null;
     text: string;
     attachments: RawChatAttachment[];
+    replyTo: ChatReplyReference | null;
   };
   const [pendingQueue, setPendingQueue] = useState<PendingDraft[]>([]);
   const [previewAttachment, setPreviewAttachment] = useState<ViewerAttachment | null>(null);
@@ -456,9 +472,9 @@ export function ChatView({ active, onSelectView }: ChatViewProps) {
     if (!head) return;
     setPendingQueue((prev) => prev.filter((item) => item.id !== head.id));
     if (head.conversationId) {
-      actions.sendMessageToConversation(head.conversationId, head.text, head.attachments);
+      actions.sendMessageToConversation(head.conversationId, head.text, head.attachments, head.replyTo);
     } else {
-      actions.sendMessage(head.text, head.attachments);
+      actions.sendMessage(head.text, head.attachments, head.replyTo);
     }
   }, [snap.chatInputDisabled, activePendingQueue, actions]);
 
@@ -643,6 +659,7 @@ export function ChatView({ active, onSelectView }: ChatViewProps) {
     setAttachedFiles([]);
     setAttachmentError(null);
     setAttachmentWarning(null);
+    setReplyTarget(null);
     if (inputRef.current) {
       inputRef.current.style.height = 'auto';
       inputRef.current.style.overflowY = 'hidden';
@@ -664,7 +681,7 @@ export function ChatView({ active, onSelectView }: ChatViewProps) {
           : `pending-${String(Date.now())}-${String(Math.random())}`;
       setPendingQueue((prev) => [
         ...prev,
-        { id, conversationId: snap.chatActiveConversation, text, attachments: attachedFiles },
+        { id, conversationId: snap.chatActiveConversation, text, attachments: attachedFiles, replyTo: replyTarget }
       ]);
       resetComposer();
       return;
@@ -675,16 +692,17 @@ export function ChatView({ active, onSelectView }: ChatViewProps) {
       && visibleMessages.length === 0
       && !approvedLowReputationPeersRef.current.has(lowReputationPeer.peerId)
     ) {
-      setPendingLowReputationSend({ text, attachments: attachedFiles });
+      setPendingLowReputationSend({ text, attachments: attachedFiles, replyTo: replyTarget });
       setLowReputationDialogOpen(true);
       return;
     }
 
     const filesToSend = attachedFiles;
+    const replyToSend = replyTarget;
     resetComposer();
-    actions.sendMessage(text, filesToSend);
+    actions.sendMessage(text, filesToSend, replyToSend);
     scrollChatToBottom('smooth');
-  }, [inputValue, attachedFiles, actions, snap.chatInputDisabled, snap.chatActiveConversation, resetComposer, lowReputationPeer, visibleMessages.length]);
+  }, [inputValue, attachedFiles, replyTarget, actions, snap.chatInputDisabled, snap.chatActiveConversation, resetComposer, lowReputationPeer, visibleMessages.length]);
 
   const handleLowReputationContinue = useCallback(() => {
     if (lowReputationPeer) {
@@ -695,7 +713,7 @@ export function ChatView({ active, onSelectView }: ChatViewProps) {
     setPendingLowReputationSend(null);
     if (!pending) return;
     resetComposer();
-    actions.sendMessage(pending.text, pending.attachments);
+    actions.sendMessage(pending.text, pending.attachments, pending.replyTo);
   }, [actions, lowReputationPeer, pendingLowReputationSend, resetComposer]);
 
   const handleLowReputationCancel = useCallback(() => {
@@ -925,6 +943,29 @@ export function ChatView({ active, onSelectView }: ChatViewProps) {
   const handleScrollToLatest = useCallback(() => {
     scrollChatToBottom('smooth');
   }, [scrollChatToBottom]);
+
+  const handleReplyToMessage = useCallback((message: ChatMessage) => {
+    const index = visibleMessages.indexOf(message);
+    const messageId = message.id || (index >= 0 ? getMessageKey(message, index) : '');
+    if (!messageId) return;
+    setReplyTarget({
+      messageId,
+      role: message.role,
+      senderLabel: getReplySenderLabel(message),
+      excerpt: getReplyExcerpt(message),
+      ...(message.createdAt ? { createdAt: message.createdAt } : {}),
+    });
+    requestAnimationFrame(() => inputRef.current?.focus());
+  }, [visibleMessages]);
+
+  const handleJumpToMessage = useCallback((messageId: string) => {
+    const target = messageRefs.current.get(messageId);
+    if (!target) return;
+    isUserScrolledUp.current = true;
+    target.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'smooth' });
+    target.classList.add(styles.chatMessageJumpHighlight);
+    window.setTimeout(() => target.classList.remove(styles.chatMessageJumpHighlight), 1400);
+  }, []);
 
   const showWelcome =
     snap.chatConversationsLoaded &&
@@ -1181,6 +1222,8 @@ export function ChatView({ active, onSelectView }: ChatViewProps) {
                     <ChatBubble
                       message={msg}
                       onOpenPreview={handleOpenPreview}
+                      onReply={handleReplyToMessage}
+                      onJumpToMessage={handleJumpToMessage}
                       conversationId={snap.chatActiveConversation || undefined}
                       searchQuery={isSearchMatch ? messageSearchQuery : undefined}
                       searchActive={isActiveSearchMatch}
@@ -1279,6 +1322,29 @@ export function ChatView({ active, onSelectView }: ChatViewProps) {
               availableUsdc={snap.creditsAvailableUsdc}
               onAddCredits={() => actions.openPaymentsPortal?.('deposit')}
             />
+
+            {replyTarget ? (
+              <div className={styles.replyComposerPreview}>
+                <button
+                  type="button"
+                  className={styles.replyComposerBody}
+                  onClick={() => handleJumpToMessage(replyTarget.messageId)}
+                  title="Jump to original message"
+                >
+                  <span className={styles.replyComposerLabel}>Replying to {replyTarget.senderLabel}</span>
+                  <span className={styles.replyComposerExcerpt}>“{replyTarget.excerpt}”</span>
+                </button>
+                <button
+                  type="button"
+                  className={styles.replyComposerCancel}
+                  onClick={() => setReplyTarget(null)}
+                  aria-label="Cancel reply"
+                  title="Cancel reply"
+                >
+                  <HugeiconsIcon icon={Cancel01Icon} size={14} strokeWidth={2} />
+                </button>
+              </div>
+            ) : null}
 
             {attachedFiles.length > 0 && (
               <div className={styles.chatAttachmentTray}>
