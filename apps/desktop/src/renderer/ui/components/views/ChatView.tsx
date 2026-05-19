@@ -289,6 +289,7 @@ export function ChatView({ active, onSelectView }: ChatViewProps) {
     setMessageSearchOpen(false);
     setMessageSearchQuery('');
     setSelectedSearchIndex(0);
+    setReplyTarget(null);
   }, [snap.chatActiveConversation]);
 
   useEffect(() => {
@@ -670,6 +671,15 @@ export function ChatView({ active, onSelectView }: ChatViewProps) {
   const handleSend = useCallback(() => {
     const text = inputValue.trim();
     if (!text && attachedFiles.length === 0) return;
+    const activeReplyTarget = replyTarget
+      && (!replyTarget.conversationId || replyTarget.conversationId === snap.chatActiveConversation)
+      && keyedVisibleMessages.some(({ message, key }) => (
+        key === replyTarget.messageId
+        || message.id === replyTarget.messageId
+        || (message.role === replyTarget.role && getReplyExcerpt(message) === replyTarget.excerpt)
+      ))
+      ? replyTarget
+      : null;
     // If the current turn is still streaming, park the draft as a pending
     // card above the composer and clear the input so the user can keep
     // typing the next one. The disabled→enabled effect flushes the queue
@@ -681,7 +691,7 @@ export function ChatView({ active, onSelectView }: ChatViewProps) {
           : `pending-${String(Date.now())}-${String(Math.random())}`;
       setPendingQueue((prev) => [
         ...prev,
-        { id, conversationId: snap.chatActiveConversation, text, attachments: attachedFiles, replyTo: replyTarget }
+        { id, conversationId: snap.chatActiveConversation, text, attachments: attachedFiles, replyTo: activeReplyTarget }
       ]);
       resetComposer();
       return;
@@ -692,17 +702,17 @@ export function ChatView({ active, onSelectView }: ChatViewProps) {
       && visibleMessages.length === 0
       && !approvedLowReputationPeersRef.current.has(lowReputationPeer.peerId)
     ) {
-      setPendingLowReputationSend({ text, attachments: attachedFiles, replyTo: replyTarget });
+      setPendingLowReputationSend({ text, attachments: attachedFiles, replyTo: activeReplyTarget });
       setLowReputationDialogOpen(true);
       return;
     }
 
     const filesToSend = attachedFiles;
-    const replyToSend = replyTarget;
+    const replyToSend = activeReplyTarget;
     resetComposer();
     actions.sendMessage(text, filesToSend, replyToSend);
     scrollChatToBottom('smooth');
-  }, [inputValue, attachedFiles, replyTarget, actions, snap.chatInputDisabled, snap.chatActiveConversation, resetComposer, lowReputationPeer, visibleMessages.length]);
+  }, [inputValue, attachedFiles, replyTarget, actions, snap.chatInputDisabled, snap.chatActiveConversation, resetComposer, lowReputationPeer, visibleMessages.length, keyedVisibleMessages]);
 
   const handleLowReputationContinue = useCallback(() => {
     if (lowReputationPeer) {
@@ -954,9 +964,10 @@ export function ChatView({ active, onSelectView }: ChatViewProps) {
       senderLabel: getReplySenderLabel(message),
       excerpt: getReplyExcerpt(message),
       ...(message.createdAt ? { createdAt: message.createdAt } : {}),
+      ...(snap.chatActiveConversation ? { conversationId: snap.chatActiveConversation } : {}),
     });
     requestAnimationFrame(() => inputRef.current?.focus());
-  }, [visibleMessages]);
+  }, [visibleMessages, snap.chatActiveConversation]);
 
   const findReplyTargetElement = useCallback((replyTo: ChatReplyReference): HTMLDivElement | null => {
     const direct = messageRefs.current.get(replyTo.messageId);
