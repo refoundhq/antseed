@@ -833,3 +833,123 @@ test('opening a conversation does not switch workspace if it matches the current
   await new Promise((resolve) => setTimeout(resolve, 100));
   assert.equal(workspaceCallLog.length, 0, 'should not call chatAiSetWorkspace when workspace already matches');
 });
+
+test('switching service mid-conversation routes the next send to the new model', async () => {
+  // Regression: handleServiceChange used to update only the dropdown value
+  // and the conversation's peerId, leaving conversation.service pointing at
+  // the original model. dispatchChatRequest() resolves via
+  // getConversationServiceSelection(), which prefers conversation.service
+  // over chatSelectedServiceValue (by design, to keep background catalog
+  // refreshes from silently rebinding an open thread). The combined effect
+  // was: user picks model B in the dropdown, but the next send still goes
+  // out as model A. This test pins the fix.
+  installDomTimers();
+
+  const uiState = createInitialUiState();
+  uiState.chatServiceOptions = [
+    {
+      id: 'model-a', label: 'Model A', provider: 'openai', protocol: 'openai-chat-completions', count: 1,
+      value: `openai${SEP}model-a${SEP}peer-a`, peerId: 'peer-a', peerDisplayName: 'Peer A', peerLabel: 'Peer A',
+      inputUsdPerMillion: null, outputUsdPerMillion: null, categories: [], description: '',
+    },
+    {
+      id: 'model-b', label: 'Model B', provider: 'openai', protocol: 'openai-chat-completions', count: 1,
+      value: `openai${SEP}model-b${SEP}peer-b`, peerId: 'peer-b', peerDisplayName: 'Peer B', peerLabel: 'Peer B',
+      inputUsdPerMillion: null, outputUsdPerMillion: null, categories: [], description: '',
+    },
+  ];
+
+  const conversations: Conversation[] = [
+    {
+      id: 'conv-a',
+      title: 'Conversation A',
+      service: 'model-a',
+      provider: 'openai',
+      peerId: 'peer-a',
+      messages: [],
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      usage: { inputTokens: 0, outputTokens: 0 },
+    },
+  ];
+
+  const sends: Array<{
+    conversationId: string;
+    message: string;
+    service?: string;
+    provider?: string;
+    peerId?: string;
+  }> = [];
+  const streamDoneHandlers: Array<(data: { conversationId: string }) => void> = [];
+
+  const bridge: DesktopBridge = {
+    chatAiListConversations: async () => ({ ok: true, data: [...conversations] }),
+    chatAiGetConversation: async (id) => {
+      const conversation = conversations.find((c) => c.id === id);
+      return conversation
+        ? { ok: true, data: { ...conversation, messages: [...conversation.messages] } }
+        : { ok: false, error: 'not found' };
+    },
+    chatPrepareAttachments: async () => ({ ok: true, data: [] }),
+    chatAiSendStream: async (conversationId, message, service, provider, _attachments, peerId) => {
+      sends.push({ conversationId, message, service, provider, peerId });
+      return { ok: true };
+    },
+    onChatAiStreamDone: (handler) => {
+      streamDoneHandlers.push(handler);
+      return () => undefined;
+    },
+    chatAiSelectPeer: async () => ({ ok: true }),
+  };
+
+  const api = initChatModule({ bridge, uiState, appendSystemLog: () => undefined });
+  await api.refreshChatConversations();
+  await api.openConversation('conv-a');
+
+  // First send: original model. Sanity check.
+  api.sendMessage('hello from model a');
+  await waitFor(() => sends.length === 1);
+  assert.deepEqual(sends[0], {
+    conversationId: 'conv-a',
+    message: 'hello from model a',
+    service: 'model-a',
+    provider: 'openai',
+    peerId: 'peer-a',
+  });
+
+  // Close out the first send so the conversation isn't marked as having a
+  // request in progress — otherwise the second sendMessage below would
+  // be rejected by isConversationSending(convId).
+  for (const handler of streamDoneHandlers) {
+    handler({ conversationId: 'conv-a' });
+  }
+  await waitFor(() => uiState.chatSendingConversationIds.length === 0);
+
+  // User switches to model B from the dropdown while conv-a is open.
+  api.handleServiceChange(`openai${SEP}model-b${SEP}peer-b`, 'peer-b');
+  assert.equal(uiState.chatSelectedServiceValue, `openai${SEP}model-b${SEP}peer-b`);
+  assert.equal(uiState.chatSelectedPeerId, 'peer-b');
+
+  // Second send on the SAME conversation: must go to model B + peer B.
+  api.sendMessage('hello from model b');
+  await waitFor(() => sends.length === 2);
+  assert.deepEqual(sends[1], {
+    conversationId: 'conv-a',
+    message: 'hello from model b',
+    service: 'model-b',
+    provider: 'openai',
+    peerId: 'peer-b',
+  });
+
+  // The sidebar summary should also reflect the new binding so the chat
+  // list row stops showing the stale model name.
+  const summary = (uiState.chatConversations as { id: string; service?: string; peerId?: string }[])
+    .find((c) => c.id === 'conv-a');
+  assert.equal(summary?.service, 'model-b');
+  assert.equal(summary?.peerId, 'peer-b');
+
+  for (const handler of streamDoneHandlers) {
+    handler({ conversationId: 'conv-a' });
+  }
+  await waitFor(() => uiState.chatSendingConversationIds.length === 0);
+});
