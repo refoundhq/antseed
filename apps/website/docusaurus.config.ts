@@ -186,7 +186,7 @@ const config: Config = {
           className: 'header-docs-link',
         },
         {to: '/ants-token', label: '$ANTS', position: 'right'},
-        {href: 'https://diem.antseed.com', label: '$DIEM', position: 'right'},
+        {href: 'https://diem.antseed.com', label: '$DIEM', position: 'right', className: 'header-diem-link'},
         {to: '/blog', label: 'Blog', position: 'right'},
         {
           href: 'https://github.com/antseed',
