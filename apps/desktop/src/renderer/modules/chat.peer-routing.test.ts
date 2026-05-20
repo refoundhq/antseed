@@ -960,16 +960,23 @@ test('edit regenerate retries a stuck in-flight request without branching twice'
 
   let editCalls = 0;
   let streamCalls = 0;
+  let abortCalls = 0;
   const bridge: DesktopBridge = {
     chatAiEditLastUserMessage: async () => {
       editCalls += 1;
-      return { ok: false, error: 'Request already in progress' };
+      if (editCalls === 1) {
+        return { ok: false, error: 'Request already in progress', editBranchPrepared: false };
+      }
+      return { ok: true, editBranchPrepared: true };
     },
     chatAiSendStream: async () => {
       streamCalls += 1;
       return { ok: true };
     },
-    chatAiAbort: async () => ({ ok: true }),
+    chatAiAbort: async () => {
+      abortCalls += 1;
+      return { ok: true };
+    },
   };
 
   const api = initChatModule({
@@ -979,10 +986,11 @@ test('edit regenerate retries a stuck in-flight request without branching twice'
   });
 
   api.editLastUserMessage('conv-edit', 'edited');
-  await waitFor(() => editCalls === 1 && streamCalls === 1);
+  await waitFor(() => editCalls === 2);
 
-  assert.equal(editCalls, 1);
-  assert.equal(streamCalls, 1);
+  assert.equal(abortCalls, 1);
+  assert.equal(editCalls, 2);
+  assert.equal(streamCalls, 0);
 });
 
 test('manual payment retry after edit regenerate reuses edit retry context', async () => {
@@ -1041,7 +1049,7 @@ test('manual payment retry after edit regenerate reuses edit retry context', asy
     }),
     chatAiEditLastUserMessage: async () => {
       editCalls += 1;
-      return { ok: false, error: 'payment_required:1000000' };
+      return { ok: false, error: 'payment_required:1000000', editBranchPrepared: true };
     },
     chatAiSendStream: async (_conversationId, message, _service, _provider, attachments) => {
       streamSends.push({

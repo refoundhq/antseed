@@ -2159,7 +2159,7 @@ export function initChatModule({
       let editBranchPrepared = Boolean(options?.editBranchPrepared);
       const getRetryOptions = (): ChatRequestOptions | undefined => (
         options?.editLastUserMessage
-          ? { ...options, editBranchPrepared: true }
+          ? { ...options, editBranchPrepared }
           : options
       );
       const sendStreamRequest = async () => {
@@ -2172,7 +2172,7 @@ export function initChatModule({
             attachments,
             selection.peerId,
           );
-          editBranchPrepared = true;
+          editBranchPrepared = Boolean(result.editBranchPrepared);
           return result;
         }
         return await bridge.chatAiSendStream!(

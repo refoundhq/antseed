@@ -928,6 +928,7 @@ export function ChatBubble({
         <div className={styles.inlineEditWrap}>
           <textarea
             className={styles.inlineEditInput}
+            aria-label="Edit message text"
             value={editValue}
             rows={Math.max(2, editValue.split('\n').length)}
             onChange={(event) => onEditValueChange?.(event.target.value)}
@@ -939,7 +940,7 @@ export function ChatBubble({
           ) : null}
           <div className={styles.inlineEditActions}>
             <button type="button" className={styles.inlineEditCancelBtn} onClick={onCancelEdit}>Cancel</button>
-            <button type="button" className={styles.inlineEditSaveBtn} onClick={onSubmitEdit}>Send</button>
+            <button type="button" className={styles.inlineEditSaveBtn} onClick={onSubmitEdit}>Save &amp; regenerate</button>
           </div>
         </div>
       ) : (

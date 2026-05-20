@@ -1774,12 +1774,17 @@ export function registerPiChatHandlers({
     attachments?: PreparedChatAttachment[],
     peerOverride?: string,
     options?: { branchBeforeLastUserMessage?: boolean },
-  ): Promise<{ ok: boolean; error?: string; stopReason?: ChatStreamStopReason }> => {
+  ): Promise<{ ok: boolean; error?: string; stopReason?: ChatStreamStopReason; editBranchPrepared?: boolean }> => {
     const trimmedMessage = userMessage.trim();
+    const includeEditBranchState = Boolean(options?.branchBeforeLastUserMessage);
+    let editBranchPrepared = false;
+    const withEditBranchState = <T extends { ok: boolean }>(result: T): T & { editBranchPrepared?: boolean } => (
+      includeEditBranchState ? { ...result, editBranchPrepared } : result
+    );
     const attachmentPromptText = buildAttachmentPromptText(attachments);
     const attachmentImages = extractAttachmentImages(attachments);
     if (trimmedMessage.length === 0 && attachmentPromptText.length === 0 && attachmentImages.length === 0) {
-      return { ok: false, error: 'Empty message' };
+      return withEditBranchState({ ok: false, error: 'Empty message' });
     }
 
     const existingRun = activeRunsByConversation.get(conversationId);
@@ -1812,15 +1817,15 @@ export function registerPiChatHandlers({
       }
     }
     if (!proxyAvailable) {
-      return {
+      return withEditBranchState({
         ok: false,
         error: `Buyer proxy is not reachable on port ${proxyPort}. Start Buyer runtime or fix buyer.proxyPort in config.`,
-      };
+      });
     }
 
     const sessionManager = await store.openSessionManager(conversationId);
     if (!sessionManager) {
-      return { ok: false, error: 'Conversation not found' };
+      return withEditBranchState({ ok: false, error: 'Conversation not found' });
     }
 
     if (options?.branchBeforeLastUserMessage) {
@@ -1829,13 +1834,14 @@ export function registerPiChatHandlers({
         .reverse()
         .find((entry) => entry.type === 'message' && entry.message?.role === 'user');
       if (!lastUserEntry) {
-        return { ok: false, error: 'No user message found to edit' };
+        return withEditBranchState({ ok: false, error: 'No user message found to edit' });
       }
       if (lastUserEntry.parentId) {
         sessionManager.branch(lastUserEntry.parentId);
       } else {
         sessionManager.resetLeaf();
       }
+      editBranchPrepared = true;
     }
 
     const context = sessionManager.buildSessionContext();
@@ -2297,7 +2303,7 @@ export function registerPiChatHandlers({
           }
           pendingAssistantMessage = null;
           const reason = emitPaymentRequiredStreamError(conversationId, amt);
-          return { ok: false, error: 'Payment required', stopReason: reason };
+          return withEditBranchState({ ok: false, error: 'Payment required', stopReason: reason });
         }
       }
 
@@ -2332,7 +2338,7 @@ export function registerPiChatHandlers({
           appendSystemLog(`Conversation title generation failed: ${asErrorMessage(error)}`);
         }
       }
-      return { ok: true };
+      return withEditBranchState({ ok: true });
     } catch (error) {
       // Always discard any buffered assistant message on error — it will not be committed.
       pendingAssistantMessage = null;
@@ -2347,7 +2353,7 @@ export function registerPiChatHandlers({
           error: 'Request aborted',
           stopReason: reason,
         });
-        return { ok: false, error: 'Aborted', stopReason: reason };
+        return withEditBranchState({ ok: false, error: 'Aborted', stopReason: reason });
       }
       const message = asErrorMessage(error);
       // Map insufficient balance / 402 errors to payment_required format
@@ -2373,7 +2379,7 @@ export function registerPiChatHandlers({
           });
         }
         const reason = emitPaymentRequiredStreamError(conversationId, amt);
-        return { ok: false, error: message, stopReason: reason };
+        return withEditBranchState({ ok: false, error: message, stopReason: reason });
       } else {
         const reason = classifyChatStreamFailure({
           error,
@@ -2386,7 +2392,7 @@ export function registerPiChatHandlers({
           stopReason: reason,
         });
         appendSystemLog(`Pi chat error: ${formatChatStreamStopForLog(reason)}`);
-        return { ok: false, error: message, stopReason: reason };
+        return withEditBranchState({ ok: false, error: message, stopReason: reason });
       }
     } finally {
       clearActiveRun(run);
