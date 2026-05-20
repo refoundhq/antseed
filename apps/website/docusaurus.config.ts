@@ -176,7 +176,7 @@ const config: Config = {
       },
       items: [
         {to: '/network', label: 'Pricing', position: 'right'},
-        {to: '/integrations', label: 'Integrations hub', position: 'right'},
+        {to: '/integrations', label: 'Integrations', position: 'right'},
         {to: '/providers', label: 'Providers', position: 'right'},
         {
           type: 'docSidebar',
@@ -186,6 +186,7 @@ const config: Config = {
           className: 'header-docs-link',
         },
         {to: '/ants-token', label: '$ANTS', position: 'right'},
+        {href: 'https://diem.antseed.com', label: '$DIEM', position: 'right'},
         {to: '/blog', label: 'Blog', position: 'right'},
         {
           href: 'https://github.com/antseed',
