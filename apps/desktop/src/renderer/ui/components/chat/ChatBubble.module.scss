@@ -133,20 +133,27 @@
       letter-spacing: 0.5px;
     }
 
-    .chat-code-copy-btn {
-      background: none;
-      border: none;
-      color: var(--text-muted);
-      cursor: pointer;
-      font-size: 10px;
-      padding: 1px 5px;
-      border-radius: 3px;
-    }
+.chat-code-copy-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.1s, background 0.1s;
+}
 
-    .chat-code-copy-btn:hover {
-      color: var(--text-primary);
-      background: var(--bg-hover);
-    }
+.chat-code-copy-btn:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.chat-code-copy-btn-copied {
+  color: var(--accent-green, #1fd87a);
+}
 
     .chat-code-container pre {
       margin: 0;
@@ -186,13 +193,89 @@
       font-weight: 600;
     }
 
-    .chat-bubble-content blockquote {
-      margin: 8px 0;
-      padding: 8px 12px;
-      border-left: 2px solid var(--border);
-      color: var(--text-secondary);
-      background: var(--bg-card-alt);
-    }
+.chat-bubble-content blockquote {
+  margin: 8px 0;
+  padding: 8px 12px;
+  border-left: 2px solid var(--border);
+  color: var(--text-secondary);
+  background: var(--bg-card-alt);
+}
+
+.chat-blockquote-container {
+  position: relative;
+}
+
+.chat-blockquote-header {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  padding: 2px 4px;
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  z-index: 1;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.chat-blockquote-container:hover .chat-blockquote-header {
+  opacity: 1;
+}
+
+.chat-blockquote-copy-btn {
+  background: var(--bg-card-alt);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.1s, background 0.1s;
+}
+
+.chat-blockquote-copy-btn:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+  border-color: var(--text-muted);
+}
+
+.chat-blockquote-copy-btn-copied {
+  color: var(--accent-green, #1fd87a);
+}
+
+/* Shared copy tooltip for code block & blockquote copy buttons */
+.chat-copy-tooltip {
+  font-size: 11px;
+  line-height: 1;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background: #2a2a2c;
+  color: #ffffff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+  user-select: none;
+  animation-duration: 0.12s;
+  animation-timing-function: ease-out;
+  z-index: 9999;
+
+  &[data-state='delayed-open'][data-side='top'] { animation-name: chat-copy-tooltip-slide-down; }
+  &[data-state='delayed-open'][data-side='bottom'] { animation-name: chat-copy-tooltip-slide-up; }
+}
+
+.chat-copy-tooltip-arrow {
+  fill: #2a2a2c;
+}
+
+@keyframes chat-copy-tooltip-slide-up {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes chat-copy-tooltip-slide-down {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
 
     .chat-bubble-content blockquote > :first-child {
       margin-top: 0;

@@ -1,6 +1,9 @@
-import { Fragment, useMemo, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Lexer } from 'marked';
+import { HugeiconsIcon } from '@hugeicons/react';
+import { Copy01Icon, Tick02Icon } from '@hugeicons/core-free-icons';
+import * as Tooltip from '@radix-ui/react-tooltip';
 import type { ChatMessage } from './chat-shared';
 import { isToolResultOnlyMessage as isToolResultOnlyMessageShared } from './chat-shared';
 
@@ -220,24 +223,84 @@ function renderListItemContent(token: MarkdownToken, key: string, highlightQuery
   return splitHighlightedText(normalizeText(token.text ?? token.raw), highlightQuery, key, activeHighlight);
 }
 
+function BlockquoteCopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  const timerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (timerRef.current !== null) window.clearTimeout(timerRef.current);
+    };
+  }, []);
+
+  const handleCopy = useCallback(() => {
+    if (!text) return;
+    void navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      if (timerRef.current !== null) window.clearTimeout(timerRef.current);
+      timerRef.current = window.setTimeout(() => setCopied(false), 1500);
+    }).catch(() => {/* clipboard denied */});
+  }, [text]);
+
+  return (
+    <Tooltip.Provider delayDuration={300}>
+      <Tooltip.Root>
+        <Tooltip.Trigger asChild>
+          <button
+            className={`chat-blockquote-copy-btn${copied ? ' chat-blockquote-copy-btn-copied' : ''}`}
+            type="button"
+            onClick={handleCopy}
+            aria-label={copied ? 'Copied!' : 'Copy'}
+          >
+            <HugeiconsIcon icon={copied ? Tick02Icon : Copy01Icon} size={14} color="currentColor" strokeWidth={2} />
+          </button>
+        </Tooltip.Trigger>
+        <Tooltip.Portal>
+          <Tooltip.Content className="chat-copy-tooltip" sideOffset={5}>
+            {copied ? 'Copied!' : 'Copy'}
+            <Tooltip.Arrow className="chat-copy-tooltip-arrow" />
+          </Tooltip.Content>
+        </Tooltip.Portal>
+      </Tooltip.Root>
+    </Tooltip.Provider>
+  );
+}
+
 function CodeBlock({ code, lang, highlightQuery, activeHighlight }: { code: string; lang?: string; highlightQuery?: string; activeHighlight?: boolean }) {
   const [copied, setCopied] = useState(false);
   const langLabel = normalizeText(lang).trim() || 'code';
 
-  const handleCopy = (): void => {
+  const handleCopy = useCallback(() => {
     void navigator.clipboard.writeText(code).then(() => {
       setCopied(true);
       window.setTimeout(() => setCopied(false), 1500);
-    });
-  };
+    }).catch(() => {/* clipboard denied */});
+  }, [code]);
 
   return (
     <div className="chat-code-container">
       <div className="chat-code-header">
         <span className="code-lang">{langLabel}</span>
-        <button className="chat-code-copy-btn" type="button" onClick={handleCopy}>
-          {copied ? 'Copied!' : 'Copy'}
-        </button>
+        <Tooltip.Provider delayDuration={300}>
+          <Tooltip.Root>
+            <Tooltip.Trigger asChild>
+              <button
+                className={`chat-code-copy-btn${copied ? ' chat-code-copy-btn-copied' : ''}`}
+                type="button"
+                onClick={handleCopy}
+                aria-label={copied ? 'Copied!' : 'Copy'}
+              >
+                <HugeiconsIcon icon={copied ? Tick02Icon : Copy01Icon} size={14} color="currentColor" strokeWidth={2} />
+              </button>
+            </Tooltip.Trigger>
+            <Tooltip.Portal>
+              <Tooltip.Content className="chat-copy-tooltip" sideOffset={5}>
+                {copied ? 'Copied!' : 'Copy'}
+                <Tooltip.Arrow className="chat-copy-tooltip-arrow" />
+              </Tooltip.Content>
+            </Tooltip.Portal>
+          </Tooltip.Root>
+        </Tooltip.Provider>
       </div>
       <pre>
         <code>{splitHighlightedText(code, highlightQuery, 'code', activeHighlight)}</code>
@@ -269,8 +332,17 @@ function renderBlockToken(token: MarkdownToken, key: string, highlightQuery?: st
     }
     case 'code':
       return <CodeBlock key={key} code={normalizeText(token.text)} lang={token.lang} highlightQuery={highlightQuery} activeHighlight={activeHighlight} />;
-    case 'blockquote':
-      return <blockquote key={key}>{renderBlockTokens(token.tokens ?? [], key, highlightQuery, activeHighlight)}</blockquote>;
+  case 'blockquote': {
+    const bqText = flattenPlainText(token.tokens);
+    return (
+      <div key={key} className="chat-blockquote-container">
+        <div className="chat-blockquote-header">
+          <BlockquoteCopyButton text={bqText} />
+        </div>
+        <blockquote>{renderBlockTokens(token.tokens ?? [], key, highlightQuery, activeHighlight)}</blockquote>
+      </div>
+    );
+  }
     case 'hr':
       return <hr key={key} />;
     case 'list': {
