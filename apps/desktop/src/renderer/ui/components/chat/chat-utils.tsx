@@ -147,12 +147,17 @@ function renderInlineToken(token: MarkdownToken, key: string, highlightQuery?: s
       return <strong key={key}>{renderInlineTokens(token.tokens, key, highlightQuery, activeHighlight)}</strong>;
     case 'em':
       return <em key={key}>{renderInlineTokens(token.tokens, key, highlightQuery, activeHighlight)}</em>;
-    case 'codespan':
+    case 'codespan': {
+      const codeText = normalizeText(token.text);
       return (
-        <code key={key} className="chat-inline-code">
-          {splitHighlightedText(normalizeText(token.text), highlightQuery, key, activeHighlight)}
-        </code>
+        <span key={key} className="chat-inline-code-wrap">
+          <code className="chat-inline-code">
+            {splitHighlightedText(codeText, highlightQuery, key, activeHighlight)}
+          </code>
+          <InlineCodeCopyButton text={codeText} />
+        </span>
       );
+    }
     case 'br':
       return <br key={key} />;
     case 'del':
@@ -221,6 +226,50 @@ function renderListItemContent(token: MarkdownToken, key: string, highlightQuery
     return <>{renderInlineTokens(token.tokens, key, highlightQuery, activeHighlight)}</>;
   }
   return splitHighlightedText(normalizeText(token.text ?? token.raw), highlightQuery, key, activeHighlight);
+}
+
+function InlineCodeCopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  const timerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (timerRef.current !== null) window.clearTimeout(timerRef.current);
+    };
+  }, []);
+
+  const handleCopy = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!text) return;
+    void navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      if (timerRef.current !== null) window.clearTimeout(timerRef.current);
+      timerRef.current = window.setTimeout(() => setCopied(false), 1500);
+    }).catch(() => {/* clipboard denied */});
+  }, [text]);
+
+  return (
+    <Tooltip.Provider delayDuration={300}>
+      <Tooltip.Root>
+        <Tooltip.Trigger asChild>
+          <button
+            className={`chat-inline-code-copy-btn${copied ? ' chat-inline-code-copy-btn-copied' : ''}`}
+            type="button"
+            onClick={handleCopy}
+            aria-label={copied ? 'Copied!' : 'Copy'}
+          >
+            <HugeiconsIcon icon={copied ? Tick02Icon : Copy01Icon} size={12} color="currentColor" strokeWidth={2} />
+          </button>
+        </Tooltip.Trigger>
+        <Tooltip.Portal>
+          <Tooltip.Content className="chat-copy-tooltip" sideOffset={5}>
+            {copied ? 'Copied!' : 'Copy'}
+            <Tooltip.Arrow className="chat-copy-tooltip-arrow" />
+          </Tooltip.Content>
+        </Tooltip.Portal>
+      </Tooltip.Root>
+    </Tooltip.Provider>
+  );
 }
 
 function BlockquoteCopyButton({ text }: { text: string }) {
@@ -332,17 +381,17 @@ function renderBlockToken(token: MarkdownToken, key: string, highlightQuery?: st
     }
     case 'code':
       return <CodeBlock key={key} code={normalizeText(token.text)} lang={token.lang} highlightQuery={highlightQuery} activeHighlight={activeHighlight} />;
-  case 'blockquote': {
-    const bqText = flattenPlainText(token.tokens);
-    return (
-      <div key={key} className="chat-blockquote-container">
-        <div className="chat-blockquote-header">
-          <BlockquoteCopyButton text={bqText} />
+    case 'blockquote': {
+      const bqText = flattenPlainText(token.tokens);
+      return (
+        <div key={key} className="chat-blockquote-container">
+          <div className="chat-blockquote-header">
+            <BlockquoteCopyButton text={bqText} />
+          </div>
+          <blockquote>{renderBlockTokens(token.tokens ?? [], key, highlightQuery, activeHighlight)}</blockquote>
         </div>
-        <blockquote>{renderBlockTokens(token.tokens ?? [], key, highlightQuery, activeHighlight)}</blockquote>
-      </div>
-    );
-  }
+      );
+    }
     case 'hr':
       return <hr key={key} />;
     case 'list': {

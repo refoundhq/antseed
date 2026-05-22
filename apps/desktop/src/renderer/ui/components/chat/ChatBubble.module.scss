@@ -101,13 +101,53 @@
       text-transform: uppercase;
     }
 
-    .chat-inline-code {
-      background: var(--bg-primary);
-      border: 1px solid var(--border);
-      border-radius: 4px;
-      padding: 1px 5px;
-      font-size: 13px;
-    }
+.chat-inline-code {
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-size: 13px;
+}
+
+.chat-inline-code-wrap {
+  position: relative;
+  display: inline;
+}
+
+.chat-inline-code-wrap .chat-inline-code-copy-btn {
+  position: absolute;
+  top: 50%;
+  left: 100%;
+  transform: translateY(-50%);
+  background: var(--bg-card-alt);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 1px 3px;
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.1s, background 0.1s, opacity 0.15s ease;
+  opacity: 0;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.chat-inline-code-wrap:hover .chat-inline-code-copy-btn {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.chat-inline-code-copy-btn:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+  border-color: var(--text-muted);
+}
+
+.chat-inline-code-copy-btn-copied {
+  color: var(--accent-green, #1fd87a);
+}
 
     .chat-code-container {
       margin: 8px 0;
