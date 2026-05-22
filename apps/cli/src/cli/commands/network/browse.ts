@@ -219,12 +219,39 @@ function peerReputationScore(peer: PeerInfo): number {
   return effectiveOnChainReputationScore(peer) ?? -1;
 }
 
-type PeerInfoJson = Omit<PeerInfo, 'onChainReputationScore'> & { onChainReputationScore: number | null };
+type PeerInfoJson = Omit<PeerInfo, 'onChainReputationScore'> & {
+  onChainReputationScore: number | null;
+  sellerAddress: string;
+  isDelegatedSeller: boolean;
+};
+
+function normalizeAddressHex(raw: string | undefined): string | null {
+  const normalized = raw?.trim().replace(/^0x/i, '').toLowerCase();
+  return normalized && /^[0-9a-f]{40}$/.test(normalized) ? normalized : null;
+}
+
+/**
+ * Derive the on-chain seller address for a peer. When the peer announces a
+ * `sellerContract` in its metadata (delegated/proxy sellers), that address
+ * is the actual on-chain seller; otherwise the peer's own address is the seller.
+ */
+function sellerAddressForPeer(peer: PeerInfo): string {
+  return normalizeAddressHex(peer.metadata?.sellerContract) ?? peer.peerId;
+}
+
+function delegatedSellerAddress(peer: PeerInfo): string | null {
+  const sellerAddress = sellerAddressForPeer(peer);
+  const peerAddress = normalizeAddressHex(peer.peerId) ?? peer.peerId.toLowerCase();
+  return sellerAddress !== peerAddress ? sellerAddress : null;
+}
 
 function peerWithReputationScore(peer: PeerInfo): PeerInfoJson {
+  const sellerAddress = sellerAddressForPeer(peer);
   return {
     ...peer,
     onChainReputationScore: effectiveOnChainReputationScore(peer),
+    sellerAddress,
+    isDelegatedSeller: delegatedSellerAddress(peer) !== null,
   };
 }
 
@@ -337,6 +364,9 @@ function parseTopLimit(raw: string | undefined): number {
  * The "Free" column is only emitted when at least one displayed peer has
  * free services; otherwise it's omitted so the common-case table stays
  * compact.
+ *
+ * A "Seller" column is added when at least one displayed peer has a
+ * `sellerContract` that differs from its peerId (delegated/proxy sellers).
  */
 function renderCompactTable(peers: PeerInfo[], hasChainData: boolean): void {
   const freeNamesByPeer = new Map(
@@ -344,14 +374,21 @@ function renderCompactTable(peers: PeerInfo[], hasChainData: boolean): void {
   );
   const anyFreeService = Array.from(freeNamesByPeer.values()).some((names) => names.length > 0);
 
+  // Show the "Seller" column when at least one peer has a sellerContract
+  // that differs from its peerId (i.e. a delegated/proxy seller).
+  const anyDelegatedSeller = peers.some((peer) => delegatedSellerAddress(peer) !== null);
+
   const head: string[] = [
     chalk.bold('Peer'),
+  ];
+  if (anyDelegatedSeller) head.push(chalk.bold('On-chain seller'));
+  head.push(
     chalk.bold('Name'),
     chalk.bold('Providers'),
     chalk.bold('Services'),
     chalk.bold('Min In $/1M'),
     chalk.bold('Min Out $/1M'),
-  ];
+  );
   if (anyFreeService) head.push(chalk.bold('Free'));
   head.push(
     chalk.bold('Score'),
@@ -383,6 +420,9 @@ function renderCompactTable(peers: PeerInfo[], hasChainData: boolean): void {
     const badge = isPeerVouched(peer) ? chalk.green(' ✓') : '';
     const peerCell = peer.peerId + badge;
 
+    const sellerAddress = delegatedSellerAddress(peer);
+    const sellerCell = sellerAddress !== null ? chalk.yellow(sellerAddress) : chalk.dim('—');
+
     const freeNames = freeNamesByPeer.get(peer.peerId) ?? [];
     const freeCell = freeNames.length === 0
       ? chalk.dim('—')
@@ -392,12 +432,15 @@ function renderCompactTable(peers: PeerInfo[], hasChainData: boolean): void {
 
     const row: string[] = [
       peerCell,
+    ];
+    if (anyDelegatedSeller) row.push(sellerCell);
+    row.push(
       peer.displayName ?? chalk.dim('—'),
       peer.providers.join(', ') || chalk.dim('—'),
       servicesCell,
       formatUsdPerMillion(pricing.input),
       formatUsdPerMillion(pricing.output),
-    ];
+    );
     if (anyFreeService) row.push(freeCell);
     row.push(
       formatReputationScore(peer),
@@ -421,6 +464,9 @@ function renderCompactTable(peers: PeerInfo[], hasChainData: boolean): void {
   }
   if (anyFreeService) {
     console.log(chalk.dim('  Free column lists services a peer offers at $0 in/out. "Min In/Out $/1M" always reflects the cheapest PAID option.'));
+  }
+  if (anyDelegatedSeller) {
+    console.log(chalk.dim(`  ${chalk.yellow('On-chain seller')} is the contract address that receives payments — differs from Peer when a delegated/proxy operator runs the node.`));
   }
   console.log('');
 }
@@ -454,6 +500,10 @@ function renderExpandedTable(peers: PeerInfo[], requestedTags: Set<string>): voi
   }> = [];
 
   const hasTagFilter = requestedTags.size > 0;
+
+  // Show the "Seller" column when at least one peer has a sellerContract
+  // that differs from its peerId (i.e. a delegated/proxy seller).
+  const anyDelegatedSeller = peers.some((peer) => delegatedSellerAddress(peer) !== null);
 
   for (const peer of peers) {
     const pricing = peer.providerPricing;
@@ -520,6 +570,9 @@ function renderExpandedTable(peers: PeerInfo[], requestedTags: Set<string>): voi
 
   const head: string[] = [
     chalk.bold('Peer'),
+  ];
+  if (anyDelegatedSeller) head.push(chalk.bold('On-chain seller'));
+  head.push(
     chalk.bold('Provider'),
     chalk.bold('Service'),
     chalk.bold('In $/1M'),
@@ -527,7 +580,7 @@ function renderExpandedTable(peers: PeerInfo[], requestedTags: Set<string>): voi
     chalk.bold('Score'),
     chalk.bold('Sessions'),
     chalk.bold('Volume'),
-  ];
+  );
   if (anyTags) head.push(chalk.bold('Tags'));
 
   const table = new Table({ head, wordWrap: true });
@@ -535,6 +588,13 @@ function renderExpandedTable(peers: PeerInfo[], requestedTags: Set<string>): voi
   for (const r of rows) {
     const row: string[] = [
       r.peerId,
+    ];
+    if (anyDelegatedSeller) {
+      const rowPeer = peers.find((p) => p.peerId === r.peerId);
+      const sellerAddress = rowPeer ? delegatedSellerAddress(rowPeer) : null;
+      row.push(sellerAddress !== null ? chalk.yellow(sellerAddress) : chalk.dim('—'));
+    }
+    row.push(
       r.provider,
       r.service === '—' || r.service === '(default)' ? chalk.dim(r.service) : r.service,
       r.input,
@@ -542,7 +602,7 @@ function renderExpandedTable(peers: PeerInfo[], requestedTags: Set<string>): voi
       r.score,
       r.sessions === '—' ? chalk.dim('—') : r.sessions,
       r.volume,
-    ];
+    );
     if (anyTags) {
       row.push(
         r.tags.length === 0
@@ -559,6 +619,9 @@ function renderExpandedTable(peers: PeerInfo[], requestedTags: Set<string>): voi
   console.log(table.toString());
   if (anyTags && requestedTags.size > 0) {
     console.log(chalk.dim(`  Matching tags highlighted green: ${Array.from(requestedTags).sort().join(', ')}`));
+  }
+  if (anyDelegatedSeller) {
+    console.log(chalk.dim(`  ${chalk.yellow('On-chain seller')} is the contract address that receives payments — differs from Peer when a delegated/proxy operator runs the node.`));
   }
   console.log('');
 }

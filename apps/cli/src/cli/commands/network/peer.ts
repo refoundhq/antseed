@@ -69,6 +69,14 @@ function normalizePeerId(raw: string): string | null {
   return cleaned;
 }
 
+function sellerAddressForPeer(peer: PeerInfo): string {
+  return normalizePeerId(peer.metadata?.sellerContract ?? '') ?? peer.peerId;
+}
+
+function isDelegatedSeller(peer: PeerInfo): boolean {
+  return sellerAddressForPeer(peer) !== peer.peerId.toLowerCase();
+}
+
 /**
  * The detail view doesn't have a column header so it appends `/1M` to make
  * each price self-describing. Precision is adaptive (see `pricing-format.ts`)
@@ -148,6 +156,15 @@ function printPeerDetail(peer: PeerInfo, requestedTags: Set<string>): void {
   console.log(`  ID:              ${peer.peerId}`);
   console.log(`  Display name:    ${peer.displayName ?? chalk.dim('—')}`);
   console.log(`  Public address:  ${peer.publicAddress ?? chalk.dim('—')}`);
+
+  const sellerAddress = sellerAddressForPeer(peer);
+  if (isDelegatedSeller(peer)) {
+    console.log(`  On-chain seller: ${chalk.yellow(sellerAddress)}`);
+    console.log(chalk.dim('    (delegated/proxy seller — channel stats and payments are attributed to the seller address)'));
+  } else {
+    console.log(`  On-chain seller: ${chalk.dim('same as peer')}`);
+  }
+
   if (typeof peer.lastSeen === 'number' && peer.lastSeen > 0) {
     const age = Date.now() - peer.lastSeen;
     console.log(`  Last seen:       ${new Date(peer.lastSeen).toISOString()} ${chalk.dim(`(${Math.max(0, Math.floor(age / 1000))}s ago)`)}`);
@@ -339,9 +356,14 @@ export function registerNetworkPeerCommand(networkCmd: Command): void {
         // filtered list without walking providerPricing themselves. When no
         // tag filter is in effect it simply contains every announced service.
         const matchingServices = collectMatchingServices(match, tagFilter);
+        // Surface the on-chain seller address explicitly so JSON consumers don't
+        // need to dig into `metadata.sellerContract` themselves.
+        const sellerAddress = sellerAddressForPeer(match);
         console.log(JSON.stringify({
           source: sourceLabel,
           filter: tagFilter.size > 0 ? { tags: Array.from(tagFilter).sort() } : null,
+          sellerAddress,
+          isDelegatedSeller: isDelegatedSeller(match),
           peer: match,
           matchingServices,
         }, null, 2));
