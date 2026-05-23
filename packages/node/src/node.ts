@@ -150,6 +150,8 @@ export interface NodeConfig {
   signalingPort?: number;     // Default: 6882 for seller
   bootstrapNodes?: Array<{ host: string; port: number }>;
   requestTimeoutMs?: number;  // Default: 30000
+  /** Timeout in ms for each HTTP metadata fetch during peer discovery. Default: 750 */
+  metadataFetchTimeoutMs?: number;
   /** Maximum buffered body size (bytes) while reconstructing streaming responses. Default: 16 MiB. */
   maxStreamBufferBytes?: number;
   /** Maximum upload body size (bytes) a seller will accept per request. Default: 64 MiB. */
@@ -1185,7 +1187,7 @@ export class AntseedNode extends EventEmitter {
 
     // Create PeerLookup with HttpMetadataResolver
     const metadataResolver = new HttpMetadataResolver({
-      timeoutMs: 750,
+      timeoutMs: this._config.metadataFetchTimeoutMs ?? 750,
       maxConcurrent: 24,
     });
     const lookupConfig: LookupConfig = {

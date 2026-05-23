@@ -14,17 +14,20 @@ test('buyer start runtime overrides are runtime-only and win over env/config', (
   config.buyer.proxyPort = 7777;
   config.buyer.maxPricing.defaults.inputUsdPerMillion = 50;
   config.buyer.maxPricing.defaults.outputUsdPerMillion = 60;
+  config.buyer.metadataFetchTimeoutMs = 1500;
   const beforeResolution = JSON.parse(JSON.stringify(config));
 
   const env = {
     ANTSEED_BUYER_MAX_INPUT_USD_PER_MILLION: '70',
     ANTSEED_BUYER_MAX_OUTPUT_USD_PER_MILLION: '80',
+    ANTSEED_BUYER_METADATA_FETCH_TIMEOUT_MS: '2000',
   } as NodeJS.ProcessEnv;
 
   const overrides = buildBuyerRuntimeOverridesFromFlags({
     port: 9000,
     maxInputUsdPerMillion: 90,
     maxOutputUsdPerMillion: 95,
+    metadataFetchTimeoutMs: 2500,
   });
 
   const effective = resolveEffectiveBuyerConfig({
@@ -36,6 +39,7 @@ test('buyer start runtime overrides are runtime-only and win over env/config', (
   assert.equal(effective.proxyPort, 9000);
   assert.equal(effective.maxPricing.defaults.inputUsdPerMillion, 90);
   assert.equal(effective.maxPricing.defaults.outputUsdPerMillion, 95);
+  assert.equal(effective.metadataFetchTimeoutMs, 2500);
   assert.deepEqual(config, beforeResolution);
 });
 

@@ -265,6 +265,19 @@ The buyer proxy refreshes its discovered peer cache from the DHT in the backgrou
 antseed config buyer set peerRefreshIntervalMs 300000
 ```
 
+Each discovered endpoint is then queried over HTTP for signed peer metadata. The default per-endpoint metadata fetch timeout is 750ms; raise it for high-latency networks or lower it to make discovery skip slow/offline endpoints faster:
+
+```bash
+antseed config buyer set metadataFetchTimeoutMs 1500
+```
+
+For one process, use either the runtime flag or env var instead of writing config:
+
+```bash
+antseed buyer start --metadata-fetch-timeout-ms 1500
+ANTSEED_BUYER_METADATA_FETCH_TIMEOUT_MS=1500 antseed buyer start
+```
+
 ## Identity and Metadata
 
 ```bash
@@ -365,6 +378,7 @@ Only secrets, global toggles, and deployment-specific runtime overrides are set 
 |---|---|
 | `ANTSEED_IDENTITY_HEX` | Identity private key (64 hex chars, optional 0x prefix) |
 | `ANTSEED_BASE_RPC_URL` | Runtime Base JSON-RPC endpoint override for seller on-chain operations |
+| `ANTSEED_BUYER_METADATA_FETCH_TIMEOUT_MS` | Runtime buyer peer-discovery metadata fetch timeout in milliseconds |
 | `ANTHROPIC_API_KEY` | Upstream Anthropic API key (used by the `anthropic` provider plugin) |
 | `OPENAI_API_KEY` | Upstream OpenAI-compatible API key (used by the `openai` provider plugin) |
 | `ANTSEED_SETTLEMENT_IDLE_MS` | Idle time before settling a session (default: 600000 / 10 min) |

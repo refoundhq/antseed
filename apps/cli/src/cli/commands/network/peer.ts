@@ -302,6 +302,7 @@ export function registerNetworkPeerCommand(networkCmd: Command): void {
           role: 'buyer',
           ...(bootstrapNodes ? { bootstrapNodes } : {}),
           dhtOperationTimeoutMs: 30_000,
+          metadataFetchTimeoutMs: config.buyer.metadataFetchTimeoutMs,
           ...(paymentsConfig ? { payments: paymentsConfig } : {}),
         });
         try {

@@ -3,7 +3,7 @@ import test from 'node:test';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { DEFAULT_BUYER_PEER_REFRESH_INTERVAL_MS } from './defaults.js';
+import { DEFAULT_BUYER_METADATA_FETCH_TIMEOUT_MS, DEFAULT_BUYER_PEER_REFRESH_INTERVAL_MS } from './defaults.js';
 import { loadConfig } from './loader.js';
 import { createDefaultConfig } from './defaults.js';
 import { deriveDisplayNameFromPeerId, shouldDeriveDisplayName } from './identity-display-name.js';
@@ -99,20 +99,23 @@ test('loadConfig applies the default buyer peer refresh interval when missing', 
     async (configPath) => {
       const config = await loadConfig(configPath);
       assert.equal(config.buyer.peerRefreshIntervalMs, DEFAULT_BUYER_PEER_REFRESH_INTERVAL_MS);
+      assert.equal(config.buyer.metadataFetchTimeoutMs, DEFAULT_BUYER_METADATA_FETCH_TIMEOUT_MS);
     }
   );
 });
 
-test('loadConfig preserves explicit buyer peerRefreshIntervalMs', async () => {
+test('loadConfig preserves explicit buyer peerRefreshIntervalMs and metadataFetchTimeoutMs', async () => {
   await withTempConfig(
     JSON.stringify({
       buyer: {
         peerRefreshIntervalMs: 15_000,
+        metadataFetchTimeoutMs: 2_500,
       },
     }),
     async (configPath) => {
       const config = await loadConfig(configPath);
       assert.equal(config.buyer.peerRefreshIntervalMs, 15_000);
+      assert.equal(config.buyer.metadataFetchTimeoutMs, 2_500);
     }
   );
 });
@@ -128,6 +131,22 @@ test('loadConfig rejects invalid buyer peerRefreshIntervalMs', async () => {
       await assert.rejects(
         async () => loadConfig(configPath),
         /buyer\.peerRefreshIntervalMs/
+      );
+    }
+  );
+});
+
+test('loadConfig rejects invalid buyer metadataFetchTimeoutMs', async () => {
+  await withTempConfig(
+    JSON.stringify({
+      buyer: {
+        metadataFetchTimeoutMs: 99,
+      },
+    }),
+    async (configPath) => {
+      await assert.rejects(
+        async () => loadConfig(configPath),
+        /buyer\.metadataFetchTimeoutMs/
       );
     }
   );

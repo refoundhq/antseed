@@ -11,6 +11,7 @@ export interface BuyerRuntimeOverrides {
   minPeerReputation?: number;
   maxInputUsdPerMillion?: number;
   maxOutputUsdPerMillion?: number;
+  metadataFetchTimeoutMs?: number;
 }
 
 export interface ResolveEffectiveConfigInput {
@@ -88,6 +89,7 @@ export function resolveEffectiveBuyerConfig(input: ResolveEffectiveConfigInput):
   const envMinReputation = parseEnvNumber(env, 'ANTSEED_BUYER_MIN_REPUTATION');
   const envMaxInputUsdPerMillion = parseEnvNumber(env, 'ANTSEED_BUYER_MAX_INPUT_USD_PER_MILLION');
   const envMaxOutputUsdPerMillion = parseEnvNumber(env, 'ANTSEED_BUYER_MAX_OUTPUT_USD_PER_MILLION');
+  const envMetadataFetchTimeoutMs = parseEnvNumber(env, 'ANTSEED_BUYER_METADATA_FETCH_TIMEOUT_MS');
 
   if (envMinReputation !== undefined) {
     buyer.minPeerReputation = envMinReputation;
@@ -97,6 +99,9 @@ export function resolveEffectiveBuyerConfig(input: ResolveEffectiveConfigInput):
   }
   if (envMaxOutputUsdPerMillion !== undefined) {
     buyer.maxPricing.defaults.outputUsdPerMillion = envMaxOutputUsdPerMillion;
+  }
+  if (envMetadataFetchTimeoutMs !== undefined) {
+    buyer.metadataFetchTimeoutMs = envMetadataFetchTimeoutMs;
   }
 
   const overrides = input.buyerOverrides;
@@ -111,6 +116,9 @@ export function resolveEffectiveBuyerConfig(input: ResolveEffectiveConfigInput):
   }
   if (overrides?.maxOutputUsdPerMillion !== undefined) {
     buyer.maxPricing.defaults.outputUsdPerMillion = overrides.maxOutputUsdPerMillion;
+  }
+  if (overrides?.metadataFetchTimeoutMs !== undefined) {
+    buyer.metadataFetchTimeoutMs = overrides.metadataFetchTimeoutMs;
   }
 
   return buyer;
