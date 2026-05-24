@@ -203,8 +203,7 @@ export class SellerRequestHandler {
             }
           }
           const providerPricing = this.resolveProviderPricing(provider, request);
-          const requestEstimate = this._estimateMaxRequestCostUsdc(request, providerPricing);
-          const estimatedRequestCost = requestEstimate?.cost ?? 0n;
+          const estimatedRequestCost = this._estimateMaxRequestCostUsdc(request, providerPricing);
           const wouldExceedLockedReserve = reserveMax > 0n
             && estimatedRequestCost > 0n
             && spent + estimatedRequestCost > reserveMax;
@@ -232,11 +231,12 @@ export class SellerRequestHandler {
               ...(isFullyExhausted ? { code: PAYMENT_CODE_CHANNEL_EXHAUSTED } : {}),
             };
             if (isFullyExhausted) {
-              const reason = isBlocked
-                ? 'blocked'
-                : wouldExceedLockedReserve
-                  ? 'insufficient locked reserve for estimated request'
-                  : 'fully exhausted';
+              let reason = 'fully exhausted';
+              if (isBlocked) {
+                reason = 'blocked';
+              } else if (wouldExceedLockedReserve) {
+                reason = 'insufficient locked reserve for estimated request';
+              }
               debugLog(`[SellerHandler] Session ${reason} for ${buyerPeerId.slice(0, 12)}... (spent=${spent} accepted=${accepted} target=${target} reserveMax=${reserveMax} estimatedRequestCost=${estimatedRequestCost}) — returning 402`);
               if (isBlocked || isAlreadyExhausted) {
                 // Default settleSession() performs final close(); do not use
@@ -526,25 +526,29 @@ export class SellerRequestHandler {
 
   // -- Private helpers --
 
-  private _parseJsonBody(body: Uint8Array): unknown | null {
+  private _parseJsonObject(body: Uint8Array): Record<string, unknown> | null {
     try {
-      return JSON.parse(new TextDecoder().decode(body)) as unknown;
+      const parsed = JSON.parse(new TextDecoder().decode(body)) as unknown;
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        return null;
+      }
+      return parsed as Record<string, unknown>;
     } catch {
       return null;
     }
   }
 
-  private _extractRequestedService(request: SerializedHttpRequest): string | null {
+  private _isJsonRequest(request: SerializedHttpRequest): boolean {
     const contentType = request.headers["content-type"] ?? request.headers["Content-Type"] ?? "";
-    if (!contentType.toLowerCase().includes("application/json")) {
+    return contentType.toLowerCase().includes("application/json");
+  }
+
+  private _extractRequestedService(request: SerializedHttpRequest): string | null {
+    if (!this._isJsonRequest(request)) {
       return null;
     }
-    const parsed = this._parseJsonBody(request.body);
-    if (!parsed || typeof parsed !== "object") {
-      return null;
-    }
-    const record = parsed as Record<string, unknown>;
-    const service = record["service"] ?? record["model"];
+    const body = this._parseJsonObject(request.body);
+    const service = body?.["service"] ?? body?.["model"];
     if (typeof service !== "string" || service.trim().length === 0) {
       return null;
     }
@@ -563,22 +567,18 @@ export class SellerRequestHandler {
   private _estimateMaxRequestCostUsdc(
     request: SerializedHttpRequest,
     pricing: ServicePricing,
-  ): { cost: bigint; inputTokens: number; maxOutputTokens: number } | null {
-    const contentType = request.headers["content-type"] ?? request.headers["Content-Type"] ?? "";
-    if (!contentType.toLowerCase().includes("application/json")) {
-      return null;
+  ): bigint {
+    if (!this._isJsonRequest(request)) {
+      return 0n;
+    }
+    const body = this._parseJsonObject(request.body);
+    if (!body) {
+      return 0n;
     }
 
-    const parsed = this._parseJsonBody(request.body);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      return null;
-    }
-
-    const body = parsed as Record<string, unknown>;
-    const maxOutputTokens = this._extractMaxOutputTokens(body);
     const inputTokens = estimateTokensFromBytes(request.body);
-    const cost = computeCostUsdc(inputTokens, maxOutputTokens, pricing);
-    return { cost, inputTokens, maxOutputTokens };
+    const maxOutputTokens = this._extractMaxOutputTokens(body);
+    return computeCostUsdc(inputTokens, maxOutputTokens, pricing);
   }
 
   private _extractMaxOutputTokens(body: Record<string, unknown>): number {
@@ -599,11 +599,15 @@ export class SellerRequestHandler {
   }
 
   private _parsePositiveInteger(value: unknown): number | null {
-    const numeric = typeof value === 'number'
-      ? value
-      : typeof value === 'string'
-        ? Number(value)
-        : NaN;
+    let numeric: number;
+    if (typeof value === 'number') {
+      numeric = value;
+    } else if (typeof value === 'string') {
+      numeric = Number(value);
+    } else {
+      return null;
+    }
+
     if (!Number.isFinite(numeric) || numeric <= 0) return null;
     return Math.floor(numeric);
   }
