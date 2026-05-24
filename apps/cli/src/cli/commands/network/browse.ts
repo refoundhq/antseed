@@ -14,6 +14,7 @@ import {
 import { parseBootstrapList, toBootstrapConfig } from '@antseed/node/discovery';
 import { parsePersistedPeers } from '../../../proxy/buyer-proxy.js';
 import { buildPaymentsConfig } from './chain-config-helper.js';
+import { resolveEffectiveBuyerConfig } from '../../../config/effective.js';
 import {
   collectServiceTags,
   parseTagFilter,
@@ -582,6 +583,7 @@ export function registerNetworkBrowseCommand(networkCmd: Command): void {
     .action(async (rawOptions: BrowseOptions) => {
       const globalOpts = getGlobalOptions(networkCmd);
       const config = await loadConfig(globalOpts.config);
+      const effectiveBuyerConfig = resolveEffectiveBuyerConfig({ config });
       const serviceFilter = rawOptions.service?.trim();
       const tagFilter = parseTagFilter(rawOptions.tag);
       const sortKey = parseSortKey(rawOptions.sort);
@@ -601,7 +603,7 @@ export function registerNetworkBrowseCommand(networkCmd: Command): void {
           role: 'buyer',
           ...(bootstrapNodes ? { bootstrapNodes } : {}),
           dhtOperationTimeoutMs: 30_000,
-          metadataFetchTimeoutMs: config.buyer.metadataFetchTimeoutMs,
+          metadataFetchTimeoutMs: effectiveBuyerConfig.metadataFetchTimeoutMs,
           ...(paymentsConfig ? { payments: paymentsConfig } : {}),
         });
 

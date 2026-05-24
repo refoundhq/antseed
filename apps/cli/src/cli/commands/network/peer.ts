@@ -12,6 +12,7 @@ import {
 import { parseBootstrapList, toBootstrapConfig } from '@antseed/node/discovery';
 import { parsePersistedPeers } from '../../../proxy/buyer-proxy.js';
 import { buildPaymentsConfig } from './chain-config-helper.js';
+import { resolveEffectiveBuyerConfig } from '../../../config/effective.js';
 import {
   collectServiceTags,
   parseTagFilter,
@@ -282,6 +283,7 @@ export function registerNetworkPeerCommand(networkCmd: Command): void {
       const tagFilter = parseTagFilter(options.tag);
       const globalOpts = getGlobalOptions(networkCmd);
       const config = await loadConfig(globalOpts.config);
+      const effectiveBuyerConfig = resolveEffectiveBuyerConfig({ config });
 
       const cachedPeers = await loadPeersFromBuyerDaemon(globalOpts.dataDir);
       let match: PeerInfo | null =
@@ -302,7 +304,7 @@ export function registerNetworkPeerCommand(networkCmd: Command): void {
           role: 'buyer',
           ...(bootstrapNodes ? { bootstrapNodes } : {}),
           dhtOperationTimeoutMs: 30_000,
-          metadataFetchTimeoutMs: config.buyer.metadataFetchTimeoutMs,
+          metadataFetchTimeoutMs: effectiveBuyerConfig.metadataFetchTimeoutMs,
           ...(paymentsConfig ? { payments: paymentsConfig } : {}),
         });
         try {

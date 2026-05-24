@@ -43,6 +43,22 @@ test('buyer start runtime overrides are runtime-only and win over env/config', (
   assert.deepEqual(config, beforeResolution);
 });
 
+test('buyer start rejects invalid metadata fetch timeout flag overrides', () => {
+  const config = createDefaultConfig();
+
+  const tooSmall = buildBuyerRuntimeOverridesFromFlags({ metadataFetchTimeoutMs: 0 });
+  assert.throws(
+    () => resolveEffectiveBuyerConfig({ config, buyerOverrides: tooSmall }),
+    /buyer\.metadataFetchTimeoutMs must be an integer >= 100/,
+  );
+
+  const notANumber = buildBuyerRuntimeOverridesFromFlags({ metadataFetchTimeoutMs: Number.NaN });
+  assert.throws(
+    () => resolveEffectiveBuyerConfig({ config, buyerOverrides: notANumber }),
+    /buyer\.metadataFetchTimeoutMs must be an integer >= 100/,
+  );
+});
+
 test('buyer start maps effective buyer config into router runtime env keys', () => {
   const config = createDefaultConfig();
   config.buyer.minPeerReputation = 72;

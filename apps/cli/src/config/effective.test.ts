@@ -72,6 +72,26 @@ test('effective buyer config precedence is flags > env > config > defaults', () 
   assert.equal(effective.maxPricing.defaults.outputUsdPerMillion, 99);
 });
 
+test('effective buyer config rejects invalid metadata fetch timeout env overrides', () => {
+  const config = createDefaultConfig();
+
+  assert.throws(
+    () => resolveEffectiveBuyerConfig({
+      config,
+      env: { ANTSEED_BUYER_METADATA_FETCH_TIMEOUT_MS: '99' } as NodeJS.ProcessEnv,
+    }),
+    /buyer\.metadataFetchTimeoutMs must be an integer >= 100/,
+  );
+
+  assert.throws(
+    () => resolveEffectiveBuyerConfig({
+      config,
+      env: { ANTSEED_BUYER_METADATA_FETCH_TIMEOUT_MS: 'not-a-number' } as NodeJS.ProcessEnv,
+    }),
+    /ANTSEED_BUYER_METADATA_FETCH_TIMEOUT_MS must be a finite number/,
+  );
+});
+
 test('effective config resolution does not mutate loaded config', () => {
   const config = createDefaultConfig();
   config.seller.providers = {
