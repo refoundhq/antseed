@@ -407,6 +407,30 @@ export function countBlocks(blocks: ContentBlock[]) {
   return summary;
 }
 
+export function getReplyableMessageText(message: ChatMessage): string {
+  if (typeof message.content === 'string') {
+    return message.content;
+  }
+
+  if (!Array.isArray(message.content)) {
+    return '';
+  }
+
+  const parts = (message.content as ContentBlock[]).map((block) => {
+    if (!block || typeof block !== 'object') return '';
+    if (block.type === 'text') return String(block.text || '');
+    if (block.type === 'file') return block.fileName ? `[File: ${block.fileName}]` : '[File]';
+    if (block.type === 'image') return '[Image]';
+
+    // Reasoning, tool calls/results, inputs, errors, and details are useful for
+    // search/debug surfaces, but they are not the conversational text a user is
+    // replying to. Do not let them become reply previews or reply context.
+    return '';
+  }).filter((part) => part.trim().length > 0);
+
+  return parts.join('\n');
+}
+
 export function toToolDisplayName(name: unknown): string {
   const raw = String(name || 'tool').trim();
   if (!raw) return 'Tool';

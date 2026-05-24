@@ -26,6 +26,17 @@ import {
   type RawChatAttachment,
 } from './chat-attachments.js';
 import {
+  ANTSEED_REPLY_CONTEXT_CUSTOM_TYPE,
+  buildReplyContextDetails,
+  buildReplyContextMessageContent,
+  isExpectedReplyUserMessage,
+  normalizeReplyContextDetails,
+  normalizeReplyReference,
+  parseReplyWrappedPrompt,
+  type ChatReplyReference,
+  type ReplyContextDetails,
+} from './chat-reply-context.js';
+import {
   deleteConversationAttachments,
   isSafeId,
   saveAttachment,
@@ -122,15 +133,6 @@ type AiMessageMeta = {
   inputUsdPerMillion?: number;
   outputUsdPerMillion?: number;
   estimatedCostUsd?: number;
-};
-
-type ChatReplyReference = {
-  messageId: string;
-  role: string;
-  senderLabel: string;
-  excerpt: string;
-  createdAt?: number;
-  conversationId?: string;
 };
 
 type AiChatMessage = {
@@ -947,136 +949,6 @@ function convertPiMessagesToUi(messages: Message[]): AiChatMessage[] {
     }
   }
   return converted;
-}
-
-const ANTSEED_REPLY_CONTEXT_CUSTOM_TYPE = 'antseed.reply_context';
-const ANTSEED_REPLY_CONTEXT_JSON_START = '<antseed_reply_context_json>';
-const ANTSEED_REPLY_CONTEXT_JSON_END = '</antseed_reply_context_json>';
-const ANTSEED_REPLY_CONTEXT_START = '<antseed_reply_context>';
-const ANTSEED_REPLY_CONTEXT_END = '</antseed_reply_context>';
-const ANTSEED_REPLY_USER_MESSAGE_START = '<antseed_user_message>';
-const ANTSEED_REPLY_USER_MESSAGE_END = '</antseed_user_message>';
-
-type ReplyContextDetails = ChatReplyReference & {
-  expectedUserExcerpt?: string;
-};
-
-type ParsedReplyWrappedPrompt = {
-  visibleText: string;
-  replyTo: ChatReplyReference | null;
-};
-
-function normalizeReplyContextExcerpt(value: unknown, maxLength = 500): string {
-  const excerpt = typeof value === 'string' ? value.replace(/\s+/g, ' ').trim() : '';
-  if (!excerpt) return '';
-  return excerpt.length > maxLength ? `${excerpt.slice(0, maxLength).trimEnd()}...` : excerpt;
-}
-
-function normalizeReplyReference(value: unknown): ChatReplyReference | null {
-  if (!value || typeof value !== 'object') return null;
-  const data = value as Record<string, unknown>;
-  const messageId = typeof data.messageId === 'string' ? data.messageId.trim() : '';
-  const role = typeof data.role === 'string' ? data.role.trim() : '';
-  const senderLabel = typeof data.senderLabel === 'string' ? data.senderLabel.trim() : '';
-  const excerpt = normalizeReplyContextExcerpt(data.excerpt);
-  if (!messageId || !role || !senderLabel || !excerpt) return null;
-  const createdAt = typeof data.createdAt === 'number' && Number.isFinite(data.createdAt) && data.createdAt > 0
-    ? Math.floor(data.createdAt)
-    : undefined;
-  const conversationId = typeof data.conversationId === 'string' ? data.conversationId.trim() : '';
-  return {
-    messageId,
-    role,
-    senderLabel,
-    excerpt,
-    ...(createdAt ? { createdAt } : {}),
-    ...(conversationId ? { conversationId } : {}),
-  };
-}
-
-function normalizeReplyContextDetails(value: unknown): ReplyContextDetails | null {
-  const replyTo = normalizeReplyReference(value);
-  if (!replyTo || !value || typeof value !== 'object') return replyTo;
-  const expectedUserExcerpt = normalizeReplyContextExcerpt((value as Record<string, unknown>).expectedUserExcerpt, 240);
-  return {
-    ...replyTo,
-    ...(expectedUserExcerpt ? { expectedUserExcerpt } : {}),
-  };
-}
-
-function extractUiContentExcerpt(content: string | ContentBlock[]): string {
-  if (typeof content === 'string') return normalizeReplyContextExcerpt(content, 240);
-  const parts = content
-    .filter((block) => block.type === 'text' || block.type === 'file')
-    .map((block) => {
-      if (block.type === 'file') return block.fileName ? `[File: ${block.fileName}]` : '';
-      return String(block.text || '');
-    })
-    .filter(Boolean);
-  return normalizeReplyContextExcerpt(parts.join(' '), 240);
-}
-
-function isExpectedReplyUserMessage(replyTo: ReplyContextDetails, content: string | ContentBlock[]): boolean {
-  if (!replyTo.expectedUserExcerpt) return true;
-  const actualExcerpt = extractUiContentExcerpt(content);
-  return Boolean(actualExcerpt && actualExcerpt === replyTo.expectedUserExcerpt);
-}
-
-function extractBetween(value: string, start: string, end: string): string | null {
-  const startIndex = value.indexOf(start);
-  if (startIndex < 0) return null;
-  const contentStart = startIndex + start.length;
-  const endIndex = value.indexOf(end, contentStart);
-  if (endIndex < 0) return null;
-  return value.slice(contentStart, endIndex).trim();
-}
-
-function buildReplyWrappedPrompt(userPrompt: string, replyTo: ChatReplyReference | null): string {
-  if (!replyTo) return userPrompt || ' ';
-  const replyMetadata = JSON.stringify(replyTo);
-  return [
-    ANTSEED_REPLY_CONTEXT_JSON_START,
-    replyMetadata,
-    ANTSEED_REPLY_CONTEXT_JSON_END,
-    '',
-    ANTSEED_REPLY_CONTEXT_START,
-    'You are responding to a user message that is a reply to an earlier chat message.',
-    '',
-    'Earlier message:',
-    `Sender: ${replyTo.senderLabel}`,
-    `Role: ${replyTo.role}`,
-    'Excerpt:',
-    '"""',
-    replyTo.excerpt,
-    '"""',
-    '',
-    'Use the earlier message as immediate local context for interpreting the user message below.',
-    'This is especially important for references like "that", "it", "continue", "explain this", or "what you wrote".',
-    'Do not answer the earlier message by itself. Answer only the user message below.',
-    ANTSEED_REPLY_CONTEXT_END,
-    '',
-    ANTSEED_REPLY_USER_MESSAGE_START,
-    userPrompt || ' ',
-    ANTSEED_REPLY_USER_MESSAGE_END,
-  ].join('\n');
-}
-
-function parseReplyWrappedPrompt(text: string): ParsedReplyWrappedPrompt {
-  if (!text.startsWith(ANTSEED_REPLY_CONTEXT_JSON_START)) {
-    return { visibleText: text, replyTo: null };
-  }
-  const replyJson = extractBetween(text, ANTSEED_REPLY_CONTEXT_JSON_START, ANTSEED_REPLY_CONTEXT_JSON_END);
-  const visibleText = extractBetween(text, ANTSEED_REPLY_USER_MESSAGE_START, ANTSEED_REPLY_USER_MESSAGE_END);
-  if (replyJson === null || visibleText === null) {
-    return { visibleText: text, replyTo: null };
-  }
-  let replyTo: ChatReplyReference | null = null;
-  try {
-    replyTo = normalizeReplyReference(JSON.parse(replyJson));
-  } catch {
-    replyTo = null;
-  }
-  return { visibleText, replyTo };
 }
 
 function getReplyWrappedPromptReference(message: Message): ChatReplyReference | null {
@@ -2423,7 +2295,10 @@ export function registerPiChatHandlers({
           userPersisted = true;
           sendToRenderer('chat:ai-user-persisted', {
             conversationId,
-            message: convertUserMessageForUi(message),
+            message: {
+              ...convertUserMessageForUi(message),
+              ...(replyTo ? { replyTo } : {}),
+            },
           });
           return;
         }
@@ -2553,8 +2428,18 @@ export function registerPiChatHandlers({
 
     try {
       const userPromptText = [trimmedMessage, attachmentPromptText].filter((part) => part.length > 0).join('\n\n');
-      const promptText = buildReplyWrappedPrompt(userPromptText, replyTo);
-      await session.prompt(promptText || ' ', { images: effectiveAttachmentImages.length > 0 ? effectiveAttachmentImages : undefined });
+      if (replyTo) {
+        await session.sendCustomMessage(
+          {
+            customType: ANTSEED_REPLY_CONTEXT_CUSTOM_TYPE,
+            content: buildReplyContextMessageContent(replyTo),
+            display: false,
+            details: buildReplyContextDetails(replyTo, userPromptText),
+          },
+          { triggerTurn: false },
+        );
+      }
+      await session.prompt(userPromptText || ' ', { images: effectiveAttachmentImages.length > 0 ? effectiveAttachmentImages : undefined });
 
       if (terminalStreamFailure !== null) {
         // `terminalStreamFailure` is mutated inside the subscribe callback,

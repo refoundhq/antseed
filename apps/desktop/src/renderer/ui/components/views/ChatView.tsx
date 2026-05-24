@@ -29,7 +29,7 @@ import { ServiceSwitchTooltip } from '../chat/ServiceSwitchTooltip';
 import { AttachmentViewer, type ViewerAttachment } from '../chat/AttachmentViewer';
 import { BrowserPreview } from '../BrowserPreview';
 import type { ChatMessage, ChatReplyReference } from '../chat/chat-shared';
-import { buildDisplayMessages } from '../chat/chat-shared';
+import { buildDisplayMessages, getReplyableMessageText } from '../chat/chat-shared';
 import type { ChatWorkspaceGitStatus, RawChatAttachment } from '../../../types/bridge';
 import { AntStationStackedLogo } from '../AntStationLogo';
 import { cancelVoiceRecording, startVoiceRecording, stopVoiceRecording } from '../../lib/voice-recorder';
@@ -116,8 +116,8 @@ function getReplySenderLabel(message: ChatMessage): string {
 }
 
 function getReplyExcerpt(message: ChatMessage): string {
-  const text = getSearchableMessageText(message).replace(/\s+/g, ' ').trim();
-  if (!text) return '(attachment or tool output)';
+  const text = getReplyableMessageText(message).replace(/\s+/g, ' ').trim();
+  if (!text) return '(no visible message text)';
   return text.length > 180 ? `${text.slice(0, 180).trimEnd()}...` : text;
 }
 
