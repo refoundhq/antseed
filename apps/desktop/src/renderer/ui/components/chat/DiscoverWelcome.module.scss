@@ -742,6 +742,19 @@
   max-width: 220px;
   transition: opacity 0.15s;
   z-index: 10;
+  border: 1px solid var(--border-subtle, rgba(0, 0, 0, 0.08));
+  border-radius: 10px;
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.12);
+  
+  :global(.dark-theme) {
+    .tooltip {
+      border-color: rgba(255, 255, 255, 0.08);
+      box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+    }
+  }
+  
 }
 
 .tagMore:hover .tagMoreTooltip,
