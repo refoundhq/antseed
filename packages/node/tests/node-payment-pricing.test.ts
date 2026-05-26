@@ -175,7 +175,7 @@ describe('SellerRequestHandler payment pricing selection', () => {
     expect(pricing).toEqual({ inputUsdPerMillion: 0.05, outputUsdPerMillion: 0.1 });
   });
 
-  it('does not add a paid auth headroom for zero-cost responses', async () => {
+  it('does not touch payment state for free responses even when a paid session exists', async () => {
     const provider = makeProvider(0, 0, { name: 'free-tier', services: ['local-test'] });
     provider.handleRequest = vi.fn(async (req) => ({
       requestId: req.requestId,
@@ -191,9 +191,10 @@ describe('SellerRequestHandler payment pricing selection', () => {
     }));
 
     const sendNeedAuth = vi.fn();
+    const recordSpend = vi.fn();
     const handler = new SellerRequestHandler({
       providers: [provider],
-      sellerPaymentManager: makeSpmMock({ getPaymentRequirements: () => ({ minBudgetPerRequest: '0', suggestedAmount: '0' }) }),
+      sellerPaymentManager: makeSpmMock({ recordSpend, getPaymentRequirements: () => ({ minBudgetPerRequest: '0', suggestedAmount: '0' }) }),
       sessionTracker: null,
       channelsClient: {} as any,
       announcer: null,
@@ -207,9 +208,10 @@ describe('SellerRequestHandler payment pricing selection', () => {
     const { mux } = handler.handleConnection(conn, 'b'.repeat(40), paymentMux);
     await mux.handleFrame({ type: MessageType.HttpRequest, messageId: 1, payload: encodeHttpRequest({ requestId: 'req-zero-cost', method: 'POST', path: '/v1/chat/completions', headers: { 'content-type': 'application/json' }, body: new TextEncoder().encode(JSON.stringify({ model: 'local-test' })) }) });
 
+    expect(provider.handleRequest).toHaveBeenCalledOnce();
     expect(sentFrames.length).toBeGreaterThan(0);
-    expect(sendNeedAuth).toHaveBeenCalledOnce();
-    expect(sendNeedAuth).toHaveBeenCalledWith(expect.objectContaining({ requestId: 'req-zero-cost', lastRequestCost: '0', currentAcceptedCumulative: '0', requiredCumulativeAmount: '0' }));
+    expect(recordSpend).not.toHaveBeenCalled();
+    expect(sendNeedAuth).not.toHaveBeenCalled();
   });
 
   it('uses cumulative spend as NeedAuth required amount without double-counting the latest request', async () => {
@@ -303,7 +305,7 @@ describe('SellerRequestHandler payment pricing selection', () => {
     expect(BigInt(sendNeedAuth.mock.calls[0]![0].requiredCumulativeAmount)).toBeLessThanOrEqual(reserveMax);
   });
 
-  it('skips the 402 / ReserveAuth handshake when the service is free', async () => {
+  it('skips the 402 / ReserveAuth handshake when a first-time buyer requests a free service', async () => {
     const provider = makeProvider(0, 0, { name: 'free-tier', services: ['local-test'] });
     provider.handleRequest = vi.fn(async (req) => ({ requestId: req.requestId, statusCode: 200, headers: { 'content-type': 'application/json' }, body: new TextEncoder().encode(JSON.stringify({ ok: true })) }));
 
@@ -328,6 +330,75 @@ describe('SellerRequestHandler payment pricing selection', () => {
     expect(provider.handleRequest).toHaveBeenCalledOnce();
     expect(sendPaymentRequired).not.toHaveBeenCalled();
     expect(sendNeedAuth).not.toHaveBeenCalled();
+    const responseFrames = sentFrames.map((f) => decodeFrame(f)).filter((d) => d?.message.type === MessageType.HttpResponse);
+    expect(responseFrames).toHaveLength(1);
+    const response = decodeHttpResponse(responseFrames[0]!.message.payload);
+    expect(response.statusCode).toBe(200);
+  });
+
+  it('skips the first-time buyer 402 when the requested service has a free override on a paid provider', async () => {
+    const provider = makeProvider(10, 20, {
+      name: 'mixed-tier',
+      services: ['free-model'],
+      servicePricing: { 'free-model': { inputUsdPerMillion: 0, outputUsdPerMillion: 0 } },
+    });
+    provider.handleRequest = vi.fn(async (req) => ({ requestId: req.requestId, statusCode: 200, headers: { 'content-type': 'application/json' }, body: new TextEncoder().encode(JSON.stringify({ ok: true })) }));
+
+    const sendPaymentRequired = vi.fn();
+    const handler = new SellerRequestHandler({
+      providers: [provider],
+      sellerPaymentManager: makeSpmMock({ hasSession: () => false, getChannelByPeer: () => undefined }),
+      sessionTracker: null,
+      channelsClient: {} as any,
+      announcer: null,
+      emit: () => false,
+    });
+
+    const sentFrames: Uint8Array[] = [];
+    const conn = { send(frame: Uint8Array) { sentFrames.push(frame); } } as any;
+    const paymentMux = { sendNeedAuth: vi.fn(), sendPaymentRequired } as any;
+    const { mux } = handler.handleConnection(conn, 'b'.repeat(40), paymentMux);
+
+    await mux.handleFrame({ type: MessageType.HttpRequest, messageId: 1, payload: encodeHttpRequest({ requestId: 'req-free-override', method: 'POST', path: '/v1/chat/completions', headers: { 'content-type': 'application/json' }, body: new TextEncoder().encode(JSON.stringify({ model: 'free-model' })) }) });
+
+    expect(provider.handleRequest).toHaveBeenCalledOnce();
+    expect(sendPaymentRequired).not.toHaveBeenCalled();
+    const response = decodeHttpResponse(decodeFrame(sentFrames[0]!)!.message.payload);
+    expect(response.statusCode).toBe(200);
+  });
+
+  it('continues serving a free service even when an existing paid channel is exhausted', async () => {
+    const provider = makeProvider(0, 0, { name: 'free-tier', services: ['local-test'] });
+    provider.handleRequest = vi.fn(async (req) => ({ requestId: req.requestId, statusCode: 200, headers: { 'content-type': 'application/json' }, body: new TextEncoder().encode(JSON.stringify({ ok: true })) }));
+
+    const sendPaymentRequired = vi.fn();
+    const sendNeedAuth = vi.fn();
+    const settleSession = vi.fn(async () => {});
+    const handler = new SellerRequestHandler({
+      providers: [provider],
+      sellerPaymentManager: makeSpmMock({
+        getCumulativeSpend: () => 1_000_000n,
+        getAcceptedCumulative: () => 1_000_000n,
+        getReserveMax: () => 1_000_000n,
+        settleSession,
+      }),
+      sessionTracker: null,
+      channelsClient: {} as any,
+      announcer: null,
+      emit: () => false,
+    });
+
+    const sentFrames: Uint8Array[] = [];
+    const conn = { send(frame: Uint8Array) { sentFrames.push(frame); } } as any;
+    const paymentMux = { sendNeedAuth, sendPaymentRequired } as any;
+    const { mux } = handler.handleConnection(conn, 'b'.repeat(40), paymentMux);
+
+    await mux.handleFrame({ type: MessageType.HttpRequest, messageId: 1, payload: encodeHttpRequest({ requestId: 'req-free-exhausted-channel', method: 'POST', path: '/v1/chat/completions', headers: { 'content-type': 'application/json' }, body: new TextEncoder().encode(JSON.stringify({ model: 'local-test' })) }) });
+
+    expect(provider.handleRequest).toHaveBeenCalledOnce();
+    expect(sendPaymentRequired).not.toHaveBeenCalled();
+    expect(sendNeedAuth).not.toHaveBeenCalled();
+    expect(settleSession).not.toHaveBeenCalled();
     const responseFrames = sentFrames.map((f) => decodeFrame(f)).filter((d) => d?.message.type === MessageType.HttpResponse);
     expect(responseFrames).toHaveLength(1);
     const response = decodeHttpResponse(responseFrames[0]!.message.payload);

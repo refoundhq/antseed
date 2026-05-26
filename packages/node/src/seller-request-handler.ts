@@ -101,21 +101,20 @@ export class SellerRequestHandler {
         return;
       }
 
+      const requestPricing = this.resolveProviderPricing(provider, request);
+      const isFreeService = this._isFreePricing(requestPricing);
+
       // Reject with 402 if no active payment session and channels client is configured.
       const spm = this._deps.sellerPaymentManager;
       const spmAuthorized = spm?.hasSession(buyerPeerId) ?? false;
       if (this._deps.channelsClient && !spmAuthorized) {
-        const providerPricing = this.resolveProviderPricing(provider, request);
-        // Free services (both input and output priced at 0) skip the payment
-        // channel handshake entirely — no 402, no ReserveAuth, no on-chain reserve.
-        const isFree = providerPricing
-          ? providerPricing.inputUsdPerMillion === 0 && providerPricing.outputUsdPerMillion === 0
-          : false;
-        if (isFree) {
+        // Free services skip the payment channel handshake entirely — no 402,
+        // no ReserveAuth, no on-chain reserve.
+        if (isFreeService) {
           debugLog(`[SellerHandler] Free service for ${buyerPeerId.slice(0, 12)}... — skipping 402 / payment channel`);
         } else {
           const requirements = spm?.getPaymentRequirements(
-            request.requestId, buyerPeerId, providerPricing,
+            request.requestId, buyerPeerId, requestPricing,
           );
           if (requirements) {
             debugLog(`[SellerHandler] No payment session for ${buyerPeerId.slice(0, 12)}... — sending 402 + PaymentRequired`);
@@ -150,8 +149,10 @@ export class SellerRequestHandler {
         }
       }
 
-      // Check budget before routing — reject if buyer hasn't authorized enough
-      if (spm) {
+      // Check budget before routing — reject if buyer hasn't authorized enough.
+      // Free requests must not be blocked by an existing exhausted/blocked paid
+      // payment channel for the same buyer.
+      if (spm && !isFreeService) {
         const initialSession = spm.getChannelByPeer(buyerPeerId);
         if (initialSession) {
           // Drain any in-flight SpendingAuth processing (e.g. an on-chain top-up
@@ -203,9 +204,8 @@ export class SellerRequestHandler {
             }
           }
           if (isBlocked || (spent > 0n && (spent > accepted || isAtExactSpendLimit))) {
-            const providerPricing = this.resolveProviderPricing(provider, request);
             const baseRequirements = spm.getPaymentRequirements(
-              request.requestId, buyerPeerId, providerPricing,
+              request.requestId, buyerPeerId, requestPricing,
             );
             // Tell the buyer exactly how much delivered spend remains unsigned.
             // Do not add forward headroom here: SpendingAuth is claimable
@@ -352,7 +352,6 @@ export class SellerRequestHandler {
 
         // Record metering
         const latencyMs = Date.now() - startTime;
-        const requestPricing = this.resolveProviderPricing(provider, request);
         if (this._deps.sessionTracker) {
           await this._deps.sessionTracker.recordMetering({
             buyerPeerId,
@@ -370,7 +369,7 @@ export class SellerRequestHandler {
 
         // Record spend and send NeedAuth with cost data after every request.
         // The buyer validates the cost independently and responds with SpendingAuth.
-        if (spm?.hasSession(buyerPeerId)) {
+        if (!isFreeService && spm?.hasSession(buyerPeerId)) {
           const usage = responseUsage;
           const costUsdc = computeCostUsdc(usage.freshInputTokens, usage.outputTokens, requestPricing, usage.cachedInputTokens);
           const session = spm.getChannelByPeer(buyerPeerId);
@@ -510,6 +509,13 @@ export class SellerRequestHandler {
   }
 
   // -- Private helpers --
+
+  private _isFreePricing(pricing: import('./interfaces/seller-provider.js').ProviderTokenPricingUsdPerMillion): boolean {
+    const cachedPrice = pricing.cachedInputUsdPerMillion ?? pricing.inputUsdPerMillion;
+    return pricing.inputUsdPerMillion === 0
+      && pricing.outputUsdPerMillion === 0
+      && cachedPrice === 0;
+  }
 
   private _parseJsonBody(body: Uint8Array): unknown | null {
     try {
