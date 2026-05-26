@@ -154,7 +154,7 @@ function renderInlineToken(token: MarkdownToken, key: string, highlightQuery?: s
           <code className="chat-inline-code">
             {splitHighlightedText(codeText, highlightQuery, key, activeHighlight)}
           </code>
-          <InlineCodeCopyButton text={codeText} />
+          <CopyButton text={codeText} className="chat-inline-code-copy-btn" size={12} stopClickPropagation />
         </span>
       );
     }
@@ -228,7 +228,7 @@ function renderListItemContent(token: MarkdownToken, key: string, highlightQuery
   return splitHighlightedText(normalizeText(token.text ?? token.raw), highlightQuery, key, activeHighlight);
 }
 
-function InlineCodeCopyButton({ text }: { text: string }) {
+export function useCopyToClipboard(text: string, timeout = 1500) {
   const [copied, setCopied] = useState(false);
   const timerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
 
@@ -238,70 +238,38 @@ function InlineCodeCopyButton({ text }: { text: string }) {
     };
   }, []);
 
-  const handleCopy = useCallback((e: React.MouseEvent) => {
-    e.stopPropagation();
+  const copy = useCallback((e?: React.MouseEvent) => {
+    e?.stopPropagation();
     if (!text) return;
     void navigator.clipboard.writeText(text).then(() => {
       setCopied(true);
       if (timerRef.current !== null) window.clearTimeout(timerRef.current);
-      timerRef.current = window.setTimeout(() => setCopied(false), 1500);
+      timerRef.current = window.setTimeout(() => setCopied(false), timeout);
     }).catch(() => {/* clipboard denied */});
-  }, [text]);
+  }, [text, timeout]);
 
-  return (
-    <Tooltip.Provider delayDuration={300}>
-      <Tooltip.Root>
-        <Tooltip.Trigger asChild>
-          <button
-            className={`chat-inline-code-copy-btn${copied ? ' chat-inline-code-copy-btn-copied' : ''}`}
-            type="button"
-            onClick={handleCopy}
-            aria-label={copied ? 'Copied!' : 'Copy'}
-          >
-            <HugeiconsIcon icon={copied ? Tick02Icon : Copy01Icon} size={12} color="currentColor" strokeWidth={2} />
-          </button>
-        </Tooltip.Trigger>
-        <Tooltip.Portal>
-          <Tooltip.Content className="chat-copy-tooltip" sideOffset={5}>
-            {copied ? 'Copied!' : 'Copy'}
-            <Tooltip.Arrow className="chat-copy-tooltip-arrow" />
-          </Tooltip.Content>
-        </Tooltip.Portal>
-      </Tooltip.Root>
-    </Tooltip.Provider>
-  );
+  return { copied, copy };
 }
 
-function BlockquoteCopyButton({ text }: { text: string }) {
-  const [copied, setCopied] = useState(false);
-  const timerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
-
-  useEffect(() => {
-    return () => {
-      if (timerRef.current !== null) window.clearTimeout(timerRef.current);
-    };
-  }, []);
-
-  const handleCopy = useCallback(() => {
-    if (!text) return;
-    void navigator.clipboard.writeText(text).then(() => {
-      setCopied(true);
-      if (timerRef.current !== null) window.clearTimeout(timerRef.current);
-      timerRef.current = window.setTimeout(() => setCopied(false), 1500);
-    }).catch(() => {/* clipboard denied */});
-  }, [text]);
+function CopyButton({ text, className, size = 14, stopClickPropagation = false }: {
+  text: string;
+  className: string;
+  size?: number;
+  stopClickPropagation?: boolean;
+}) {
+  const { copied, copy } = useCopyToClipboard(text);
 
   return (
     <Tooltip.Provider delayDuration={300}>
       <Tooltip.Root>
         <Tooltip.Trigger asChild>
           <button
-            className={`chat-blockquote-copy-btn${copied ? ' chat-blockquote-copy-btn-copied' : ''}`}
+            className={`${className}${copied ? ` ${className}-copied` : ''}`}
             type="button"
-            onClick={handleCopy}
+            onClick={stopClickPropagation ? (e) => copy(e) : () => copy()}
             aria-label={copied ? 'Copied!' : 'Copy'}
           >
-            <HugeiconsIcon icon={copied ? Tick02Icon : Copy01Icon} size={14} color="currentColor" strokeWidth={2} />
+            <HugeiconsIcon icon={copied ? Tick02Icon : Copy01Icon} size={size} color="currentColor" strokeWidth={2} />
           </button>
         </Tooltip.Trigger>
         <Tooltip.Portal>
@@ -316,40 +284,14 @@ function BlockquoteCopyButton({ text }: { text: string }) {
 }
 
 function CodeBlock({ code, lang, highlightQuery, activeHighlight }: { code: string; lang?: string; highlightQuery?: string; activeHighlight?: boolean }) {
-  const [copied, setCopied] = useState(false);
+  const { copied, copy } = useCopyToClipboard(code);
   const langLabel = normalizeText(lang).trim() || 'code';
-
-  const handleCopy = useCallback(() => {
-    void navigator.clipboard.writeText(code).then(() => {
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1500);
-    }).catch(() => {/* clipboard denied */});
-  }, [code]);
 
   return (
     <div className="chat-code-container">
       <div className="chat-code-header">
         <span className="code-lang">{langLabel}</span>
-        <Tooltip.Provider delayDuration={300}>
-          <Tooltip.Root>
-            <Tooltip.Trigger asChild>
-              <button
-                className={`chat-code-copy-btn${copied ? ' chat-code-copy-btn-copied' : ''}`}
-                type="button"
-                onClick={handleCopy}
-                aria-label={copied ? 'Copied!' : 'Copy'}
-              >
-                <HugeiconsIcon icon={copied ? Tick02Icon : Copy01Icon} size={14} color="currentColor" strokeWidth={2} />
-              </button>
-            </Tooltip.Trigger>
-            <Tooltip.Portal>
-              <Tooltip.Content className="chat-copy-tooltip" sideOffset={5}>
-                {copied ? 'Copied!' : 'Copy'}
-                <Tooltip.Arrow className="chat-copy-tooltip-arrow" />
-              </Tooltip.Content>
-            </Tooltip.Portal>
-          </Tooltip.Root>
-        </Tooltip.Provider>
+        <CopyButton text={code} className="chat-code-copy-btn" />
       </div>
       <pre>
         <code>{splitHighlightedText(code, highlightQuery, 'code', activeHighlight)}</code>
@@ -386,7 +328,7 @@ function renderBlockToken(token: MarkdownToken, key: string, highlightQuery?: st
       return (
         <div key={key} className="chat-blockquote-container">
           <div className="chat-blockquote-header">
-            <BlockquoteCopyButton text={bqText} />
+            <CopyButton text={bqText} className="chat-blockquote-copy-btn" />
           </div>
           <blockquote>{renderBlockTokens(token.tokens ?? [], key, highlightQuery, activeHighlight)}</blockquote>
         </div>

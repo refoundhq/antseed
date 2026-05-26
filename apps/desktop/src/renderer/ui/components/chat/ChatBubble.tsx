@@ -4,7 +4,7 @@ import { HugeiconsIcon } from '@hugeicons/react';
 import { Copy01Icon, Tick02Icon, BrowserIcon } from '@hugeicons/core-free-icons';
 import * as Tooltip from '@radix-ui/react-tooltip';
 import type { ReactNode } from 'react';
-import { MarkdownContent } from './chat-utils.js';
+import { MarkdownContent, useCopyToClipboard } from './chat-utils.js';
 import styles from './ChatBubble.module.scss';
 import { AttachmentViewer, type ViewerAttachment } from './AttachmentViewer';
 import type { ChatMessage, ContentBlock } from './chat-shared';
@@ -830,24 +830,8 @@ function extractPlainText(content: unknown): string {
 }
 
 function CopyResponseButton({ content }: { content: unknown }) {
-  const [copied, setCopied] = useState(false);
-  const timerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
-
-  useEffect(() => {
-    return () => {
-      if (timerRef.current !== null) window.clearTimeout(timerRef.current);
-    };
-  }, []);
-
-  const handleCopy = useCallback(() => {
-    const text = extractPlainText(content);
-    if (!text) return;
-    navigator.clipboard.writeText(text).then(() => {
-      setCopied(true);
-      if (timerRef.current !== null) window.clearTimeout(timerRef.current);
-      timerRef.current = window.setTimeout(() => setCopied(false), 2000);
-    }).catch(() => {/* clipboard denied — silently ignore */});
-  }, [content]);
+  const text = extractPlainText(content);
+  const { copied, copy } = useCopyToClipboard(text, 2000);
 
   return (
     <Tooltip.Provider delayDuration={300}>
@@ -856,7 +840,7 @@ function CopyResponseButton({ content }: { content: unknown }) {
           <button
             type="button"
             className={`${styles.copyResponseBtn}${copied ? ` ${styles.copyResponseBtnCopied}` : ''}`}
-            onClick={handleCopy}
+            onClick={() => copy()}
             aria-label={copied ? 'Copied!' : 'Copy response'}
           >
             <HugeiconsIcon

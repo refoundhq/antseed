@@ -134,15 +134,22 @@
   z-index: 1;
 }
 
-.chat-inline-code-wrap:hover .chat-inline-code-copy-btn {
+.chat-inline-code-wrap:hover .chat-inline-code-copy-btn,
+.chat-inline-code-wrap .chat-inline-code-copy-btn:focus-visible {
   opacity: 1;
   pointer-events: auto;
 }
 
-.chat-inline-code-copy-btn:hover {
+.chat-inline-code-copy-btn:hover,
+.chat-inline-code-copy-btn:focus-visible {
   color: var(--text-primary);
   background: var(--bg-hover);
   border-color: var(--text-muted);
+}
+
+.chat-inline-code-copy-btn:focus-visible {
+  outline: 2px solid var(--accent-blue, #3b82f6);
+  outline-offset: 1px;
 }
 
 .chat-inline-code-copy-btn-copied {
@@ -186,9 +193,15 @@
   transition: color 0.1s, background 0.1s;
 }
 
-.chat-code-copy-btn:hover {
+.chat-code-copy-btn:hover,
+.chat-code-copy-btn:focus-visible {
   color: var(--text-primary);
   background: var(--bg-hover);
+}
+
+.chat-code-copy-btn:focus-visible {
+  outline: 2px solid var(--accent-blue, #3b82f6);
+  outline-offset: 1px;
 }
 
 .chat-code-copy-btn-copied {
@@ -258,7 +271,8 @@
   transition: opacity 0.15s ease;
 }
 
-.chat-blockquote-container:hover .chat-blockquote-header {
+.chat-blockquote-container:hover .chat-blockquote-header,
+.chat-blockquote-container .chat-blockquote-header:focus-within {
   opacity: 1;
 }
 
@@ -275,10 +289,16 @@
   transition: color 0.1s, background 0.1s;
 }
 
-.chat-blockquote-copy-btn:hover {
+.chat-blockquote-copy-btn:hover,
+.chat-blockquote-copy-btn:focus-visible {
   color: var(--text-primary);
   background: var(--bg-hover);
   border-color: var(--text-muted);
+}
+
+.chat-blockquote-copy-btn:focus-visible {
+  outline: 2px solid var(--accent-blue, #3b82f6);
+  outline-offset: 1px;
 }
 
 .chat-blockquote-copy-btn-copied {
