@@ -90,7 +90,7 @@ export function StakeCard({ diemPrice, apy }: StakeCardProps) {
     setTab(next);
     setAmtEdited(false);
     if (next === 'stake') setAmt(stakeDefaultAmt);
-    if (next === 'unstake') setAmt(user.stakedDiem ? fmtDiem(toDiemNumber(user.stakedDiem)) : '0');
+    if (next === 'unstake') setAmt(user.stakedDiem ? formatDiemInput(user.stakedDiem) : '0');
   };
 
   const diemValue = parseFloat(amt) || 0;
@@ -104,7 +104,7 @@ export function StakeCard({ diemPrice, apy }: StakeCardProps) {
     setAmtEdited(true);
     if (v === 'max') {
       if (tab === 'stake' && stakeMaxAmount != null) setAmt(formatDiemInput(stakeMaxAmount));
-      else if (tab === 'unstake' && user.stakedDiem != null) setAmt(String(toDiemNumber(user.stakedDiem)));
+      else if (tab === 'unstake' && user.stakedDiem != null) setAmt(formatDiemInput(user.stakedDiem));
     } else {
       setAmt(v);
     }
@@ -374,6 +374,19 @@ function UnstakePanel(props: UnstakePanelProps) {
   const { state } = useUnstakeState();
 
   const stakedNum = toDiemNumber(props.stakedDiem);
+  const unstakeQuickOptions = useMemo(() => {
+    const staked = props.stakedDiem ?? 0n;
+    const disabled = props.isConnected && staked === 0n;
+    const pct = (value: bigint) => formatDiemInput((staked * value) / 100n);
+
+    return [
+      { label: '25%', value: pct(25n), disabled },
+      { label: '50%', value: pct(50n), disabled },
+      { label: '75%', value: pct(75n), disabled },
+      { label: 'Max', value: 'max', disabled },
+    ];
+  }, [props.isConnected, props.stakedDiem]);
+
   let parsedAmt: bigint = 0n;
   try {
     parsedAmt = props.amt ? parseEther(props.amt) : 0n;
@@ -415,15 +428,7 @@ function UnstakePanel(props: UnstakePanelProps) {
             setAmt={props.setAmt}
             amtUsd={props.amtUsd}
           />
-          <QuickSet
-            options={[
-              { label: '25%', value: String(stakedNum * 0.25) },
-              { label: '50%', value: String(stakedNum * 0.5) },
-              { label: '75%', value: String(stakedNum * 0.75) },
-              { label: 'Max', value: 'max' },
-            ]}
-            onSet={props.setQuick}
-          />
+          <QuickSet options={unstakeQuickOptions} onSet={props.setQuick} />
           {props.isConnected ? (
             <button
               className="stake-cta ghost unstake-cta"
@@ -760,7 +765,7 @@ function QuickSet({
   return (
     <div className="quick-set">
       {options.map((o) => (
-        <button key={o.value} disabled={o.disabled} onClick={() => onSet(o.value)}>{o.label}</button>
+        <button key={`${o.label}-${o.value}`} disabled={o.disabled} onClick={() => onSet(o.value)}>{o.label}</button>
       ))}
     </div>
   );
