@@ -237,7 +237,7 @@ export const integrations: Integration[] = [
     description: [
       "Codex is OpenAI's terminal coding agent. Recent versions ignore `OPENAI_BASE_URL` and instead read provider config from Codex settings.",
       '`antseed codex` supplies that provider config for one run with Codex `-c` overrides, points it at the active buyer proxy, sets the placeholder API key, and leaves your real `CODEX_HOME` untouched.',
-      'If you prefer a persistent Codex setup, you can still add an AntSeed provider/profile to `~/.codex/config.toml`; the wrapper is the shortest path for one-off sessions.',
+      'If you prefer a persistent manual setup, create `~/.codex/antseed.config.toml` and launch Codex with `codex --profile antseed`; the wrapper is still the shortest path for one-off sessions.',
     ],
     install: [
       { label: 'Install Codex globally', command: 'npm install -g @openai/codex' },
@@ -253,34 +253,30 @@ export const integrations: Integration[] = [
       },
       {
         kind: 'file',
-        path: '~/.codex/config.toml',
+        path: '~/.codex/antseed.config.toml',
         language: 'toml',
-        snippet: `# Manual alternative: register AntSeed as a custom model provider.
-[model_providers.antseed]
-name    = "AntSeed"
-base_url = "http://localhost:${ANT_PORT}/v1"
-wire_api = "responses"
-env_key = "ANTSEED_API_KEY"
-
-# Bundle the provider + a default model into a profile.
-[profiles.antseed]
-model          = "claude-sonnet-4-6"
+        snippet: `# Loaded by: codex --profile antseed
+# Set this to a service id returned by http://localhost:${ANT_PORT}/v1/models
+# after pinning an AntSeed peer.
+model = "claude-sonnet-4-6"
 model_provider = "antseed"
 
-# Optional: make AntSeed the default profile so you don't need --profile every time.
-# profile = "antseed"`,
+[model_providers.antseed]
+name = "AntSeed"
+base_url = "http://localhost:${ANT_PORT}/v1"
+wire_api = "responses"`,
         note:
-          'Manual profile only: this must be your **user-level** `~/.codex/config.toml`. Also export `ANTSEED_API_KEY=antseed` before launching Codex directly. Project-local `./.codex/config.toml` provider blocks are ignored by Codex.',
+          'Manual profile only: this must be your **user-level** `~/.codex/antseed.config.toml`, then launch with `codex --profile antseed`. If your buyer proxy uses a non-default port, update `base_url` to match it. Project-local `./.codex/config.toml` provider blocks are ignored by Codex.',
       },
       {
         kind: 'gui',
         instructions:
-          'No real OpenAI key is needed. The wrapper sets `ANTSEED_API_KEY` automatically; for manual profiles, export `ANTSEED_API_KEY=antseed` or enter any non-empty placeholder if Codex prompts.',
+          'No real OpenAI key is needed. The AntSeed proxy authenticates with your local buyer identity; the wrapper and manual profile both point Codex at the local proxy instead of OpenAI.',
       },
     ],
     modelHints: {
       suggested: ['claude-sonnet-4-6', 'deepseek-v3.1', 'kimi-k2.5', 'qwen-3-coder-480b'],
-      note: 'Pass the peer service id to `antseed codex --model <service-id>`. For a manual profile, set `model = "<service-id>"` inside `[profiles.antseed]` or override with `codex --profile antseed --model <service-id>`.',
+      note: 'Pass the peer service id to `antseed codex --model <service-id>`. For a manual profile, set top-level `model = "<service-id>"` in `~/.codex/antseed.config.toml` or override with `codex --profile antseed --model <service-id>`.',
     },
     test: [
       {
@@ -292,12 +288,12 @@ model_provider = "antseed"
 "deepseek-v4-flash"
 "gpt-oss-120b"`,
         note:
-          'Whatever appears here is a valid value for `model = ...` inside `[profiles.antseed]` (or for `codex --profile antseed --model <id>`).',
+          'Whatever appears here is a valid value for top-level `model = ...` in `~/.codex/antseed.config.toml` (or for `codex --profile antseed --model <id>`).',
       },
       {
         label: 'Run Codex through the wrapper',
         command: 'antseed codex --model deepseek-v4-flash',
-        note: 'Manual profile equivalent: `ANTSEED_API_KEY=antseed codex --profile antseed --model deepseek-v4-flash`.',
+        note: 'Manual profile equivalent: `codex --profile antseed --model deepseek-v4-flash`.',
       },
       {
         label: 'Verify inference is actually paid through AntSeed',
@@ -312,7 +308,7 @@ Deposits reserved:           0 USDC → 1 USDC`,
     troubleshooting: [
       {
         problem: '`OPENAI_BASE_URL` / `OPENAI_API_KEY` are being ignored',
-        fix: 'Expected on recent Codex builds. Use `antseed codex --model <service-id>` so the wrapper injects the provider config for the current run, or use the manual `~/.codex/config.toml` profile above.',
+        fix: 'Expected on recent Codex builds. Use `antseed codex --model <service-id>` so the wrapper injects the provider config for the current run, or use the manual `~/.codex/antseed.config.toml` profile above.',
       },
       {
         problem: 'How can I tell if Codex is actually routing through AntSeed?',
@@ -320,19 +316,19 @@ Deposits reserved:           0 USDC → 1 USDC`,
       },
       {
         problem: 'Codex prints `Ignored unsupported project-local config keys … model_provider, model_providers`',
-        fix: 'Provider settings must live in your **user-level** `~/.codex/config.toml`. Codex silently rejects them in a project-local `./.codex/config.toml` and falls back to its default (OpenAI). Move the `[model_providers.antseed]` and `[profiles.antseed]` blocks to `~/.codex/config.toml` and relaunch.',
+        fix: 'Provider settings must live in your **user-level** Codex profile file. For this manual flow, put the top-level `model`, `model_provider`, and `[model_providers.antseed]` block in `~/.codex/antseed.config.toml`, then relaunch with `codex --profile antseed`. Codex silently rejects provider blocks in project-local `./.codex/config.toml` and falls back to its default provider.',
       },
       {
         problem: 'Hand-written Codex `-c` provider overrides behave inconsistently',
-        fix: 'Use `antseed codex --model <service-id>` so AntSeed supplies the complete provider block (`base_url`, `wire_api`, `env_key`, and `model_provider`) for the current run. If managing config yourself, keep the full provider/profile in user-level `~/.codex/config.toml`.',
+        fix: 'Use `antseed codex --model <service-id>` so AntSeed supplies the complete provider block (`base_url`, `wire_api`, and `model_provider`) for the current run. If managing config yourself, keep the full provider/profile in user-level `~/.codex/antseed.config.toml`.',
       },
       {
         problem: 'Streaming stops after the first chunk with a manual profile',
-        fix: 'Use `antseed codex`, or set `wire_api = "responses"` in your manual `[model_providers.antseed]` block.',
+        fix: 'Use `antseed codex`, or set `wire_api = "responses"` in the manual `[model_providers.antseed]` block.',
       },
       {
         problem: '`unknown profile: antseed`',
-        fix: 'Codex caches the config on launch. Make sure you saved `~/.codex/config.toml`, then start a fresh `codex` session.',
+        fix: 'Codex caches profile config on launch. Make sure you saved `~/.codex/antseed.config.toml`, then start a fresh `codex --profile antseed` session.',
       },
       {
         problem: 'Hangs forever on first message',
@@ -344,7 +340,7 @@ Deposits reserved:           0 USDC → 1 USDC`,
       { label: 'Codex sample config', href: 'https://developers.openai.com/codex/config-sample' },
     ],
     agentSummary:
-      'Prefer `antseed codex --model <service-id>`. It injects the AntSeed Codex provider for one run using base_url=http://localhost:8377/v1, wire_api="responses", and ANTSEED_API_KEY=antseed. Manual alternative: add [model_providers.antseed] and [profiles.antseed] to user-level ~/.codex/config.toml, then run `ANTSEED_API_KEY=antseed codex --profile antseed`.',
+      'Prefer `antseed codex --model <service-id>`. It injects the AntSeed Codex provider for one run using base_url=http://localhost:8377/v1 and wire_api="responses". Manual alternative: create user-level ~/.codex/antseed.config.toml with top-level model/model_provider plus [model_providers.antseed], then run `codex --profile antseed`.',
   },
   {
     slug: 'opencode',
