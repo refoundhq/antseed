@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { Button } from '@antseed/ui';
 import { useUiSnapshot } from '../../hooks/useUiSnapshot';
 import { useActions } from '../../hooks/useActions';
 
@@ -169,13 +170,13 @@ export function ConfigView({ active }: ConfigViewProps) {
 
           <div className="settings-footer">
           {dirty && (
-            <button
+            <Button
               className="settings-save-btn"
               onClick={() => void handleSaveAndRestart()}
               disabled={configSaving}
             >
               {configSaving ? 'Saving...' : 'Save & Restart'}
-            </button>
+            </Button>
           )}
           </div>
         </article>
@@ -234,14 +235,13 @@ export function ConfigView({ active }: ConfigViewProps) {
                 <h4>Better accuracy</h4>
                 <p>Install Base multilingual for improved transcription quality. It is about 142 MB.</p>
               </div>
-              <button
-                type="button"
+              <Button
                 className="settings-save-btn"
                 onClick={() => void handleInstallBaseModel()}
                 disabled={voiceInstalling || voiceStatus?.models.some((model) => model.id === 'base' && model.installed)}
               >
                 {voiceInstalling ? 'Installing…' : voiceStatus?.models.some((model) => model.id === 'base' && model.installed) ? 'Installed' : 'Install Base'}
-              </button>
+              </Button>
             </div>
             {voiceMessage ? <p className="settings-note">{voiceMessage}</p> : null}
             {voiceStatus?.error ? <p className="settings-message error">{voiceStatus.error}</p> : null}

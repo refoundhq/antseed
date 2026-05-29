@@ -15,6 +15,7 @@ import {
 import { EMISSIONS_CLAIM_ABI } from '../emissions-abi';
 import { getErrorMessage, usePaymentNetwork } from '../payment-network';
 import { useAuthorizedWallet } from '../context/AuthorizedWalletContext';
+import { Button } from '../components/Button';
 
 interface EmissionsViewProps {
   config: PaymentConfig | null;
@@ -391,20 +392,20 @@ export function EmissionsView({ config }: EmissionsViewProps) {
             <div className="status-msg status-error">{sellerClaimError || buyerClaimError}</div>
           )}
           <div className="emissions-claim-actions">
-            <button
-              className="btn-primary"
+            <Button
+              fullWidth
               onClick={handleClaimSeller}
               disabled={!pending || pending.rows.every((r) => r.isCurrent || r.seller.claimed || r.seller.amount === '0')}
             >
               Claim seller
-            </button>
-            <button
-              className="btn-primary"
+            </Button>
+            <Button
+              fullWidth
               onClick={handleClaimBuyer}
               disabled={!pending || pending.rows.every((r) => r.isCurrent || r.buyer.claimed || r.buyer.amount === '0')}
             >
               Claim buyer
-            </button>
+            </Button>
           </div>
         </div>
       </section>
@@ -429,8 +430,9 @@ export function EmissionsView({ config }: EmissionsViewProps) {
             </p>
           </div>
           {config?.antsTokenAddress && connector && (
-            <button
-              className="btn-outline"
+            <Button
+              fullWidth
+              variant="outline"
               onClick={async () => {
                 try {
                   const provider = await connector.getProvider();
@@ -451,7 +453,7 @@ export function EmissionsView({ config }: EmissionsViewProps) {
               }}
             >
               Add ANTS to wallet
-            </button>
+            </Button>
           )}
         </div>
       </section>
@@ -523,4 +525,3 @@ function EmissionsTable({ rows, shares }: {
     </div>
   );
 }
-

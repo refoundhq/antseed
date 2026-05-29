@@ -10,6 +10,7 @@ import {
 import { formatUnits, parseUnits } from 'viem';
 import type { BalanceData, PaymentConfig } from '../types';
 import { getErrorMessage, usePaymentNetwork } from '../payment-network';
+import { Button } from './Button';
 import './DepositView.scss';
 
 const MIN_FIRST_DEPOSIT = 1; // USDC — matches AntseedDeposits.MIN_BUYER_DEPOSIT
@@ -419,14 +420,13 @@ function CryptoDeposit({ config, balance, buyerAddress, onDeposited }: {
           <div className="deposit-connect-wrapper">
             <ConnectButton.Custom>
               {({ openConnectModal, mounted }) => (
-                <button
-                  type="button"
-                  className="btn-primary"
+                <Button
+                  fullWidth
                   onClick={openConnectModal}
                   disabled={!mounted}
                 >
                   Connect Wallet
-                </button>
+                </Button>
               )}
             </ConnectButton.Custom>
           </div>
@@ -444,9 +444,9 @@ function CryptoDeposit({ config, balance, buyerAddress, onDeposited }: {
           <div className="deposit-success-note">
             Your credits are now available. You can return to AntSeed Desktop to continue.
           </div>
-          <button className="btn-outline" onClick={resetForm} style={{ marginTop: 12 }}>
+          <Button fullWidth variant="outline" onClick={resetForm} style={{ marginTop: 12 }}>
             Deposit more
-          </button>
+          </Button>
         </div>
       ) : (
         <>
@@ -605,8 +605,8 @@ function CryptoDeposit({ config, balance, buyerAddress, onDeposited }: {
             )}
           </div>
 
-          <button
-            className="btn-primary"
+          <Button
+            fullWidth
             onClick={handleDeposit}
             disabled={step !== 'idle' || !isValidAmount || !config || isSwitchingChain || customTargetInvalid || !depositTarget || allowanceLoading || allowanceFetching || walletUsdcLoading || walletUsdcFetching || !walletUsdcKnown}
           >
@@ -618,7 +618,7 @@ function CryptoDeposit({ config, balance, buyerAddress, onDeposited }: {
              step === 'depositing' ? 'Depositing...' :
              allowanceShortfall ? `Step 1: Approve ${amount || '0'} USDC` :
              'Step 2: Deposit USDC'}
-          </button>
+          </Button>
         </>
       )}
 
