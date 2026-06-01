@@ -1,6 +1,6 @@
 {
   "name": "@antseed/payments",
-  "version": "0.1.21",
+  "version": "0.1.23",
   "description": "Buyer payments portal for AntSeed",
   "files": [
     "dist"
@@ -23,6 +23,7 @@
   },
   "dependencies": {
     "@antseed/node": "workspace:*",
+    "@antseed/ui": "workspace:*",
     "@fastify/cors": "^10.0.0",
     "@fastify/static": "^9.0.0",
     "fastify": "^5.7.4"

@@ -7,7 +7,10 @@ import { PaymentMux } from '../src/p2p/payment-mux.js';
 import { MessageType, type FramedMessage, type PaymentRequiredPayload } from '../src/types/protocol.js';
 import * as codec from '../src/p2p/payment-codec.js';
 import type { PeerConnection } from '../src/p2p/connection-manager.js';
+import type { SerializedHttpRequest, SerializedHttpResponse } from '../src/types/http.js';
 import { SellerPaymentManager, type SellerPaymentConfig } from '../src/payments/seller-payment-manager.js';
+import { BuyerPaymentManager } from '../src/payments/buyer-payment-manager.js';
+import { BuyerPaymentNegotiator } from '../src/payments/buyer-payment-negotiator.js';
 import { ChannelStore } from '../src/payments/channel-store.js';
 import type { Identity } from '../src/p2p/identity.js';
 import { bytesToHex } from '../src/utils/hex.js';
@@ -497,5 +500,123 @@ describe('PaymentRequired codec with pricing', () => {
     const decoded = codec.decodePaymentRequired(codec.encodePaymentRequired(SAMPLE_PAYMENT_REQUIRED));
     expect(decoded.inputUsdPerMillion).toBeUndefined();
     expect(decoded.outputUsdPerMillion).toBeUndefined();
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════
+// Buyer: insufficient deposit handling
+// ═══════════════════════════════════════════════════════════════
+
+describe('Buyer insufficient deposit handling', () => {
+  let tempDir: string;
+  let store: ChannelStore;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), 'buyer-insufficient-deposits-'));
+    store = new ChannelStore(tempDir);
+  });
+
+  afterEach(() => {
+    store.close();
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  function makeBuyerPaymentManager(): { buyer: BuyerPaymentManager; buyerIdentity: Identity } {
+    const buyerIdentity = createTestIdentity();
+    const buyer = new BuyerPaymentManager(buyerIdentity, {
+      rpcUrl: 'http://127.0.0.1:8545',
+      depositsContractAddress: '0x' + 'dd'.repeat(20),
+      channelsContractAddress: CONTRACT_ADDR,
+      usdcAddress: '0x' + 'ee'.repeat(20),
+      identityRegistryAddress: '0x' + 'ff'.repeat(20),
+      chainId: CHAIN_ID,
+      defaultAuthDurationSecs: 3600,
+      maxPerRequestUsdc: 500_000n,
+      maxReserveAmountUsdc: 1_000_000n,
+      dataDir: tempDir,
+    }, store);
+    return { buyer, buyerIdentity };
+  }
+
+  function makeMux(): import('../src/p2p/payment-mux.js').PaymentMux & { sentSpendingAuths: unknown[] } {
+    const mux = {
+      sentSpendingAuths: [] as unknown[],
+      sendSpendingAuth(payload: unknown) { mux.sentSpendingAuths.push(payload); },
+      sendAuthAck() {},
+      sendPaymentRequired() {},
+      sendNeedAuth() {},
+      onSpendingAuth() {},
+      onAuthAck() {},
+      onPaymentRequired() {},
+      onNeedAuth() {},
+      handleFrame: vi.fn(),
+    };
+    return mux as unknown as import('../src/p2p/payment-mux.js').PaymentMux & { sentSpendingAuths: unknown[] };
+  }
+
+  it('returns payment_required before reserve when available deposit is below reserve amount', async () => {
+    const { buyer, buyerIdentity } = makeBuyerPaymentManager();
+    const depositsClient = {
+      getBuyerBalance: vi.fn().mockResolvedValue({ available: 500_000n, reserved: 0n, lastActivityAt: 0n }),
+    };
+    const negotiator = new BuyerPaymentNegotiator(
+      buyerIdentity,
+      buyer,
+      depositsClient as never,
+      null,
+      store,
+      {},
+      { emit: vi.fn() },
+    );
+
+    const conn = mockConnection();
+    const peer = {
+      peerId: toPeerId('a'.repeat(40)),
+      lastSeen: Date.now(),
+      providers: ['openai'],
+    };
+    const req: SerializedHttpRequest = {
+      requestId: 'req-short-balance',
+      method: 'POST',
+      path: '/v1/chat/completions',
+      headers: {},
+      body: new Uint8Array(0),
+    };
+    const response: SerializedHttpResponse = {
+      requestId: req.requestId,
+      statusCode: 402,
+      headers: { 'content-type': 'application/json' },
+      body: new TextEncoder().encode(JSON.stringify({
+        error: 'payment_required',
+        minBudgetPerRequest: '10000',
+        suggestedAmount: '1000000',
+      })),
+    };
+
+    const result = await negotiator.handle402(response, peer, conn, req);
+
+    expect(result.action).toBe('return');
+    if (result.action === 'return') {
+      const body = JSON.parse(new TextDecoder().decode(result.response.body)) as Record<string, unknown>;
+      expect(body.code).toBe('insufficient_deposits');
+    }
+    expect(depositsClient.getBuyerBalance).toHaveBeenCalledOnce();
+    expect(conn.send).not.toHaveBeenCalled();
+  });
+
+  it('does not send a top-up ReserveAuth when available deposit cannot cover the added reserve', async () => {
+    const { buyer } = makeBuyerPaymentManager();
+    const mux = makeMux();
+    const sellerPeerId = fakePeerId('seller-top-up-short');
+
+    await buyer.authorizeSpending(sellerPeerId, mux, 10_000n, 1_000_000n);
+    vi.spyOn(buyer.depositsClient, 'getBuyerBalance').mockResolvedValue({
+      available: 500_000n,
+      reserved: 1_000_000n,
+      lastActivityAt: 0n,
+    });
+
+    await expect(buyer.topUpReserve(sellerPeerId, mux)).rejects.toThrow('Insufficient buyer deposits');
+    expect(mux.sentSpendingAuths).toHaveLength(1);
   });
 });

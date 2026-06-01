@@ -96,6 +96,18 @@ export function createWindow(config: WindowConfig): void {
     if (devToolsShortcut && mainWindow) {
       mainWindow.webContents.openDevTools({ mode: 'detach' });
     }
+
+    // Windows: Ctrl++ sends Ctrl+Shift+= which does not match the viewMenu's
+    // CmdOrCtrl+= zoom-in accelerator. Handle it explicitly so zoom is symmetrical.
+    if (
+      input.type === 'keyDown' &&
+      input.control &&
+      !input.alt &&
+      input.key === '+' &&
+      mainWindow
+    ) {
+      mainWindow.webContents.setZoomLevel(mainWindow.webContents.getZoomLevel() + 0.5);
+    }
   });
 
   mainWindow.on('closed', () => {

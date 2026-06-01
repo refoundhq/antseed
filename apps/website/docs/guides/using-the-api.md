@@ -106,7 +106,7 @@ Claude Code sends requests to `/v1/messages` and the proxy routes them to the be
 
 ## Codex
 
-Recent Codex versions (0.40+) ignore `OPENAI_BASE_URL` and `OPENAI_API_KEY` and only read `~/.codex/config.toml`. See the [Codex integration page](/integrations/codex) for the profile-based setup, the routing-verification check, and known gotchas (project-local configs, `-c` flag pitfalls).
+Recent Codex versions (0.40+) ignore `OPENAI_BASE_URL` and `OPENAI_API_KEY`. Use `antseed codex --model <service-id>` for automatic per-run config, or create `~/.codex/antseed.config.toml` and launch with `codex --profile antseed` for the manual setup. See the [Codex integration page](/integrations/codex) for the tested profile file, routing-verification check, and known gotchas (project-local configs, `-c` flag pitfalls).
 
 ## curl
 

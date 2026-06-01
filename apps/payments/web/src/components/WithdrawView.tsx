@@ -5,6 +5,7 @@ import type { BalanceData, PaymentConfig } from '../types';
 import { useAuthorizedWallet } from '../context/AuthorizedWalletContext';
 import { useWithdraw } from '../hooks/useWithdraw';
 import { usePaymentNetwork } from '../payment-network';
+import { Button } from './Button';
 import './WithdrawView.scss';
 
 interface WithdrawViewProps {
@@ -79,22 +80,21 @@ export function WithdrawView({ config, balance, onAction }: WithdrawViewProps) {
             <div className="deposit-success-note">
               Funds were sent to {address ? shortAddr(address) : 'your authorized wallet'}.
             </div>
-            <button className="btn-outline" onClick={resetForm} style={{ marginTop: 12 }}>
+            <Button fullWidth variant="outline" onClick={resetForm} style={{ marginTop: 12 }}>
               Withdraw more
-            </button>
+            </Button>
           </div>
         ) : !isConnected ? (
           <div className="deposit-connect-wrapper">
             <ConnectButton.Custom>
               {({ openConnectModal, mounted }) => (
-                <button
-                  type="button"
-                  className="btn-primary"
+                <Button
+                  fullWidth
                   onClick={openConnectModal}
                   disabled={!mounted}
                 >
                   Connect Wallet
-                </button>
+                </Button>
               )}
             </ConnectButton.Custom>
           </div>
@@ -135,8 +135,8 @@ export function WithdrawView({ config, balance, onAction }: WithdrawViewProps) {
                 <span className="hint">Available: ${availableAmount.toFixed(2)} USDC</span>
               </div>
 
-              <button
-                className="btn-primary"
+              <Button
+                fullWidth
                 onClick={handleClick}
                 disabled={
                   running ||
@@ -151,7 +151,7 @@ export function WithdrawView({ config, balance, onAction }: WithdrawViewProps) {
                  wrongChain ? `Switch to ${targetChainName}` :
                  running ? 'Processing...' :
                  'Withdraw'}
-              </button>
+              </Button>
             </div>
           </>
         )}

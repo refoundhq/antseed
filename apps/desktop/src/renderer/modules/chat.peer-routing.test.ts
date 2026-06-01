@@ -213,6 +213,225 @@ test('new chat created while previous response is pending sends to its own peer'
   await waitFor(() => uiState.chatSendingConversationIds.length === 0);
 });
 
+
+test('stream errors clear when switching conversations', async () => {
+  installDomTimers();
+
+  const uiState = createInitialUiState();
+  uiState.chatServiceOptions = [
+    {
+      id: 'model-a', label: 'Model A', provider: 'openai', protocol: 'openai-chat-completions', count: 1,
+      value: `openai${SEP}model-a${SEP}peer-a`, peerId: 'peer-a', peerDisplayName: 'Peer A', peerLabel: 'Peer A',
+      inputUsdPerMillion: null, outputUsdPerMillion: null, cachedInputUsdPerMillion: null, categories: [], description: '',
+    },
+    {
+      id: 'model-b', label: 'Model B', provider: 'openai', protocol: 'openai-chat-completions', count: 1,
+      value: `openai${SEP}model-b${SEP}peer-b`, peerId: 'peer-b', peerDisplayName: 'Peer B', peerLabel: 'Peer B',
+      inputUsdPerMillion: null, outputUsdPerMillion: null, cachedInputUsdPerMillion: null, categories: [], description: '',
+    },
+  ];
+
+  const conversations: Conversation[] = [
+    {
+      id: 'conv-a',
+      title: 'Conversation A',
+      service: 'model-a',
+      provider: 'openai',
+      peerId: 'peer-a',
+      messages: [],
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      usage: { inputTokens: 0, outputTokens: 0 },
+    },
+    {
+      id: 'conv-b',
+      title: 'Conversation B',
+      service: 'model-b',
+      provider: 'openai',
+      peerId: 'peer-b',
+      messages: [],
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      usage: { inputTokens: 0, outputTokens: 0 },
+    },
+  ];
+
+  const streamErrorHandlers: Array<NonNullable<Parameters<NonNullable<DesktopBridge['onChatAiStreamError']>>[0]>> = [];
+  const bridge: DesktopBridge = {
+    chatAiListConversations: async () => ({ ok: true, data: [...conversations] }),
+    chatAiGetConversation: async (id) => {
+      const conversation = conversations.find((c) => c.id === id);
+      return conversation
+        ? { ok: true, data: { ...conversation, messages: [...conversation.messages] } }
+        : { ok: false, error: 'not found' };
+    },
+    onChatAiStreamError: (handler) => {
+      streamErrorHandlers.push(handler);
+      return () => undefined;
+    },
+  };
+
+  const api = initChatModule({ bridge, uiState, appendSystemLog: () => undefined });
+  await api.refreshChatConversations();
+  await api.openConversation('conv-a');
+
+  streamErrorHandlers[0]?.({
+    conversationId: 'conv-a',
+    error: 'Upstream refused the request',
+    stopReason: {
+      kind: 'http_error',
+      source: 'upstream',
+      retryable: false,
+      message: 'Upstream refused the request',
+      statusCode: 500,
+    },
+  });
+
+  assert.equal(uiState.chatError, 'Upstream refused the request');
+
+  await api.openConversation('conv-b');
+  assert.equal(uiState.chatError, null);
+
+  await api.openConversation('conv-a');
+  assert.equal(uiState.chatError, null);
+});
+
+test('payment-required card clears when switching conversations or models', async () => {
+  installDomTimers();
+
+  const uiState = createInitialUiState();
+  uiState.chatServiceOptions = [
+    {
+      id: 'model-a', label: 'Model A', provider: 'openai', protocol: 'openai-chat-completions', count: 1,
+      value: `openai${SEP}model-a${SEP}peer-a`, peerId: 'peer-a', peerDisplayName: 'Peer A', peerLabel: 'Peer A',
+      inputUsdPerMillion: null, outputUsdPerMillion: null, cachedInputUsdPerMillion: null, categories: [], description: '',
+    },
+    {
+      id: 'model-b', label: 'Model B', provider: 'openai', protocol: 'openai-chat-completions', count: 1,
+      value: `openai${SEP}model-b${SEP}peer-b`, peerId: 'peer-b', peerDisplayName: 'Peer B', peerLabel: 'Peer B',
+      inputUsdPerMillion: null, outputUsdPerMillion: null, cachedInputUsdPerMillion: null, categories: [], description: '',
+    },
+  ];
+
+  const conversations: Conversation[] = [
+    {
+      id: 'conv-a',
+      title: 'Conversation A',
+      service: 'model-a',
+      provider: 'openai',
+      peerId: 'peer-a',
+      messages: [{ role: 'user', content: 'paywalled prompt', createdAt: Date.now() - 1_000 }],
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      usage: { inputTokens: 0, outputTokens: 0 },
+    },
+    {
+      id: 'conv-b',
+      title: 'Conversation B',
+      service: 'model-b',
+      provider: 'openai',
+      peerId: 'peer-b',
+      messages: [],
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      usage: { inputTokens: 0, outputTokens: 0 },
+    },
+  ];
+
+  let creditsCalls = 0;
+  const sends: Array<{ conversationId: string; message: string; service?: string; provider?: string; peerId?: string }> = [];
+  const streamErrorHandlers: Array<NonNullable<Parameters<NonNullable<DesktopBridge['onChatAiStreamError']>>[0]>> = [];
+  const streamDoneHandlers: Array<(data: { conversationId: string }) => void> = [];
+  const bridge: DesktopBridge = {
+    chatAiListConversations: async () => ({ ok: true, data: [...conversations] }),
+    chatAiGetConversation: async (id) => {
+      const conversation = conversations.find((c) => c.id === id);
+      return conversation
+        ? { ok: true, data: { ...conversation, messages: [...conversation.messages] } }
+        : { ok: false, error: 'not found' };
+    },
+    creditsGetInfo: async () => {
+      creditsCalls += 1;
+      return {
+        ok: true,
+        data: {
+          evmAddress: null,
+          operatorAddress: null,
+          balanceUsdc: '0',
+          reservedUsdc: '0',
+          availableUsdc: '0',
+          creditLimitUsdc: '0',
+        },
+        error: null,
+      };
+    },
+    onChatAiStreamError: (handler) => {
+      streamErrorHandlers.push(handler);
+      return () => undefined;
+    },
+    onChatAiStreamDone: (handler) => {
+      streamDoneHandlers.push(handler);
+      return () => undefined;
+    },
+    chatAiSendStream: async (conversationId, message, service, provider, _attachments, peerId) => {
+      sends.push({ conversationId, message, service, provider, peerId });
+      return { ok: true };
+    },
+    chatAiSelectPeer: async () => ({ ok: true }),
+  };
+
+  const api = initChatModule({ bridge, uiState, appendSystemLog: () => undefined });
+  await api.refreshChatConversations();
+  await api.openConversation('conv-a');
+
+  const emitPaymentRequired = () => streamErrorHandlers[0]?.({
+    conversationId: 'conv-a',
+    error: 'payment_required:1000000',
+    stopReason: {
+      kind: 'payment_required',
+      source: 'billing',
+      retryable: false,
+      message: 'Payment required',
+      statusCode: 402,
+      errorCode: 'payment_required',
+    },
+  });
+
+  emitPaymentRequired();
+  await waitFor(() => creditsCalls === 1);
+  await waitFor(() => uiState.chatPaymentApprovalVisible === true);
+  assert.equal(uiState.chatPaymentApprovalPeerId, 'peer-a');
+
+  api.retryAfterPayment();
+  await waitFor(() => sends.length === 1);
+  assert.deepEqual(sends[0], {
+    conversationId: 'conv-a',
+    message: 'paywalled prompt',
+    service: 'model-a',
+    provider: 'openai',
+    peerId: 'peer-a',
+  });
+  assert.equal(uiState.chatPaymentApprovalVisible, true);
+  assert.equal(uiState.chatPaymentApprovalPeerId, 'peer-a');
+
+  streamDoneHandlers[0]?.({ conversationId: 'conv-a' });
+  assert.equal(uiState.chatPaymentApprovalVisible, true);
+  assert.equal(uiState.chatPaymentApprovalPeerId, 'peer-a');
+
+  await api.openConversation('conv-b');
+  assert.equal(uiState.chatPaymentApprovalVisible, false);
+  assert.equal(uiState.chatPaymentApprovalPeerId, null);
+
+  await api.openConversation('conv-a');
+  emitPaymentRequired();
+  await waitFor(() => creditsCalls === 2);
+  await waitFor(() => uiState.chatPaymentApprovalVisible === true);
+
+  api.handleServiceChange(`openai${SEP}model-b${SEP}peer-b`, 'peer-b');
+  assert.equal(uiState.chatPaymentApprovalVisible, false);
+  assert.equal(uiState.chatPaymentApprovalPeerId, null);
+});
+
 test('discover-selected draft keeps its peer if another discover chat is opened before create finishes', async () => {
   installDomTimers();
 
@@ -832,4 +1051,108 @@ test('opening a conversation does not switch workspace if it matches the current
   // Give a tick for any potential async calls
   await new Promise((resolve) => setTimeout(resolve, 100));
   assert.equal(workspaceCallLog.length, 0, 'should not call chatAiSetWorkspace when workspace already matches');
+});
+
+test('switching service mid-conversation routes the next send to the new model', async () => {
+  installDomTimers();
+
+  const uiState = createInitialUiState();
+  uiState.chatServiceOptions = [
+    {
+      id: 'model-a', label: 'Model A', provider: 'openai', protocol: 'openai-chat-completions', count: 1,
+      value: `openai${SEP}model-a${SEP}peer-a`, peerId: 'peer-a', peerDisplayName: 'Peer A', peerLabel: 'Peer A',
+      inputUsdPerMillion: null, outputUsdPerMillion: null, categories: [], description: '',
+    },
+    {
+      id: 'model-b', label: 'Model B', provider: 'openai', protocol: 'openai-chat-completions', count: 1,
+      value: `openai${SEP}model-b${SEP}peer-b`, peerId: 'peer-b', peerDisplayName: 'Peer B', peerLabel: 'Peer B',
+      inputUsdPerMillion: null, outputUsdPerMillion: null, categories: [], description: '',
+    },
+  ];
+
+  const conversations: Conversation[] = [
+    {
+      id: 'conv-a',
+      title: 'Conversation A',
+      service: 'model-a',
+      provider: 'openai',
+      peerId: 'peer-a',
+      messages: [],
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      usage: { inputTokens: 0, outputTokens: 0 },
+    },
+  ];
+
+  const sends: Array<{
+    conversationId: string;
+    message: string;
+    service?: string;
+    provider?: string;
+    peerId?: string;
+  }> = [];
+  const streamDoneHandlers: Array<(data: { conversationId: string }) => void> = [];
+
+  const bridge: DesktopBridge = {
+    chatAiListConversations: async () => ({ ok: true, data: [...conversations] }),
+    chatAiGetConversation: async (id) => {
+      const conversation = conversations.find((c) => c.id === id);
+      return conversation
+        ? { ok: true, data: { ...conversation, messages: [...conversation.messages] } }
+        : { ok: false, error: 'not found' };
+    },
+    chatPrepareAttachments: async () => ({ ok: true, data: [] }),
+    chatAiSendStream: async (conversationId, message, service, provider, _attachments, peerId) => {
+      sends.push({ conversationId, message, service, provider, peerId });
+      return { ok: true };
+    },
+    onChatAiStreamDone: (handler) => {
+      streamDoneHandlers.push(handler);
+      return () => undefined;
+    },
+    chatAiSelectPeer: async () => ({ ok: true }),
+  };
+
+  const api = initChatModule({ bridge, uiState, appendSystemLog: () => undefined });
+  await api.refreshChatConversations();
+  await api.openConversation('conv-a');
+
+  api.sendMessage('hello from model a');
+  await waitFor(() => sends.length === 1);
+  assert.deepEqual(sends[0], {
+    conversationId: 'conv-a',
+    message: 'hello from model a',
+    service: 'model-a',
+    provider: 'openai',
+    peerId: 'peer-a',
+  });
+
+  for (const handler of streamDoneHandlers) {
+    handler({ conversationId: 'conv-a' });
+  }
+  await waitFor(() => uiState.chatSendingConversationIds.length === 0);
+
+  api.handleServiceChange(`openai${SEP}model-b${SEP}peer-b`, 'peer-b');
+  assert.equal(uiState.chatSelectedServiceValue, `openai${SEP}model-b${SEP}peer-b`);
+  assert.equal(uiState.chatSelectedPeerId, 'peer-b');
+
+  api.sendMessage('hello from model b');
+  await waitFor(() => sends.length === 2);
+  assert.deepEqual(sends[1], {
+    conversationId: 'conv-a',
+    message: 'hello from model b',
+    service: 'model-b',
+    provider: 'openai',
+    peerId: 'peer-b',
+  });
+
+  const summary = (uiState.chatConversations as { id: string; service?: string; peerId?: string }[])
+    .find((c) => c.id === 'conv-a');
+  assert.equal(summary?.service, 'model-b');
+  assert.equal(summary?.peerId, 'peer-b');
+
+  for (const handler of streamDoneHandlers) {
+    handler({ conversationId: 'conv-a' });
+  }
+  await waitFor(() => uiState.chatSendingConversationIds.length === 0);
 });

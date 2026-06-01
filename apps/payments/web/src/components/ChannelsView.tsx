@@ -7,6 +7,7 @@ import { CHANNELS_ABI } from '../channels-abi';
 import { getErrorMessage, usePaymentNetwork } from '../payment-network';
 import { useChannels } from '../hooks/useChannels';
 import { useAuthorizedWallet } from '../context/AuthorizedWalletContext';
+import { Button } from './Button';
 import './ChannelsView.scss';
 
 interface ChannelsViewProps {
@@ -157,11 +158,11 @@ function ChannelRow({
         {closeConfirmed || withdrawConfirmed ? (
           <button className="btn-link" onClick={onRefresh}>Refresh</button>
         ) : status === 'active' ? (
-          <button className="btn-outline" onClick={handleRequestClose}>Close</button>
+          <Button size="sm" variant="outline" onClick={handleRequestClose}>Close</Button>
         ) : status === 'closing' ? (
-          <button className="btn-outline" disabled>Waiting…</button>
+          <Button size="sm" variant="outline" disabled>Waiting…</Button>
         ) : status === 'withdrawable' ? (
-          <button className="btn-primary" onClick={handleWithdraw}>Withdraw</button>
+          <Button size="sm" onClick={handleWithdraw}>Withdraw</Button>
         ) : (
           <span className="channels-table-dash">—</span>
         )}
@@ -217,9 +218,9 @@ export function ChannelsView({ config }: ChannelsViewProps) {
               per-request against the escrow.
             </p>
           </header>
-          <button className="btn-outline channels-refresh-btn" onClick={fetchData}>
+          <Button className="channels-refresh-btn" variant="outline" onClick={fetchData}>
             Refresh
-          </button>
+          </Button>
         </div>
 
         <div className="dashboard-chart-card">
@@ -315,4 +316,3 @@ export function ChannelsView({ config }: ChannelsViewProps) {
     </div>
   );
 }
-

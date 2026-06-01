@@ -56,7 +56,7 @@ export type { ANTSTokenClientConfig } from './evm/ants-token-client.js';
 
 // Emissions
 export { EmissionsClient } from './evm/emissions-client.js';
-export type { EmissionsClientConfig } from './evm/emissions-client.js';
+export type { EmissionsClientConfig, EmissionsEpochParams } from './evm/emissions-client.js';
 
 // Subscription Pool
 export { SubPoolClient } from './evm/subpool-client.js';

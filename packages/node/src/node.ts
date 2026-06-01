@@ -150,6 +150,8 @@ export interface NodeConfig {
   signalingPort?: number;     // Default: 6882 for seller
   bootstrapNodes?: Array<{ host: string; port: number }>;
   requestTimeoutMs?: number;  // Default: 30000
+  /** Timeout in ms for each HTTP metadata fetch during peer discovery. Default: 1500 */
+  metadataFetchTimeoutMs?: number;
   /** Maximum buffered body size (bytes) while reconstructing streaming responses. Default: 16 MiB. */
   maxStreamBufferBytes?: number;
   /** Maximum upload body size (bytes) a seller will accept per request. Default: 64 MiB. */
@@ -248,6 +250,8 @@ export class AntseedNode extends EventEmitter {
   private _sessionTracker: SellerSessionTracker | null = null;
   /** Buyer-side background full discovery sweep, if one is running. */
   private _backgroundPeerDiscoveryPromise: Promise<PeerInfo[]> | null = null;
+  /** Serializes non-blocking on-chain enrichment for incrementally discovered peers. */
+  private _partialPeerEnrichmentChain: Promise<void> = Promise.resolve();
 
   constructor(config: NodeConfig) {
     super();
@@ -506,22 +510,35 @@ export class AntseedNode extends EventEmitter {
     return filtered;
   }
 
+  startBackgroundPeerDiscoverySweep(): void {
+    this._startBackgroundPeerDiscoverySweep();
+  }
+
   private _startBackgroundPeerDiscoverySweep(): void {
     if (!this._peerLookup || this._backgroundPeerDiscoveryPromise) {
       return;
     }
     const peerLookup = this._peerLookup;
+    const emittedPeerIds = new Set<string>();
     debugLog(`[Node] Starting background exhaustive peer discovery sweep`);
     this._backgroundPeerDiscoveryPromise = (async () => {
       const results = await peerLookup.findAllExhaustive(async (partialResults, context) => {
         if (partialResults.length === 0) return;
-        const peers = await this._lookupResultsToPeerInfos(partialResults);
+        const peers: PeerInfo[] = [];
+        for (const result of partialResults) {
+          const peer = this._lookupResultToPeerInfo(result);
+          if (emittedPeerIds.has(peer.peerId)) continue;
+          emittedPeerIds.add(peer.peerId);
+          peers.push(peer);
+        }
+        if (peers.length === 0) return;
         debugLog(
           `[Node] Background DHT partial ${context.phase}`
           + `${context.subnet !== undefined ? ` ${context.subnet}/${SUBNET_COUNT - 1}` : ""}`
           + ` emitted ${peers.length} peer(s) from ${context.endpointCount} endpoint(s)`,
         );
         this.emit("peers:discovered", peers);
+        this._queuePartialPeerEnrichment(peers);
       });
       debugLog(`[Node] Background DHT sweep returned ${results.length} result(s)`);
       const peers = await this._lookupResultsToPeerInfos(results);
@@ -532,6 +549,30 @@ export class AntseedNode extends EventEmitter {
       return [];
     }).finally(() => {
       this._backgroundPeerDiscoveryPromise = null;
+    });
+  }
+
+  private _queuePartialPeerEnrichment(peers: PeerInfo[]): void {
+    if (peers.length === 0 || !this._channelsClient || !this._stakingClient) {
+      return;
+    }
+    const peersToEnrich = peers.map((peer) => ({ ...peer }));
+    this._partialPeerEnrichmentChain = this._partialPeerEnrichmentChain.then(async () => {
+      if (!this._started || !this._channelsClient || !this._stakingClient) {
+        return;
+      }
+      await this._enrichPeersWithOnChainStats(peersToEnrich);
+      if (!this._started) {
+        return;
+      }
+      const enriched = peersToEnrich.filter((peer) => typeof peer.onChainStatsFetchedAt === "number");
+      if (enriched.length === 0) {
+        return;
+      }
+      debugLog(`[Node] Background DHT partial on-chain enrichment emitted ${enriched.length} peer(s)`);
+      this.emit("peers:discovered", enriched);
+    }).catch((err) => {
+      debugWarn(`[Node] Background DHT partial on-chain enrichment failed: ${err instanceof Error ? err.message : err}`);
     });
   }
 
@@ -1185,7 +1226,7 @@ export class AntseedNode extends EventEmitter {
 
     // Create PeerLookup with HttpMetadataResolver
     const metadataResolver = new HttpMetadataResolver({
-      timeoutMs: 750,
+      timeoutMs: this._config.metadataFetchTimeoutMs ?? 1500,
       maxConcurrent: 24,
     });
     const lookupConfig: LookupConfig = {

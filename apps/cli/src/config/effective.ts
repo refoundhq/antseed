@@ -1,4 +1,5 @@
 import type { BuyerCLIConfig, AntseedConfig, SellerCLIConfig } from './types.js';
+import { MIN_BUYER_METADATA_FETCH_TIMEOUT_MS } from './validation.js';
 
 export interface SellerRuntimeOverrides {
   reserveFloor?: number;
@@ -11,6 +12,7 @@ export interface BuyerRuntimeOverrides {
   minPeerReputation?: number;
   maxInputUsdPerMillion?: number;
   maxOutputUsdPerMillion?: number;
+  metadataFetchTimeoutMs?: number;
 }
 
 export interface ResolveEffectiveConfigInput {
@@ -25,6 +27,11 @@ function parseEnvNumber(env: NodeJS.ProcessEnv, key: string): number | undefined
   if (raw === undefined) return undefined;
   const parsed = Number(raw);
   return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function assertValidMetadataFetchTimeoutMs(value: number, sourceLabel: string): void {
+  if (Number.isInteger(value) && value >= MIN_BUYER_METADATA_FETCH_TIMEOUT_MS) return;
+  throw new Error(`${sourceLabel} must be an integer >= ${MIN_BUYER_METADATA_FETCH_TIMEOUT_MS}`);
 }
 
 /**
@@ -88,6 +95,11 @@ export function resolveEffectiveBuyerConfig(input: ResolveEffectiveConfigInput):
   const envMinReputation = parseEnvNumber(env, 'ANTSEED_BUYER_MIN_REPUTATION');
   const envMaxInputUsdPerMillion = parseEnvNumber(env, 'ANTSEED_BUYER_MAX_INPUT_USD_PER_MILLION');
   const envMaxOutputUsdPerMillion = parseEnvNumber(env, 'ANTSEED_BUYER_MAX_OUTPUT_USD_PER_MILLION');
+  const envMetadataFetchTimeoutKey = 'ANTSEED_BUYER_METADATA_FETCH_TIMEOUT_MS';
+  const envMetadataFetchTimeoutMs = parseEnvNumber(env, envMetadataFetchTimeoutKey);
+  if (env[envMetadataFetchTimeoutKey] !== undefined && envMetadataFetchTimeoutMs === undefined) {
+    throw new Error(`${envMetadataFetchTimeoutKey} must be a finite number`);
+  }
 
   if (envMinReputation !== undefined) {
     buyer.minPeerReputation = envMinReputation;
@@ -97,6 +109,9 @@ export function resolveEffectiveBuyerConfig(input: ResolveEffectiveConfigInput):
   }
   if (envMaxOutputUsdPerMillion !== undefined) {
     buyer.maxPricing.defaults.outputUsdPerMillion = envMaxOutputUsdPerMillion;
+  }
+  if (envMetadataFetchTimeoutMs !== undefined) {
+    buyer.metadataFetchTimeoutMs = envMetadataFetchTimeoutMs;
   }
 
   const overrides = input.buyerOverrides;
@@ -112,6 +127,11 @@ export function resolveEffectiveBuyerConfig(input: ResolveEffectiveConfigInput):
   if (overrides?.maxOutputUsdPerMillion !== undefined) {
     buyer.maxPricing.defaults.outputUsdPerMillion = overrides.maxOutputUsdPerMillion;
   }
+  if (overrides?.metadataFetchTimeoutMs !== undefined) {
+    buyer.metadataFetchTimeoutMs = overrides.metadataFetchTimeoutMs;
+  }
+
+  assertValidMetadataFetchTimeoutMs(buyer.metadataFetchTimeoutMs, 'buyer.metadataFetchTimeoutMs');
 
   return buyer;
 }

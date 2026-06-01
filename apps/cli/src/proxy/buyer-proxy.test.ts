@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { Readable } from 'node:stream'
 import test from 'node:test'
 import type { PeerInfo } from '@antseed/node'
@@ -110,6 +113,28 @@ test('BuyerProxy accepts a custom background refresh interval', () => {
   })
 
   assert.equal((proxy as any)._bgRefreshIntervalMs, 15_000)
+})
+
+test('BuyerProxy starts incremental discovery on startup', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'antseed-buyer-proxy-'))
+  t.after(() => rm(dir, { recursive: true, force: true }))
+  let sweepCalls = 0
+  const proxy = new BuyerProxy({
+    port: 0,
+    dataDir: dir,
+    node: {
+      router: null,
+      on: () => undefined,
+      startBackgroundPeerDiscoverySweep: () => { sweepCalls += 1 },
+    } as any,
+    backgroundRefreshIntervalMs: 60 * 60_000,
+  })
+  ;(proxy as any)._refreshPeersNow = async () => []
+
+  await proxy.start()
+  await proxy.stop()
+
+  assert.equal(sweepCalls, 1)
 })
 
 test('selectCandidatePeersForRouting enforces explicit provider overrides even without request protocol', () => {

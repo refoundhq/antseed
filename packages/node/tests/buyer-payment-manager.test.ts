@@ -512,6 +512,41 @@ describe('BuyerPaymentManager', () => {
     expect(mux.sentSpendingAuths.length).toBeGreaterThanOrEqual(1);
   });
 
+  it('handleNeedAuth proactively top-ups after crossing the 65% reserve threshold', async () => {
+    store.close();
+    store = new ChannelStore(tempDir);
+    manager = new BuyerPaymentManager(
+      identity,
+      makeConfig(tempDir, { maxReserveAmountUsdc: 100_000n, maxPerRequestUsdc: 100_000n }),
+      store,
+    );
+    manager.setSigner(Wallet.createRandom());
+
+    const sellerPeerId = fakePeerId('seller-needauth-threshold-topup');
+    const channelId = await manager.authorizeSpending(sellerPeerId, mux, 10_000n);
+    mux.sentSpendingAuths.length = 0;
+
+    await manager.handleNeedAuth(sellerPeerId, {
+      channelId,
+      requiredCumulativeAmount: '65000',
+      currentAcceptedCumulative: '0',
+      deposit: '100000',
+      lastRequestCost: '65000',
+      inputTokens: '1000',
+      freshInputTokens: '1000',
+      outputTokens: '100',
+      cachedInputTokens: '0',
+    }, mux);
+
+    expect(mux.sentSpendingAuths).toHaveLength(2);
+    const spendingFirst = mux.sentSpendingAuths[0] as Record<string, unknown>;
+    const reserveSecond = mux.sentSpendingAuths[1] as Record<string, unknown>;
+    expect(spendingFirst.cumulativeAmount).toBe('65000');
+    expect(spendingFirst.reserveMaxAmount).toBeUndefined();
+    expect(reserveSecond.cumulativeAmount).toBe('65000');
+    expect(reserveSecond.reserveMaxAmount).toBe('200000');
+  });
+
   it('handleNeedAuth sends spending auth before reserve top-up when the ceiling blocks the required amount', async () => {
     store.close();
     store = new ChannelStore(tempDir);
@@ -780,16 +815,7 @@ describe('BuyerPaymentManager', () => {
     const channelId = await manager.authorizeSpending(sellerPeerId, mux, 100_000n, TEST_PRICING);
     manager.handleAuthAck(sellerPeerId, { channelId });
 
-    const reserveOnlyCost = 100_000n - SAMPLE_ESTIMATE.cost;
-    await manager.handleNeedAuth(sellerPeerId, {
-      channelId,
-      requiredCumulativeAmount: reserveOnlyCost.toString(),
-      currentAcceptedCumulative: '0',
-      deposit: '1000000',
-      lastRequestCost: reserveOnlyCost.toString(),
-    }, mux);
-
-    manager.recordResponseBytes(sellerPeerId, SAMPLE_INPUT, SAMPLE_OUTPUT);
+    (manager as unknown as { _verifiedCost: Map<string, bigint> })._verifiedCost.set(sellerPeerId, 100_000n);
     mux.sentSpendingAuths.length = 0;
     await manager.extendCurrentSpendingAuth(sellerPeerId, 1n, mux, 100_001n);
 

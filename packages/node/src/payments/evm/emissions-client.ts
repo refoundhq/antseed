@@ -32,8 +32,10 @@ const EMISSIONS_ABI = [
   'function RESERVE_SHARE_PCT() external view returns (uint256)',
   'function TEAM_SHARE_PCT() external view returns (uint256)',
   'function MAX_SELLER_SHARE_PCT() external view returns (uint256)',
+  'function MAX_BUYER_SHARE_PCT() external view returns (uint256)',
   'function reserveAccumulated() external view returns (uint256)',
   // Reads — mappings exposed as auto-generated getters
+  'function epochParams(uint256 epoch) external view returns (uint256 sellerSharePct, uint256 buyerSharePct, uint256 reserveSharePct, uint256 teamSharePct, uint256 maxSellerSharePct, uint256 maxBuyerSharePct, bool initialized)',
   'function epochTotalSellerPoints(uint256 epoch) external view returns (uint256)',
   'function epochTotalBuyerPoints(uint256 epoch) external view returns (uint256)',
   'function userSellerPoints(address account, uint256 epoch) external view returns (uint256)',
@@ -41,6 +43,20 @@ const EMISSIONS_ABI = [
   'function sellerEpochClaimed(address account, uint256 epoch) external view returns (bool)',
   'function buyerEpochClaimed(address account, uint256 epoch) external view returns (bool)',
 ] as const;
+
+const LEGACY_EPOCH_PARAMS_ABI = [
+  'function epochParams(uint256 epoch) external view returns (uint256 sellerSharePct, uint256 buyerSharePct, uint256 reserveSharePct, uint256 teamSharePct, uint256 maxSellerSharePct, bool initialized)',
+] as const;
+
+export interface EmissionsEpochParams {
+  sellerSharePct: number;
+  buyerSharePct: number;
+  reserveSharePct: number;
+  teamSharePct: number;
+  maxSellerSharePct: number;
+  maxBuyerSharePct: number;
+  initialized: boolean;
+}
 
 export class EmissionsClient extends BaseEvmClient {
   constructor(config: EmissionsClientConfig) {
@@ -98,20 +114,15 @@ export class EmissionsClient extends BaseEvmClient {
     return Number(v);
   }
 
-  async getShares(): Promise<{
-    sellerSharePct: number;
-    buyerSharePct: number;
-    reserveSharePct: number;
-    teamSharePct: number;
-    maxSellerSharePct: number;
-  }> {
+  async getShares(): Promise<EmissionsEpochParams> {
     const contract = new Contract(this._contractAddress, EMISSIONS_ABI, this._provider);
-    const [seller, buyer, reserve, team, maxSeller] = await Promise.all([
+    const [seller, buyer, reserve, team, maxSeller, maxBuyer] = await Promise.all([
       contract.getFunction('SELLER_SHARE_PCT')(),
       contract.getFunction('BUYER_SHARE_PCT')(),
       contract.getFunction('RESERVE_SHARE_PCT')(),
       contract.getFunction('TEAM_SHARE_PCT')(),
       contract.getFunction('MAX_SELLER_SHARE_PCT')(),
+      contract.getFunction('MAX_BUYER_SHARE_PCT')().catch(() => 100n),
     ]);
     return {
       sellerSharePct: Number(seller),
@@ -119,7 +130,37 @@ export class EmissionsClient extends BaseEvmClient {
       reserveSharePct: Number(reserve),
       teamSharePct: Number(team),
       maxSellerSharePct: Number(maxSeller),
+      maxBuyerSharePct: Number(maxBuyer),
+      initialized: true,
     };
+  }
+
+  async getEpochParams(epoch: number): Promise<EmissionsEpochParams> {
+    const contract = new Contract(this._contractAddress, EMISSIONS_ABI, this._provider);
+    try {
+      const [seller, buyer, reserve, team, maxSeller, maxBuyer, initialized] = await contract.getFunction('epochParams')(epoch);
+      return {
+        sellerSharePct: Number(seller),
+        buyerSharePct: Number(buyer),
+        reserveSharePct: Number(reserve),
+        teamSharePct: Number(team),
+        maxSellerSharePct: Number(maxSeller),
+        maxBuyerSharePct: Number(maxBuyer),
+        initialized,
+      };
+    } catch {
+      const legacyContract = new Contract(this._contractAddress, LEGACY_EPOCH_PARAMS_ABI, this._provider);
+      const [seller, buyer, reserve, team, maxSeller, initialized] = await legacyContract.getFunction('epochParams')(epoch);
+      return {
+        sellerSharePct: Number(seller),
+        buyerSharePct: Number(buyer),
+        reserveSharePct: Number(reserve),
+        teamSharePct: Number(team),
+        maxSellerSharePct: Number(maxSeller),
+        maxBuyerSharePct: 100,
+        initialized,
+      };
+    }
   }
 
   async epochTotalSellerPoints(epoch: number): Promise<bigint> {

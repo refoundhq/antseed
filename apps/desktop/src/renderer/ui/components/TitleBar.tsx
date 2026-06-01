@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { HugeiconsIcon } from '@hugeicons/react';
 import { Sun02Icon } from '@hugeicons/core-free-icons';
 import { Moon02Icon } from '@hugeicons/core-free-icons';
+import { Button } from '@antseed/ui';
 import { AntStationLogo } from './AntStationLogo';
 import { useUiSnapshot } from '../hooks/useUiSnapshot';
 import { useActions } from '../hooks/useActions';
@@ -103,30 +104,33 @@ export function TitleBar() {
       </div>
       <div className={styles.titleBarRight}>
         {updateState && (
-          updateState.status === 'ready' ? (
-            <button
-              className={styles.titleBarUpdateBtn}
-              onClick={handleUpdate}
-              aria-label={`Install v${updateState.version} and restart`}
-              title={`Install v${updateState.version} and restart`}
-            >
-              Update to v{updateState.version}
-            </button>
-          ) : (
-            <button
-              className={`${styles.titleBarUpdateBtn} ${styles.titleBarUpdateBtnDownloading}`}
-              disabled
-              aria-label={`Downloading v${updateState.version} ${updateState.percent}%`}
-              title={`Downloading v${updateState.version} — ${updateState.percent}%`}
-            >
-              <span className={styles.titleBarUpdateFill} style={{ width: `${updateState.percent}%` }} aria-hidden="true" />
-              <span className={styles.titleBarUpdateLabel}>Downloading v{updateState.version} · {updateState.percent}%</span>
-            </button>
-          )
+          <div className={styles.titleBarCenter}>
+            {updateState.status === 'ready' ? (
+              <button
+                className={`${styles.titleBarUpdateBadge} ${styles.titleBarUpdateBadgeReady}`}
+                onClick={handleUpdate}
+                aria-label={`Install v${updateState.version} and restart`}
+                title={`Click to install v${updateState.version} and restart`}
+              >
+                <span className={styles.titleBarUpdateDot} />
+                Update to v{updateState.version}
+              </button>
+            ) : (
+              <button
+                className={`${styles.titleBarUpdateBadge} ${styles.titleBarUpdateBadgeDownloading}`}
+                disabled
+                aria-label={`Downloading v${updateState.version} ${updateState.percent}%`}
+                title={`Downloading v${updateState.version} — ${updateState.percent}%`}
+              >
+                <span className={styles.titleBarUpdateFill} style={{ width: `${updateState.percent}%` }} aria-hidden="true" />
+                <span className={styles.titleBarUpdateLabel}>
+                  <span className={styles.titleBarUpdateDot} />
+                  Downloading v{updateState.version} · {updateState.percent}%
+                </span>
+              </button>
+            )}
+          </div>
         )}
-        <div className={styles.alphaHint}>
-          Alpha Version
-        </div>
         <div className={styles.titleBarCreditsWrapper}>
           <button
             className={styles.titleBarCreditsBtn}
@@ -169,12 +173,21 @@ export function TitleBar() {
                 )}
               </div>
               <div className={styles.creditsDropdownActions}>
-                <button className={styles.creditsDropdownManageBtn} onClick={handleManageCredits}>
+                <Button
+                  className={styles.creditsDropdownManageBtn}
+                  size="sm"
+                  variant="outline"
+                  onClick={handleManageCredits}
+                >
                   Portal
-                </button>
-                <button className={styles.creditsDropdownAddBtn} onClick={handleDepositCredits}>
+                </Button>
+                <Button
+                  className={styles.creditsDropdownAddBtn}
+                  size="sm"
+                  onClick={handleDepositCredits}
+                >
                   Deposit
-                </button>
+                </Button>
               </div>
             </div>
           )}

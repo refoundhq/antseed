@@ -137,6 +137,9 @@ const api = {
   getSystemLocale(): Promise<string> {
     return ipcRenderer.invoke('app:get-system-locale') as Promise<string>;
   },
+  getAppVersion(): Promise<string> {
+    return ipcRenderer.invoke('app:get-version') as Promise<string>;
+  },
   getState(): Promise<RuntimeSnapshot> {
     return ipcRenderer.invoke('runtime:get-state') as Promise<RuntimeSnapshot>;
   },
@@ -278,6 +281,18 @@ const api = {
   pickDirectory(): Promise<{ ok: boolean; path: string | null }> {
     return ipcRenderer.invoke('desktop:pick-directory');
   },
+  voiceTranscribe(audio: ArrayBuffer): Promise<{ ok: boolean; text?: string; error?: string }> {
+    return ipcRenderer.invoke('voice:transcribe', audio) as Promise<{ ok: boolean; text?: string; error?: string }>;
+  },
+  voiceGetStatus(): Promise<unknown> {
+    return ipcRenderer.invoke('voice:get-status') as Promise<unknown>;
+  },
+  voiceSetModel(modelId: string): Promise<unknown> {
+    return ipcRenderer.invoke('voice:set-model', modelId) as Promise<unknown>;
+  },
+  voiceInstallModel(modelId: string): Promise<unknown> {
+    return ipcRenderer.invoke('voice:install-model', modelId) as Promise<unknown>;
+  },
   onChatAiDone(handler: (data: { conversationId: string; message: { role: string; content: unknown; createdAt?: number; meta?: Record<string, unknown> } }) => void): () => void {
     const listener = (_: unknown, data: { conversationId: string; message: { role: string; content: unknown; createdAt?: number; meta?: Record<string, unknown> } }) => handler(data);
     ipcRenderer.on('chat:ai-done', listener);
@@ -292,6 +307,11 @@ const api = {
     const listener = (_: unknown, data: { conversationId: string; message: { role: string; content: unknown; createdAt?: number } }) => handler(data);
     ipcRenderer.on('chat:ai-user-persisted', listener);
     return () => ipcRenderer.off('chat:ai-user-persisted', listener);
+  },
+  onChatConversationTitleUpdated(handler: (data: { conversationId: string; title: string }) => void): () => void {
+    const listener = (_: unknown, data: { conversationId: string; title: string }) => handler(data);
+    ipcRenderer.on('chat:conversation-title-updated', listener);
+    return () => ipcRenderer.off('chat:conversation-title-updated', listener);
   },
   // Streaming events
   onChatAiStreamStart(handler: (data: { conversationId: string; turn: number }) => void): () => void {

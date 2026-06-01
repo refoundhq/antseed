@@ -293,7 +293,7 @@ export function registerRoutes(fastify: FastifyInstance, ctx: RouteContext): voi
 
       const rows = await Promise.all(
         epochList.map(async (epoch) => {
-          const [pending, v2UserSP, v2UserBP, v2SellerClaimed, v2BuyerClaimed, v2TotalSP, v2TotalBP, epEmission] = await Promise.all([
+          const [pending, v2UserSP, v2UserBP, v2SellerClaimed, v2BuyerClaimed, v2TotalSP, v2TotalBP, epEmission, params] = await Promise.all([
             retryRead(() => client.pendingEmissions(address, [epoch])),
             retryRead(() => client.userSellerPoints(address, epoch)),
             retryRead(() => client.userBuyerPoints(address, epoch)),
@@ -302,6 +302,7 @@ export function registerRoutes(fastify: FastifyInstance, ctx: RouteContext): voi
             retryRead(() => client.epochTotalSellerPoints(epoch)),
             retryRead(() => client.epochTotalBuyerPoints(epoch)),
             retryRead(() => client.getEpochEmission(epoch)),
+            retryRead(() => client.getEpochParams(epoch)),
           ]);
 
           let userSP = v2UserSP;
@@ -338,6 +339,7 @@ export function registerRoutes(fastify: FastifyInstance, ctx: RouteContext): voi
           return {
             epoch,
             epochEmission: epEmission.toString(),
+            params,
             seller: {
               amount: pending.seller.toString(),
               userPoints: userSP.toString(),

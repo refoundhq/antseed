@@ -3,6 +3,7 @@ import type {Config, Plugin, PluginModule} from '@docusaurus/types';
 import type * as Preset from '@docusaurus/preset-classic';
 import integrationsPagesPlugin from './plugins/integrations-pages';
 import {integrations as integrationEntries} from './src/integrations/integrations';
+import desktopPkg from '../desktop/package.json';
 
 const statsProxyPlugin: PluginModule = () => ({
   name: 'stats-proxy',
@@ -142,7 +143,7 @@ const config: Config = {
           'Agent-to-agent commerce support',
         ],
         downloadUrl: 'https://github.com/AntSeed/antseed/releases',
-        softwareVersion: '0.1.49',
+        softwareVersion: desktopPkg.version,
         license: 'https://github.com/AntSeed/antseed/blob/main/LICENSE',
       }),
     },
@@ -175,7 +176,7 @@ const config: Config = {
       },
       items: [
         {to: '/network', label: 'Pricing', position: 'right'},
-        {to: '/integrations', label: 'Integrations hub', position: 'right'},
+        {to: '/integrations', label: 'Integrations', position: 'right'},
         {to: '/providers', label: 'Providers', position: 'right'},
         {
           type: 'docSidebar',
@@ -185,6 +186,7 @@ const config: Config = {
           className: 'header-docs-link',
         },
         {to: '/ants-token', label: '$ANTS', position: 'right'},
+        {href: 'https://diem.antseed.com', label: '$DIEM', position: 'right', className: 'header-diem-link'},
         {to: '/blog', label: 'Blog', position: 'right'},
         {
           href: 'https://github.com/antseed',

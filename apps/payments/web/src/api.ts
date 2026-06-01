@@ -95,9 +95,20 @@ export interface EmissionsEpochInfo {
   halvingInterval: number;
 }
 
+export interface EmissionsEpochParams {
+  sellerSharePct: number;
+  buyerSharePct: number;
+  reserveSharePct: number;
+  teamSharePct: number;
+  maxSellerSharePct: number;
+  maxBuyerSharePct: number;
+  initialized: boolean;
+}
+
 export interface EmissionsPendingRow {
   epoch: number;
   epochEmission: string;
+  params: EmissionsEpochParams;
   seller: { amount: string; userPoints: string; totalPoints: string; claimed: boolean };
   buyer:  { amount: string; userPoints: string; totalPoints: string; claimed: boolean };
   isCurrent: boolean;
@@ -108,13 +119,7 @@ export interface EmissionsPendingResponse {
   rows: EmissionsPendingRow[];
 }
 
-export interface EmissionsShares {
-  sellerSharePct: number;
-  buyerSharePct: number;
-  reserveSharePct: number;
-  teamSharePct: number;
-  maxSellerSharePct: number;
-}
+export interface EmissionsShares extends EmissionsEpochParams {}
 
 export async function getEmissionsInfo(): Promise<EmissionsEpochInfo> {
   return fetchJson('/api/emissions');

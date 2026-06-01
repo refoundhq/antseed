@@ -42,7 +42,7 @@ import {
   loadChatWorkspaceDir,
   persistChatWorkspaceDir,
 } from './chat-workspace.js';
-import { DEFAULT_BUYER_STATE_PATH } from './constants.js';
+import { DEFAULT_BUYER_STATE_PATH, LOCALHOST, LOCALHOST_URL } from './constants.js';
 import { PROXY_PROVIDER_ID, normalizeProviderId, sanitizeProviderHint } from './chat-provider-hint.js';
 import { asErrorMessage } from './utils.js';
 import {
@@ -292,7 +292,7 @@ const PROXY_RUNTIME_API_KEY = 'antseed-local';
 
 const CHAT_SYSTEM_PROMPT_ENV = 'ANTSEED_CHAT_SYSTEM_PROMPT';
 const CHAT_SYSTEM_PROMPT_FILE_ENV = 'ANTSEED_CHAT_SYSTEM_PROMPT_FILE';
-const CHAT_SERVICE_MAX_OPTIONS = 1000;
+const CHAT_SERVICE_MAX_OPTIONS = 5000;
 const CHAT_SERVICE_MAX_OPTIONS_PER_PROVIDER = 1000;
 
 function normalizeTokenCount(value: unknown): number {
@@ -1004,7 +1004,7 @@ function makeProxyService(
     id: serviceId,
     name: serviceId,
     provider: PROXY_PROVIDER_ID,
-    baseUrl: needsV1 ? `http://127.0.0.1:${port}/v1` : `http://127.0.0.1:${port}`,
+    baseUrl: needsV1 ? `${LOCALHOST_URL}:${port}/v1` : `${LOCALHOST_URL}:${port}`,
     reasoning: true,
     input: inputModalities,
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
@@ -1099,7 +1099,7 @@ function mergeAssistantMessagesForUi(base: AiChatMessage | null, next: AiChatMes
 
 async function isPortReachable(port: number, timeoutMs = 700): Promise<boolean> {
   return await new Promise((resolve) => {
-    const socket = createConnection({ host: '127.0.0.1', port: Math.floor(port) });
+    const socket = createConnection({ host: LOCALHOST, port: Math.floor(port) });
 
     let settled = false;
     const finish = (ok: boolean): void => {
@@ -1517,12 +1517,220 @@ function normalizePaymentBody(body: Record<string, unknown>): Record<string, unk
 }
 
 
-function toConversationTitle(userMessage: string): string {
-  const normalized = userMessage.trim();
-  if (normalized.length === 0) {
-    return 'New conversation';
-  }
+function sanitizeGeneratedConversationTitle(value: unknown): string | null {
+  const cleaned = String(value ?? '')
+    .trim()
+    .replace(/^```(?:text)?/i, '')
+    .replace(/```$/i, '')
+    .replace(/^Title:\s*/i, '')
+    .replace(/^['\"]|['\"]$/g, '')
+    .replace(/[\r\n]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (!cleaned) return null;
+  return cleaned.slice(0, 60).trim();
+}
+
+function titleTextFromContent(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (!Array.isArray(value)) return '';
+  return value.map((block) => {
+    if (typeof block === 'string') return block;
+    if (!block || typeof block !== 'object') return '';
+    const data = block as Record<string, unknown>;
+    return typeof data.text === 'string'
+      ? data.text
+      : typeof data.output_text === 'string'
+        ? data.output_text
+        : '';
+  }).join('');
+}
+
+function getMessageText(message: Message | null | undefined): string {
+  if (!message) return '';
+  return titleTextFromContent((message as unknown as Record<string, unknown>).content).trim();
+}
+
+function legacyFallbackTitleForMessage(messageText: string): string {
+  const normalized = messageText.trim();
+  if (!normalized) return 'New conversation';
   return normalized.slice(0, 60) + (normalized.length > 60 ? '...' : '');
+}
+
+function shouldGenerateConversationTitleForSession(sessionName: string | undefined, firstUserMessage: string): boolean {
+  const current = sessionName?.trim() ?? '';
+  if (!current || current === 'Conversation' || current === 'New Chat' || current === 'New conversation') {
+    return true;
+  }
+  const legacyFallback = legacyFallbackTitleForMessage(firstUserMessage);
+  return current === legacyFallback;
+}
+
+function extractGeneratedTitleFromResponse(protocol: ChatServiceProtocol, body: unknown): string | null {
+  if (!body || typeof body !== 'object') return null;
+  const data = body as Record<string, unknown>;
+
+  if (protocol === 'openai-chat-completions') {
+    const choice = Array.isArray(data.choices) ? data.choices[0] as Record<string, unknown> | undefined : undefined;
+    const message = choice?.message as Record<string, unknown> | undefined;
+    return sanitizeGeneratedConversationTitle(
+      titleTextFromContent(message?.content)
+        || titleTextFromContent(choice?.text),
+    );
+  }
+
+  if (protocol === 'openai-responses') {
+    if (typeof data.output_text === 'string') {
+      return sanitizeGeneratedConversationTitle(data.output_text);
+    }
+    const output = Array.isArray(data.output) ? data.output : [];
+    for (const item of output) {
+      if (!item || typeof item !== 'object') continue;
+      const content = Array.isArray((item as Record<string, unknown>).content)
+        ? (item as Record<string, unknown>).content as Record<string, unknown>[]
+        : [];
+      for (const block of content) {
+        const title = sanitizeGeneratedConversationTitle(titleTextFromContent([block]));
+        if (title) return title;
+      }
+    }
+    return null;
+  }
+
+  const content = Array.isArray(data.content) ? data.content : [];
+  for (const block of content) {
+    if (!block || typeof block !== 'object') continue;
+    const title = sanitizeGeneratedConversationTitle((block as Record<string, unknown>).text);
+    if (title) return title;
+  }
+  return null;
+}
+
+function extractGeneratedTitleFromResponsesSse(text: string): string | null {
+  let eventName = '';
+  let dataLines: string[] = [];
+  let streamedText = '';
+
+  const flushEvent = (): string | null => {
+    if (dataLines.length === 0) return null;
+    const dataText = dataLines.join('\n').trim();
+    const event = eventName;
+    eventName = '';
+    dataLines = [];
+    if (!dataText || dataText === '[DONE]') return null;
+
+    try {
+      const data = JSON.parse(dataText) as Record<string, unknown>;
+      const type = typeof data.type === 'string' ? data.type : event;
+      if (type === 'response.output_text.delta' && typeof data.delta === 'string') {
+        streamedText += data.delta;
+        return null;
+      }
+      if (type === 'response.output_text.done' && typeof data.text === 'string') {
+        return sanitizeGeneratedConversationTitle(data.text);
+      }
+      if (type === 'response.completed') {
+        return extractGeneratedTitleFromResponse('openai-responses', data.response ?? data);
+      }
+    } catch {
+      // Ignore malformed SSE records and fall back to accumulated deltas.
+    }
+    return null;
+  };
+
+  for (const line of text.replace(/\r\n?/g, '\n').split('\n')) {
+    if (line === '') {
+      const title = flushEvent();
+      if (title) return title;
+      continue;
+    }
+    if (line.startsWith('event:')) {
+      eventName = line.slice('event:'.length).trim();
+    } else if (line.startsWith('data:')) {
+      dataLines.push(line.slice('data:'.length).trimStart());
+    }
+  }
+
+  return flushEvent() ?? sanitizeGeneratedConversationTitle(streamedText);
+}
+
+async function generateConversationTitleWithModel({
+  proxyPort,
+  serviceId,
+  protocol,
+  peerId,
+  userMessage,
+}: {
+  proxyPort: number;
+  serviceId: string;
+  protocol: ChatServiceProtocol;
+  peerId: string | null;
+  userMessage: string;
+}): Promise<string | null> {
+  const titleInstructions = 'You write short, accurate chat titles.';
+  const prompt = [
+    'Create a concise title for this chat conversation.',
+    'Rules: 3-6 words, no quotes, no period, title case only if natural, return only the title.',
+    '',
+    `User message:\n${userMessage.slice(0, 4000)}`,
+  ].join('\n');
+  const headers: Record<string, string> = {
+    'content-type': 'application/json',
+    authorization: `Bearer ${PROXY_RUNTIME_API_KEY}`,
+    'x-api-key': PROXY_RUNTIME_API_KEY,
+  };
+  if (peerId) headers['x-antseed-pin-peer'] = peerId;
+
+  let url = `${LOCALHOST_URL}:${proxyPort}/v1/messages`;
+  let body: Record<string, unknown> = {
+    model: serviceId,
+    max_tokens: 64,
+    system: titleInstructions,
+    messages: [{ role: 'user', content: prompt }],
+  };
+
+  if (protocol === 'openai-chat-completions') {
+    url = `${LOCALHOST_URL}:${proxyPort}/v1/chat/completions`;
+    body = {
+      model: serviceId,
+      max_tokens: 256,
+      messages: [
+        { role: 'system', content: `${titleInstructions} Return only the title.` },
+        { role: 'user', content: prompt },
+      ],
+    };
+  } else if (protocol === 'openai-responses') {
+    url = `${LOCALHOST_URL}:${proxyPort}/v1/responses`;
+    headers.accept = 'text/event-stream';
+    body = {
+      model: serviceId,
+      max_output_tokens: 64,
+      instructions: titleInstructions,
+      input: [{ role: 'user', content: [{ type: 'input_text', text: prompt }] }],
+      stream: true,
+    };
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15_000);
+  const response = await fetch(url, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(body),
+    signal: controller.signal,
+  }).finally(() => clearTimeout(timeout));
+  if (!response.ok) return null;
+
+  if (protocol === 'openai-responses') {
+    return extractGeneratedTitleFromResponsesSse(await response.text());
+  }
+
+  try {
+    return extractGeneratedTitleFromResponse(protocol, await response.json());
+  } catch {
+    return null;
+  }
 }
 
 export function registerPiChatHandlers({
@@ -1800,10 +2008,11 @@ export function registerPiChatHandlers({
     await session.setModel(proxyModel);
     session.agent.sessionId = conversationId;
 
-    const existingUserMessages = session.messages.filter((message) => message.role === 'user').length;
-    if (existingUserMessages === 0 && (!session.sessionName || session.sessionName.trim().length === 0)) {
-      session.setSessionName(toConversationTitle(trimmedMessage));
-    }
+    const firstUserMessageText = getMessageText(session.messages.find((message) => message.role === 'user')) || trimmedMessage;
+    const shouldGenerateConversationTitle = shouldGenerateConversationTitleForSession(
+      session.sessionName,
+      firstUserMessageText,
+    );
 
     const turnMetaQueue: AiMessageMeta[] = [];
     const toolArgsById = new Map<string, Record<string, unknown>>();
@@ -2161,6 +2370,25 @@ export function registerPiChatHandlers({
         streamDone = true;
         sendToRenderer('chat:ai-stream-done', { conversationId });
       }
+
+      if (shouldGenerateConversationTitle) {
+        try {
+          let title = await generateConversationTitleWithModel({
+            proxyPort,
+            serviceId,
+            protocol,
+            peerId: preferredPeerId,
+            userMessage: firstUserMessageText,
+          });
+
+          if (title) {
+            session.setSessionName(title);
+            sendToRenderer('chat:conversation-title-updated', { conversationId, title });
+          }
+        } catch (error) {
+          appendSystemLog(`Conversation title generation failed: ${asErrorMessage(error)}`);
+        }
+      }
       return { ok: true };
     } catch (error) {
       // Always discard any buffered assistant message on error — it will not be committed.
@@ -2277,7 +2505,7 @@ export function registerPiChatHandlers({
     params: { port: number; path: string; method: string; headers: Record<string, string>; body: string },
   ) => {
     try {
-      const url = `http://127.0.0.1:${params.port}${params.path}`;
+      const url = `${LOCALHOST_URL}:${params.port}${params.path}`;
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 60_000);
       const res = await fetch(url, {
@@ -2318,7 +2546,7 @@ export function registerPiChatHandlers({
       await Promise.all(uniqueCatalogPeerIds.map(async (peerId) => {
         try {
           const resp = await fetch(
-            `http://127.0.0.1:${buyerPort}/_antseed/metering/${encodeURIComponent(peerId)}`,
+            `${LOCALHOST_URL}:${buyerPort}/_antseed/metering/${encodeURIComponent(peerId)}`,
           );
           if (!resp.ok) return;
           const body = await resp.json() as Record<string, unknown> | null;
@@ -2603,7 +2831,7 @@ export function registerPiChatHandlers({
     // Eager connection warmup via buyer proxy
     const proxyPort = await resolveProxyPort(configPath);
     try {
-      const response = await fetch(`http://127.0.0.1:${proxyPort}/_antseed/connect`, {
+      const response = await fetch(`${LOCALHOST_URL}:${proxyPort}/_antseed/connect`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ peerId }),

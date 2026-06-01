@@ -1,4 +1,5 @@
 import type { DiscoverRow, RendererUiState } from '../core/state';
+import { LOCALHOST_URL } from '../constants';
 import type { BadgeTone } from '../core/state';
 import { notifyUiStateChanged, notifyUiStateChangedSync } from '../core/store';
 import { normalizeDiscoverRow, projectRowsToChatServiceOptions } from './discover-rows.js';
@@ -212,6 +213,20 @@ export function initChatModule({
     }
   }
 
+  function hidePaymentApprovalCard(): void {
+    uiState.chatPaymentApprovalVisible = false;
+    uiState.chatPaymentApprovalPeerId = null;
+    uiState.chatPaymentApprovalPeerName = null;
+    uiState.chatPaymentApprovalPeerInfo = null;
+    uiState.chatPaymentApprovalLoading = false;
+    uiState.chatPaymentApprovalError = null;
+  }
+
+  function clearTransientChatNotices(): void {
+    uiState.chatError = null;
+    hidePaymentApprovalCard();
+  }
+
   async function refreshAvailableCreditsUsdc(): Promise<number> {
     if (!bridge?.creditsGetInfo) {
       return parseFloat(uiState.creditsAvailableUsdc || '0');
@@ -283,7 +298,6 @@ export function initChatModule({
 
     const timer = setTimeout(() => {
       chatRetryTimers.delete(convId);
-      uiState.chatError = null;
       if (ctx?.content != null) {
         setConversationSending(convId, true);
         dispatchChatRequest(convId, ctx.content, ctx.attachments, ctx.selection);
@@ -305,12 +319,6 @@ export function initChatModule({
       && required > 0
       && available >= required
     ) {
-      uiState.chatPaymentApprovalVisible = false;
-      uiState.chatPaymentApprovalPeerId = null;
-      uiState.chatPaymentApprovalPeerName = null;
-      uiState.chatPaymentApprovalPeerInfo = null;
-      uiState.chatPaymentApprovalError = null;
-      uiState.chatError = null;
       scheduleChatRetry(retryCtx, 'payment');
       notifyUiStateChanged();
       return;
@@ -738,7 +746,7 @@ export function initChatModule({
         ltTokens: uiState.chatLifetimeTotalTokens,
         ltSessions: uiState.chatLifetimeSessions,
       };
-      const url = `http://127.0.0.1:${port}/_antseed/metering/${encodeURIComponent(sellerPeerId)}`;
+      const url = `${LOCALHOST_URL}:${port}/_antseed/metering/${encodeURIComponent(sellerPeerId)}`;
       const resp = await fetch(url);
       if (!resp.ok) return;
       const stats = (await resp.json()) as MeteringPeerStats;
@@ -1499,6 +1507,8 @@ export function initChatModule({
     uiState.chatLifetimeSpentUsdc = '';
     uiState.chatLifetimeTotalTokens = '';
     uiState.chatLifetimeSessions = '';
+    clearTransientChatNotices();
+    notifyUiStateChanged();
 
     try {
       const result = await bridge.chatAiGetConversation(convId);
@@ -1544,7 +1554,7 @@ export function initChatModule({
 
         setLocalConversationMessages(convId, uiState.chatMessages as ChatMessage[]);
         updateThreadMeta(activeConversation);
-        uiState.chatError = null;
+        clearTransientChatNotices();
         notifyUiStateChanged();
 
         const convWorkspacePath = conv.workspacePath;
@@ -1574,7 +1584,7 @@ export function initChatModule({
     activeConversation = null;
     uiState.chatDeleteVisible = false;
     uiState.chatConversationTitle = 'New Chat';
-    uiState.chatError = null;
+    clearTransientChatNotices();
     // Re-derive sending flags from the (now null) active conversation so that
     // the thinking indicator does not leak in from whichever chat the user was
     // previously viewing while it was still streaming. Without this, the
@@ -2172,23 +2182,12 @@ export function initChatModule({
   }
 
   /**
-   * Retry the last user message after a payment failure.  Dismisses the
-   * payment-approval card and re-sends the most recent user message in the
-   * active conversation.  Intended to be called when credits become
-   * available after a 402 was returned.
+   * Retry the last user message after a payment failure. Keeps the
+   * payment-approval card visible while the user stays in the same chat;
+   * context switches are responsible for dismissing transient notices.
    */
   function retryAfterPayment(): void {
     if (!bridge) return;
-
-    // Dismiss payment card
-    uiState.chatPaymentApprovalVisible = false;
-    uiState.chatPaymentApprovalPeerId = null;
-    uiState.chatPaymentApprovalPeerName = null;
-    uiState.chatPaymentApprovalPeerInfo = null;
-    uiState.chatPaymentApprovalLoading = false;
-    uiState.chatPaymentApprovalError = null;
-    uiState.chatError = null;
-    notifyUiStateChanged();
 
     // Find the last user message to resend
     type MsgShape = { role?: string; content?: unknown };
@@ -2238,6 +2237,7 @@ export function initChatModule({
   function handleServiceChange(value: string, explicitPeerId?: string): void {
     uiState.chatSelectedServiceValue = value;
     pendingServiceOptions = null;
+    clearTransientChatNotices();
 
     // Prefer an explicit peerId (e.g. from a Discover card click) so we don't
     // depend on chatServiceOptions.value matching the encoded form exactly.
@@ -2248,9 +2248,33 @@ export function initChatModule({
       peerId = selectedOption?.peerId || '';
     }
     uiState.chatSelectedPeerId = peerId;
+
+    const decoded = decodeChatServiceSelection(value);
+    const nextServiceId = normalizeChatServiceId(selectedOption?.id ?? decoded.id);
+    const nextProvider = normalizeProviderId(selectedOption?.provider ?? decoded.provider);
+
     if (activeConversation) {
       activeConversation.peerId = peerId || undefined;
       activeConversation.peerLabel = selectedOption?.peerDisplayName || selectedOption?.peerLabel || undefined;
+
+      if (nextServiceId) {
+        activeConversation.service = nextServiceId;
+        activeConversation.provider = nextProvider ?? '';
+      }
+
+      const convId = activeConversation.id;
+      if (convId && Array.isArray(uiState.chatConversations)) {
+        const list = uiState.chatConversations as ChatConversationSummary[];
+        const summary = list.find((c) => c.id === convId);
+        if (summary) {
+          summary.peerId = peerId || '';
+          summary.peerLabel = activeConversation.peerLabel ?? '';
+          if (nextServiceId) {
+            summary.service = nextServiceId;
+            summary.provider = nextProvider ?? '';
+          }
+        }
+      }
     }
     if (bridge?.chatAiSelectPeer) {
       void bridge.chatAiSelectPeer({
@@ -2278,6 +2302,7 @@ export function initChatModule({
   function clearPinnedPeer(): void {
     uiState.chatSelectedPeerId = '';
     uiState.chatRoutedPeer = '';
+    clearTransientChatNotices();
     if (activeConversation) {
       delete activeConversation.peerId;
       delete activeConversation.peerLabel;
@@ -2314,10 +2339,10 @@ export function initChatModule({
             }
           });
         } else if (data.conversationId === uiState.chatActiveConversation) {
-            commitAssistantMessage(incomingMessage);
-            uiState.chatError = null;
-            setConversationSending(data.conversationId, false);
-            notifyUiStateChanged();
+          commitAssistantMessage(incomingMessage);
+          uiState.chatError = null;
+          setConversationSending(data.conversationId, false);
+          notifyUiStateChanged();
         }
         void refreshChatConversations();
         void refreshWorkspaceGitStatus();
@@ -2355,6 +2380,26 @@ export function initChatModule({
           );
           notifyUiStateChanged();
         }
+      });
+    }
+
+    if (bridge.onChatConversationTitleUpdated) {
+      bridge.onChatConversationTitleUpdated((data) => {
+        const title = String(data.title || '').trim();
+        if (!title) return;
+        const conversations = Array.isArray(uiState.chatConversations)
+          ? (uiState.chatConversations as ChatConversationSummary[])
+          : [];
+        const conv = conversations.find((c) => c.id === data.conversationId);
+        if (conv) {
+          conv.title = title;
+          uiState.chatConversations = [...conversations];
+        }
+        if (data.conversationId === uiState.chatActiveConversation) {
+          uiState.chatConversationTitle = title;
+        }
+        notifyUiStateChanged();
+        void refreshChatConversations();
       });
     }
 

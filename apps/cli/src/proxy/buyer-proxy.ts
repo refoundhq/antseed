@@ -419,9 +419,11 @@ export class BuyerProxy {
       })
     })
     this._startBackgroundRefresh()
-    // Trigger initial peer discovery immediately so the desktop can show
-    // services without waiting for the first request or 5-minute interval.
-    void this._refreshPeersNow().catch(() => {})
+    // Trigger initial discovery immediately so the desktop can show services
+    // without waiting for the first request or 5-minute interval. The sweep
+    // emits each accepted metadata document as it arrives, so buyer.state.json
+    // gets useful rows while slower endpoints continue timing out.
+    this._startIncrementalDiscoverySweep()
     await this._writeStateFile('connected')
     this._watchStateFile()
   }
@@ -545,8 +547,13 @@ export class BuyerProxy {
     })
   }
 
+  private _startIncrementalDiscoverySweep(): void {
+    this._node.startBackgroundPeerDiscoverySweep()
+  }
+
   private _startBackgroundRefresh(): void {
     this._bgRefreshHandle = setInterval(() => {
+      this._startIncrementalDiscoverySweep()
       void this._refreshPeersNow().catch(() => {
         // background refresh failure is non-fatal
       })

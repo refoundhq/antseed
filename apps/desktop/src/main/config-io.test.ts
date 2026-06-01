@@ -9,6 +9,7 @@ import {
   DESKTOP_DEFAULT_MAX_OUTPUT_USD_PER_MILLION,
   DESKTOP_DEFAULT_MIN_PEER_REPUTATION,
   DESKTOP_DEFAULT_PEER_REFRESH_INTERVAL_MS,
+  DESKTOP_DEFAULT_METADATA_FETCH_TIMEOUT_MS,
   ensureConfig,
   readConfig,
 } from './config-io.js';
@@ -39,6 +40,7 @@ test('ensureConfig creates config with desktop buyer max pricing defaults', asyn
   assert.equal(pricing.output, DESKTOP_DEFAULT_MAX_OUTPUT_USD_PER_MILLION);
   assert.equal((config.buyer as { minPeerReputation?: number }).minPeerReputation, DESKTOP_DEFAULT_MIN_PEER_REPUTATION);
   assert.equal((config.buyer as { peerRefreshIntervalMs?: number }).peerRefreshIntervalMs, DESKTOP_DEFAULT_PEER_REFRESH_INTERVAL_MS);
+  assert.equal((config.buyer as { metadataFetchTimeoutMs?: number }).metadataFetchTimeoutMs, DESKTOP_DEFAULT_METADATA_FETCH_TIMEOUT_MS);
 });
 
 test('ensureConfig clamps buyer max pricing above desktop defaults', async (t) => {
@@ -123,6 +125,7 @@ test('ensureConfig preserves valid buyer peer refresh interval', async (t) => {
   await writeFile(configPath, JSON.stringify({
     buyer: {
       peerRefreshIntervalMs: 30_000,
+      metadataFetchTimeoutMs: 2_000,
       maxPricing: {
         defaults: {
           inputUsdPerMillion: 4,
@@ -136,6 +139,7 @@ test('ensureConfig preserves valid buyer peer refresh interval', async (t) => {
 
   const config = await readConfig(configPath);
   assert.equal((config.buyer as { peerRefreshIntervalMs?: number }).peerRefreshIntervalMs, 30_000);
+  assert.equal((config.buyer as { metadataFetchTimeoutMs?: number }).metadataFetchTimeoutMs, 2_000);
 });
 
 test('ensureConfig preserves buyer max pricing at or below desktop defaults', async (t) => {

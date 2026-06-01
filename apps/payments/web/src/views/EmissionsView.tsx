@@ -8,12 +8,14 @@ import {
   getEmissionsShares,
   getTransfersEnabled,
   type EmissionsEpochInfo,
+  type EmissionsEpochParams,
   type EmissionsPendingResponse,
   type EmissionsShares as SharesType,
 } from '../api';
 import { EMISSIONS_CLAIM_ABI } from '../emissions-abi';
 import { getErrorMessage, usePaymentNetwork } from '../payment-network';
 import { useAuthorizedWallet } from '../context/AuthorizedWalletContext';
+import { Button } from '../components/Button';
 
 interface EmissionsViewProps {
   config: PaymentConfig | null;
@@ -40,48 +42,66 @@ function formatAnts(amountWei: string): string {
   }
 }
 
-function estimateSideReward(epochEmission: string, sharePct: number, userPts: string, totalPts: string): bigint {
+function getEffectiveParams(
+  row: EmissionsPendingResponse['rows'][number] | undefined,
+  fallback: SharesType | null | undefined,
+): EmissionsEpochParams | null {
+  if (row?.params?.initialized) return row.params;
+  return fallback ?? row?.params ?? null;
+}
+
+function estimateSideReward(
+  epochEmission: string,
+  sharePct: number,
+  maxSharePct: number,
+  userPts: string,
+  totalPts: string,
+): bigint {
   const emission = safeBigint(epochEmission);
   const user = safeBigint(userPts);
   const total = safeBigint(totalPts);
-  if (total === 0n) return 0n;
-  return emission * BigInt(Math.round(sharePct * 100)) * user / (10000n * total);
+  if (emission === 0n || total === 0n || user === 0n) return 0n;
+
+  const bucket = emission * BigInt(Math.round(sharePct * 100)) / 10000n;
+  const reward = bucket * user / total;
+  const maxReward = bucket * BigInt(Math.round(maxSharePct * 100)) / 10000n;
+  return reward > maxReward ? maxReward : reward;
 }
 
 function estimateRowReward(
   row: EmissionsPendingResponse['rows'][number],
-  epochEmission: string,
-  shares: SharesType,
+  fallback: SharesType | null | undefined,
 ): string {
-  const emission = safeBigint(epochEmission);
-  const userSP = safeBigint(row.seller.userPoints);
-  const totalSP = safeBigint(row.seller.totalPoints);
-  const userBP = safeBigint(row.buyer.userPoints);
-  const totalBP = safeBigint(row.buyer.totalPoints);
+  const params = getEffectiveParams(row, fallback);
+  if (!params) return '0';
 
-  let est = 0n;
-  if (totalSP > 0n) {
-    est += emission * BigInt(Math.round(shares.sellerSharePct * 100)) * userSP / (10000n * totalSP);
-  }
-  if (totalBP > 0n) {
-    est += emission * BigInt(Math.round(shares.buyerSharePct * 100)) * userBP / (10000n * totalBP);
-  }
-  return est.toString();
+  const sellerReward = estimateSideReward(
+    row.epochEmission,
+    params.sellerSharePct,
+    params.maxSellerSharePct,
+    row.seller.userPoints,
+    row.seller.totalPoints,
+  );
+  const buyerReward = estimateSideReward(
+    row.epochEmission,
+    params.buyerSharePct,
+    params.maxBuyerSharePct,
+    row.buyer.userPoints,
+    row.buyer.totalPoints,
+  );
+  return (sellerReward + buyerReward).toString();
 }
 
 function computeEpochShare(
   row: EmissionsPendingResponse['rows'][number] | undefined,
-  shares: SharesType,
+  fallback: SharesType | null | undefined,
 ): number {
   if (!row) return 0;
-  const userSP = safeBigint(row.seller.userPoints);
-  const totalSP = safeBigint(row.seller.totalPoints);
-  const userBP = safeBigint(row.buyer.userPoints);
-  const totalBP = safeBigint(row.buyer.totalPoints);
-  let pct = 0;
-  if (totalSP > 0n) pct += shares.sellerSharePct * Number((userSP * 10000n) / totalSP) / 10000;
-  if (totalBP > 0n) pct += shares.buyerSharePct * Number((userBP * 10000n) / totalBP) / 10000;
-  return pct;
+  const emission = safeBigint(row.epochEmission);
+  if (emission === 0n) return 0;
+
+  const reward = safeBigint(estimateRowReward(row, fallback));
+  return Number((reward * 10000n) / emission) / 100;
 }
 
 function formatTimeRemaining(seconds: number): string {
@@ -252,31 +272,37 @@ export function EmissionsView({ config }: EmissionsViewProps) {
 
   const rows = pending?.rows ?? [];
   const currentRow = rows.find((r) => r.isCurrent);
-  const currentSellerPts = currentRow?.seller.userPoints ?? '0';
-  const currentBuyerPts = currentRow?.buyer.userPoints ?? '0';
-  const totalSellerPts = currentRow?.seller.totalPoints ?? '0';
-  const totalBuyerPts = currentRow?.buyer.totalPoints ?? '0';
-  const currentEstimate = currentRow && info && shares
-    ? estimateRowReward(currentRow, info.epochEmission, shares)
-    : '0';
-
-  const epochSharePct = shares
-    ? computeEpochShare(currentRow, shares)
-    : 0;
+  const currentParams = getEffectiveParams(currentRow, shares);
+  const currentEstimate = currentRow ? estimateRowReward(currentRow, shares) : '0';
+  const epochSharePct = computeEpochShare(currentRow, shares);
 
   let totalClaimable = 0n;
   let totalClaimed = 0n;
   for (const r of rows) {
     if (r.isCurrent) continue;
-    const ep = r.epochEmission ?? info.epochEmission;
-    // Per-side: pendingEmissions returns 0 for claimed sides, so estimate from points
-    if (r.seller.claimed && shares) {
-      totalClaimed += estimateSideReward(ep, shares.sellerSharePct, r.seller.userPoints, r.seller.totalPoints);
+    const params = getEffectiveParams(r, shares);
+    // Per-side: pendingEmissions returns 0 for claimed sides, so estimate from points.
+    // Use the epoch's snapshotted params so historical rows don't change when
+    // owner-controlled global shares are updated for future epochs.
+    if (r.seller.claimed && params) {
+      totalClaimed += estimateSideReward(
+        r.epochEmission,
+        params.sellerSharePct,
+        params.maxSellerSharePct,
+        r.seller.userPoints,
+        r.seller.totalPoints,
+      );
     } else {
       totalClaimable += safeBigint(r.seller.amount);
     }
-    if (r.buyer.claimed && shares) {
-      totalClaimed += estimateSideReward(ep, shares.buyerSharePct, r.buyer.userPoints, r.buyer.totalPoints);
+    if (r.buyer.claimed && params) {
+      totalClaimed += estimateSideReward(
+        r.epochEmission,
+        params.buyerSharePct,
+        params.maxBuyerSharePct,
+        r.buyer.userPoints,
+        r.buyer.totalPoints,
+      );
     } else {
       totalClaimable += safeBigint(r.buyer.amount);
     }
@@ -288,10 +314,10 @@ export function EmissionsView({ config }: EmissionsViewProps) {
         <header className="dashboard-section-head">
           <div className="dashboard-section-eyebrow">Current epoch</div>
           <h2 className="dashboard-section-title">Epoch #{info.currentEpoch}</h2>
-          {shares && (
+          {currentParams && (
             <p className="dashboard-section-sub">
-              Split: {shares.sellerSharePct}% sellers · {shares.buyerSharePct}% buyers ·{' '}
-              {shares.reserveSharePct}% reserve · {shares.teamSharePct}% team
+              Split: {currentParams.sellerSharePct}% sellers · {currentParams.buyerSharePct}% buyers ·{' '}
+              {currentParams.reserveSharePct}% reserve · {currentParams.teamSharePct}% team
             </p>
           )}
         </header>
@@ -361,25 +387,25 @@ export function EmissionsView({ config }: EmissionsViewProps) {
           </p>
         </header>
         <div className="dashboard-chart-card">
-          <EmissionsTable rows={pending?.rows ?? []} epochEmission={info.epochEmission} shares={shares} />
+          <EmissionsTable rows={pending?.rows ?? []} shares={shares} />
           {(sellerClaimError || buyerClaimError) && (
             <div className="status-msg status-error">{sellerClaimError || buyerClaimError}</div>
           )}
           <div className="emissions-claim-actions">
-            <button
-              className="btn-primary"
+            <Button
+              fullWidth
               onClick={handleClaimSeller}
               disabled={!pending || pending.rows.every((r) => r.isCurrent || r.seller.claimed || r.seller.amount === '0')}
             >
               Claim seller
-            </button>
-            <button
-              className="btn-primary"
+            </Button>
+            <Button
+              fullWidth
               onClick={handleClaimBuyer}
               disabled={!pending || pending.rows.every((r) => r.isCurrent || r.buyer.claimed || r.buyer.amount === '0')}
             >
               Claim buyer
-            </button>
+            </Button>
           </div>
         </div>
       </section>
@@ -404,8 +430,9 @@ export function EmissionsView({ config }: EmissionsViewProps) {
             </p>
           </div>
           {config?.antsTokenAddress && connector && (
-            <button
-              className="btn-outline"
+            <Button
+              fullWidth
+              variant="outline"
               onClick={async () => {
                 try {
                   const provider = await connector.getProvider();
@@ -426,7 +453,7 @@ export function EmissionsView({ config }: EmissionsViewProps) {
               }}
             >
               Add ANTS to wallet
-            </button>
+            </Button>
           )}
         </div>
       </section>
@@ -441,9 +468,8 @@ export function EmissionsView({ config }: EmissionsViewProps) {
   );
 }
 
-function EmissionsTable({ rows, epochEmission, shares }: {
+function EmissionsTable({ rows, shares }: {
   rows: EmissionsPendingResponse['rows'];
-  epochEmission?: string;
   shares?: SharesType | null;
 }) {
   if (rows.length === 0) {
@@ -462,11 +488,10 @@ function EmissionsTable({ rows, epochEmission, shares }: {
         </thead>
         <tbody>
           {rows.slice().reverse().map((row) => {
-            const ep = row.epochEmission ?? epochEmission ?? '0';
-            const total = (row.isCurrent || row.seller.claimed || row.buyer.claimed) && shares
-              ? estimateRowReward(row, ep, shares)
+            const total = row.isCurrent || row.seller.claimed || row.buyer.claimed
+              ? estimateRowReward(row, shares)
               : addWei(row.seller.amount, row.buyer.amount);
-            const share = shares ? computeEpochShare(row, shares) : 0;
+            const share = computeEpochShare(row, shares);
             // "Fully resolved" = each side is either claimed or has no points
             const sellerDone = row.seller.claimed || row.seller.userPoints === '0';
             const buyerDone = row.buyer.claimed || row.buyer.userPoints === '0';
@@ -500,4 +525,3 @@ function EmissionsTable({ rows, epochEmission, shares }: {
     </div>
   );
 }
-

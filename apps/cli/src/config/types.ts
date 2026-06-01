@@ -104,6 +104,8 @@ export interface BuyerCLIConfig {
   proxyPort: number;
   /** How often the buyer refreshes its peer list from the DHT in the background (ms) */
   peerRefreshIntervalMs: number;
+  /** Timeout in ms for each HTTP metadata fetch during peer discovery */
+  metadataFetchTimeoutMs: number;
 }
 
 /**

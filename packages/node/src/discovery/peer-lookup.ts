@@ -80,6 +80,12 @@ export type LookupPartialCallback = (
   context: LookupPartialContext,
 ) => void | Promise<void>;
 
+type ResolveLookupResultsOptions = {
+  metadataPeerId?: string;
+  maxResults?: number;
+  onResult?: (result: LookupResult) => void | Promise<void>;
+};
+
 export class PeerLookup {
   private readonly config: LookupConfig;
   private nextSubnetStart = 0;
@@ -124,10 +130,10 @@ export class PeerLookup {
    * Complete a full sequential wildcard+subnet sweep. Intended for background
    * catch-up after a fast foreground discovery has already populated the UI.
    *
-   * When `onPartial` is provided, each non-empty DHT batch is metadata-resolved
-   * and emitted immediately instead of making callers wait for every shard to
-   * finish. This keeps the buyer catalog moving while the exhaustive sweep is
-   * still walking later shards.
+   * When `onPartial` is provided, each accepted metadata result is emitted as
+   * soon as it settles instead of making callers wait for every endpoint in a
+   * shard to resolve or timeout. This keeps the buyer catalog moving while the
+   * exhaustive sweep is still walking later shards.
    */
   async findAllExhaustive(onPartial?: LookupPartialCallback): Promise<LookupResult[]> {
     return this.findAllWithDhtBudget(undefined, "background", onPartial);
@@ -154,12 +160,16 @@ export class PeerLookup {
     );
     merged.push(...wildcardEndpoints);
     if (onPartial && wildcardEndpoints.length > 0) {
-      const resolved = await this.resolveLookupResults(shuffle(wildcardEndpoints));
-      partialResults.push(...resolved);
-      await onPartial(resolved, {
+      const context: LookupPartialContext = {
         mode,
         phase: "wildcard",
         endpointCount: wildcardEndpoints.length,
+      };
+      await this.resolveLookupResults(shuffle(wildcardEndpoints), {
+        onResult: async (result) => {
+          partialResults.push(result);
+          await onPartial([result], context);
+        },
       });
     }
 
@@ -191,18 +201,24 @@ export class PeerLookup {
       merged.push(...subnetEndpoints);
       if (onPartial && subnetEndpoints.length > 0) {
         const partialStartedAt = Date.now();
-        const resolved = await this.resolveLookupResults(shuffle(subnetEndpoints));
-        partialResults.push(...resolved);
-        debugLog(
-          `[PeerLookup] ${mode}: subnet ${subnet}/${SUBNET_COUNT - 1} partial metadata resolved `
-          + `${resolved.length}/${subnetEndpoints.length} in ${Date.now() - partialStartedAt}ms`,
-        );
-        await onPartial(resolved, {
+        let resolvedCount = 0;
+        const context: LookupPartialContext = {
           mode,
           phase: "subnet",
           subnet,
           endpointCount: subnetEndpoints.length,
+        };
+        await this.resolveLookupResults(shuffle(subnetEndpoints), {
+          onResult: async (result) => {
+            resolvedCount += 1;
+            partialResults.push(result);
+            await onPartial([result], context);
+          },
         });
+        debugLog(
+          `[PeerLookup] ${mode}: subnet ${subnet}/${SUBNET_COUNT - 1} partial metadata resolved `
+          + `${resolvedCount}/${subnetEndpoints.length} in ${Date.now() - partialStartedAt}ms`,
+        );
       }
       nextStart = (subnet + 1) % SUBNET_COUNT;
     }
@@ -266,7 +282,7 @@ export class PeerLookup {
 
   private async resolveLookupResults(
     peers: PeerEndpoint[],
-    options?: { metadataPeerId?: string; maxResults?: number },
+    options?: ResolveLookupResultsOptions,
   ): Promise<LookupResult[]> {
     const maxResults = options?.maxResults ?? this.config.maxResults;
     const metadataPeerId = options?.metadataPeerId;
@@ -291,17 +307,26 @@ export class PeerLookup {
       );
     }
 
-    // Resolve all peers in parallel — bad-port timeouts no longer block good peers
+    // Resolve all peers in parallel — bad-port timeouts no longer block good peers.
+    // When a progress callback is provided, publish accepted metadata as each
+    // endpoint settles instead of waiting for every slow endpoint to timeout.
     const settled = await Promise.allSettled(
-      uniquePeers.map((peer) => this._resolveSinglePeer(peer)),
+      uniquePeers.map(async (peer) => {
+        const result = await this._resolveSinglePeer(peer);
+        if (result === null) return null;
+        if (metadataPeerId && result.metadata.peerId.toLowerCase() !== metadataPeerId) {
+          return null;
+        }
+        if (options?.onResult) {
+          await options.onResult(result);
+        }
+        return result;
+      }),
     );
 
     const results: LookupResult[] = [];
     for (const r of settled) {
       if (r.status === "fulfilled" && r.value !== null) {
-        if (metadataPeerId && r.value.metadata.peerId.toLowerCase() !== metadataPeerId) {
-          continue;
-        }
         results.push(r.value);
         if (results.length >= maxResults) break;
       }

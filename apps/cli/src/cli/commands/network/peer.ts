@@ -12,6 +12,7 @@ import {
 import { parseBootstrapList, toBootstrapConfig } from '@antseed/node/discovery';
 import { parsePersistedPeers } from '../../../proxy/buyer-proxy.js';
 import { buildPaymentsConfig } from './chain-config-helper.js';
+import { resolveEffectiveBuyerConfig } from '../../../config/effective.js';
 import {
   collectServiceTags,
   parseTagFilter,
@@ -66,6 +67,14 @@ function normalizePeerId(raw: string): string | null {
   const cleaned = raw.trim().replace(/^0x/i, '').toLowerCase();
   if (!/^[0-9a-f]{40}$/.test(cleaned)) return null;
   return cleaned;
+}
+
+function sellerAddressForPeer(peer: PeerInfo): string {
+  return normalizePeerId(peer.metadata?.sellerContract ?? '') ?? peer.peerId;
+}
+
+function isDelegatedSeller(peer: PeerInfo): boolean {
+  return sellerAddressForPeer(peer) !== peer.peerId.toLowerCase();
 }
 
 /**
@@ -147,6 +156,15 @@ function printPeerDetail(peer: PeerInfo, requestedTags: Set<string>): void {
   console.log(`  ID:              ${peer.peerId}`);
   console.log(`  Display name:    ${peer.displayName ?? chalk.dim('—')}`);
   console.log(`  Public address:  ${peer.publicAddress ?? chalk.dim('—')}`);
+
+  const sellerAddress = sellerAddressForPeer(peer);
+  if (isDelegatedSeller(peer)) {
+    console.log(`  On-chain seller: ${chalk.yellow(sellerAddress)}`);
+    console.log(chalk.dim('    (delegated/proxy seller — channel stats and payments are attributed to the seller address)'));
+  } else {
+    console.log(`  On-chain seller: ${chalk.dim('same as peer')}`);
+  }
+
   if (typeof peer.lastSeen === 'number' && peer.lastSeen > 0) {
     const age = Date.now() - peer.lastSeen;
     console.log(`  Last seen:       ${new Date(peer.lastSeen).toISOString()} ${chalk.dim(`(${Math.max(0, Math.floor(age / 1000))}s ago)`)}`);
@@ -282,6 +300,7 @@ export function registerNetworkPeerCommand(networkCmd: Command): void {
       const tagFilter = parseTagFilter(options.tag);
       const globalOpts = getGlobalOptions(networkCmd);
       const config = await loadConfig(globalOpts.config);
+      const effectiveBuyerConfig = resolveEffectiveBuyerConfig({ config });
 
       const cachedPeers = await loadPeersFromBuyerDaemon(globalOpts.dataDir);
       let match: PeerInfo | null =
@@ -302,6 +321,7 @@ export function registerNetworkPeerCommand(networkCmd: Command): void {
           role: 'buyer',
           ...(bootstrapNodes ? { bootstrapNodes } : {}),
           dhtOperationTimeoutMs: 30_000,
+          metadataFetchTimeoutMs: effectiveBuyerConfig.metadataFetchTimeoutMs,
           ...(paymentsConfig ? { payments: paymentsConfig } : {}),
         });
         try {
@@ -336,9 +356,14 @@ export function registerNetworkPeerCommand(networkCmd: Command): void {
         // filtered list without walking providerPricing themselves. When no
         // tag filter is in effect it simply contains every announced service.
         const matchingServices = collectMatchingServices(match, tagFilter);
+        // Surface the on-chain seller address explicitly so JSON consumers don't
+        // need to dig into `metadata.sellerContract` themselves.
+        const sellerAddress = sellerAddressForPeer(match);
         console.log(JSON.stringify({
           source: sourceLabel,
           filter: tagFilter.size > 0 ? { tags: Array.from(tagFilter).sort() } : null,
+          sellerAddress,
+          isDelegatedSeller: isDelegatedSeller(match),
           peer: match,
           matchingServices,
         }, null, 2));

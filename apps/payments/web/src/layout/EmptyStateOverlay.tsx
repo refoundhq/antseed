@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useBodyScrollLock } from '../hooks/useBodyScrollLock';
 import type { BalanceData, PaymentConfig } from '../types';
 import { DepositView } from '../components/DepositView';
+import { Button } from '../components/Button';
 import type { OverlayPhase } from '../App';
 
 interface EmptyStateOverlayProps {
@@ -121,13 +122,12 @@ export function EmptyStateOverlay({
               you only pay for what you use.
             </p>
             <div className="empty-state-success-actions">
-              <button
-                type="button"
-                className="btn-primary"
+              <Button
+                fullWidth
                 onClick={onContinue}
               >
                 Continue
-              </button>
+              </Button>
             </div>
           </div>
         )}

@@ -230,6 +230,7 @@ function mergeBuyerConfig(
       minPeerReputation: defaults.minPeerReputation,
       proxyPort: defaults.proxyPort,
       peerRefreshIntervalMs: defaults.peerRefreshIntervalMs,
+      metadataFetchTimeoutMs: defaults.metadataFetchTimeoutMs,
     };
   }
   return {
@@ -241,6 +242,9 @@ function mergeBuyerConfig(
     peerRefreshIntervalMs: typeof value['peerRefreshIntervalMs'] === 'number'
       ? value['peerRefreshIntervalMs']
       : defaults.peerRefreshIntervalMs,
+    metadataFetchTimeoutMs: typeof value['metadataFetchTimeoutMs'] === 'number'
+      ? value['metadataFetchTimeoutMs']
+      : defaults.metadataFetchTimeoutMs,
   };
 }
 

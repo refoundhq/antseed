@@ -123,6 +123,11 @@ nav.navbar {
   font-weight: 600;
 }
 
+.iconExternalLink,
+.header-diem-link [class*='iconExternalLink'] {
+  display: none;
+}
+
 /* Social icon links — SVG background icons */
 .header-github-link,
 .header-x-link,

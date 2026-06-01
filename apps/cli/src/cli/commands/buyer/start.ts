@@ -29,12 +29,14 @@ export function buildBuyerRuntimeOverridesFromFlags(options: {
   minPeerReputation?: number
   maxInputUsdPerMillion?: number
   maxOutputUsdPerMillion?: number
+  metadataFetchTimeoutMs?: number
 }): BuyerRuntimeOverrides {
   const overrides: BuyerRuntimeOverrides = {}
   if (options.port !== undefined) overrides.proxyPort = options.port
   if (options.minPeerReputation !== undefined) overrides.minPeerReputation = options.minPeerReputation
   if (options.maxInputUsdPerMillion !== undefined) overrides.maxInputUsdPerMillion = options.maxInputUsdPerMillion
   if (options.maxOutputUsdPerMillion !== undefined) overrides.maxOutputUsdPerMillion = options.maxOutputUsdPerMillion
+  if (options.metadataFetchTimeoutMs !== undefined) overrides.metadataFetchTimeoutMs = options.metadataFetchTimeoutMs
   return overrides
 }
 
@@ -190,6 +192,7 @@ export function registerBuyerStartCommand(buyerCmd: Command): void {
     .option('--instance <id>', 'use a configured plugin instance by ID')
     .option('--max-input-usd-per-million <number>', 'runtime-only max input pricing override in USD per 1M tokens', parseFloat)
     .option('--max-output-usd-per-million <number>', 'runtime-only max output pricing override in USD per 1M tokens', parseFloat)
+    .option('--metadata-fetch-timeout-ms <number>', 'runtime-only timeout for each peer metadata HTTP fetch during discovery', Number)
     .option('--peer <peerId>', 'pin all requests to a specific peer ID (40-char hex EVM address), bypassing the router')
     .action(async (options) => {
       const globalOpts = getGlobalOptions(buyerCmd)
@@ -205,6 +208,7 @@ export function registerBuyerStartCommand(buyerCmd: Command): void {
         port: options.port as number | undefined,
         maxInputUsdPerMillion: options.maxInputUsdPerMillion as number | undefined,
         maxOutputUsdPerMillion: options.maxOutputUsdPerMillion as number | undefined,
+        metadataFetchTimeoutMs: options.metadataFetchTimeoutMs as number | undefined,
       })
       const effectiveBuyerConfig = resolveEffectiveBuyerConfig({
         config,
@@ -333,6 +337,7 @@ export function registerBuyerStartCommand(buyerCmd: Command): void {
       console.log(chalk.dim(`  max reserve USDC: ${(Number(maxReserveAmountUsdc) / 1_000_000).toFixed(6)}`))
       console.log(chalk.dim(`  min peer reputation: ${effectiveBuyerConfig.minPeerReputation}`))
       console.log(chalk.dim(`  peer refresh interval: ${effectiveBuyerConfig.peerRefreshIntervalMs}ms`))
+      console.log(chalk.dim(`  metadata fetch timeout: ${effectiveBuyerConfig.metadataFetchTimeoutMs}ms`))
       console.log(chalk.dim(`  proxy port: ${effectiveBuyerConfig.proxyPort}`))
       if (pinnedPeerId) {
         console.log(chalk.yellow(`  pinned peer: ${pinnedPeerId} (router bypassed)`))
@@ -349,6 +354,7 @@ export function registerBuyerStartCommand(buyerCmd: Command): void {
         allowPrivateIPs: true,
         dataDir: globalOpts.dataDir,
         configPath: globalOpts.config,
+        metadataFetchTimeoutMs: effectiveBuyerConfig.metadataFetchTimeoutMs,
         payments: paymentsConfig,
       })
 
