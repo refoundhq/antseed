@@ -138,15 +138,37 @@ function collectFreeServiceNames(peer: PeerInfo): string[] {
   return Array.from(names).sort((a, b) => a.localeCompare(b));
 }
 
+function normalizeServiceSearchTerm(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '')
+    .replace(/([a-z])m(?=\d)/g, '$1');
+}
+
+function serviceSearchTerms(value: string): string[] {
+  const raw = value.trim().toLowerCase();
+  const normalized = normalizeServiceSearchTerm(value);
+  return Array.from(new Set([raw, normalized].filter((term) => term.length > 0)));
+}
+
+function serviceNameMatchesFilter(name: string, filter: string): boolean {
+  const haystackTerms = serviceSearchTerms(name);
+  const needleTerms = serviceSearchTerms(filter);
+  if (needleTerms.length === 0) return true;
+  return needleTerms.some((needle) => haystackTerms.some((haystack) => haystack.includes(needle)));
+}
+
 /**
  * Check whether the peer matches a `--service` filter. Matches on provider
- * name OR any announced service name (case-insensitive).
+ * name OR any announced service name using a forgiving normalized substring
+ * comparison so common spelling variants like `minimax-3`, `minimax m3`, and
+ * `MiniMax M3` match the canonical `minimax-m3` service id.
  */
-function peerMatchesServiceFilter(peer: PeerInfo, filter: string): boolean {
-  const needle = filter.trim().toLowerCase();
-  if (needle.length === 0) return true;
-  if (peer.providers.some((p) => p.toLowerCase() === needle)) return true;
-  return collectServiceNames(peer).some((name) => name.toLowerCase() === needle);
+export function peerMatchesServiceFilter(peer: PeerInfo, filter: string): boolean {
+  if (filter.trim().length === 0) return true;
+  if (peer.providers.some((p) => serviceNameMatchesFilter(p, filter))) return true;
+  return collectServiceNames(peer).some((name) => serviceNameMatchesFilter(name, filter));
 }
 
 /**
