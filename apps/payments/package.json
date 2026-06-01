@@ -23,6 +23,7 @@
   },
   "dependencies": {
     "@antseed/node": "workspace:*",
+    "@antseed/ui": "workspace:*",
     "@fastify/cors": "^10.0.0",
     "@fastify/static": "^9.0.0",
     "fastify": "^5.7.4"

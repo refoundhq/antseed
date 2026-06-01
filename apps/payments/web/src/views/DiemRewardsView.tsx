@@ -5,6 +5,7 @@ import { formatUnits, parseAbi } from 'viem';
 import type { PaymentConfig } from '../types';
 import { DIEM_STAKING_PROXY_ABI, DIEM_STAKING_PROXY_ADDRESS } from '../diem-proxy-abi';
 import { getErrorMessage, usePaymentNetwork } from '../payment-network';
+import { Button } from '../components/Button';
 
 interface DiemRewardsViewProps {
   config: PaymentConfig | null;
@@ -266,8 +267,8 @@ export function DiemRewardsView({ config }: DiemRewardsViewProps) {
               {claimError ?? 'DIEM $ANTS claim confirmed.'}
             </div>
           )}
-          <button
-            className="btn-primary"
+          <Button
+            fullWidth
             onClick={handleClaim}
             disabled={claimSubmitting || claimableEpochs.length === 0}
           >
@@ -278,7 +279,7 @@ export function DiemRewardsView({ config }: DiemRewardsViewProps) {
                 : claimableEpochs.length > 0
                   ? 'Clear 0-$ANTS epochs'
                   : 'Nothing to claim'}
-          </button>
+          </Button>
         </div>
       </section>
     </div>
