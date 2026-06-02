@@ -110,8 +110,7 @@
     width: 1%;
     white-space: nowrap;
 
-    .btn-outline,
-    .btn-primary,
+    .as-button,
     .btn-link {
       width: auto;
       padding: 6px 14px;
@@ -195,7 +194,7 @@
   }
 }
 
-.channels-section-head-row .channels-refresh-btn.btn-outline {
+.channels-section-head-row .channels-refresh-btn {
   width: auto;
   padding: 6px 14px;
   font-size: 12px;

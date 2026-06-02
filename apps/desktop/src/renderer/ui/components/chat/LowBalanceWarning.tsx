@@ -1,3 +1,4 @@
+import { Alert, Button } from '@antseed/ui';
 import styles from './LowBalanceWarning.module.scss';
 
 type LowBalanceWarningProps = {
@@ -10,17 +11,24 @@ export function LowBalanceWarning({ visible, availableUsdc, onAddCredits }: LowB
   if (!visible) return null;
 
   return (
-    <div className={styles.lowBalanceWarning}>
+    <Alert
+      className={styles.lowBalanceWarning}
+      tone="warning"
+      action={(
+        <Button
+          className={styles.addCreditsLink}
+          size="sm"
+          variant="ghost"
+          onClick={onAddCredits}
+        >
+          Add Credits
+        </Button>
+      )}
+    >
       <span className={styles.warningText}>
         Your balance is running low (${parseFloat(availableUsdc).toFixed(2)} remaining).
         Add credits to continue using paid services.
       </span>
-      <button
-        className={styles.addCreditsLink}
-        onClick={onAddCredits}
-      >
-        Add Credits
-      </button>
-    </div>
+    </Alert>
   );
 }

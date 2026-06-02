@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { HugeiconsIcon } from '@hugeicons/react';
 import { Sun02Icon } from '@hugeicons/core-free-icons';
 import { Moon02Icon } from '@hugeicons/core-free-icons';
+import { Button } from '@antseed/ui';
 import { AntStationLogo } from './AntStationLogo';
 import { useUiSnapshot } from '../hooks/useUiSnapshot';
 import { useActions } from '../hooks/useActions';
@@ -172,12 +173,21 @@ export function TitleBar() {
                 )}
               </div>
               <div className={styles.creditsDropdownActions}>
-                <button className={styles.creditsDropdownManageBtn} onClick={handleManageCredits}>
+                <Button
+                  className={styles.creditsDropdownManageBtn}
+                  size="sm"
+                  variant="outline"
+                  onClick={handleManageCredits}
+                >
                   Portal
-                </button>
-                <button className={styles.creditsDropdownAddBtn} onClick={handleDepositCredits}>
+                </Button>
+                <Button
+                  className={styles.creditsDropdownAddBtn}
+                  size="sm"
+                  onClick={handleDepositCredits}
+                >
                   Deposit
-                </button>
+                </Button>
               </div>
             </div>
           )}

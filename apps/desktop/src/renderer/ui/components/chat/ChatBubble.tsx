@@ -1,12 +1,13 @@
 import { createPortal } from 'react-dom';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { HugeiconsIcon } from '@hugeicons/react';
-import { Copy01Icon, Tick02Icon, BrowserIcon } from '@hugeicons/core-free-icons';
-import * as Tooltip from '@radix-ui/react-tooltip';
+import { BrowserIcon } from '@hugeicons/core-free-icons';
 import type { ReactNode } from 'react';
-import { MarkdownContent, useCopyToClipboard } from './chat-utils.js';
+import { MarkdownContent } from './chat-utils.js';
+import { findSensitiveChatArtifacts } from './chat-safety';
 import styles from './ChatBubble.module.scss';
 import { AttachmentViewer, type ViewerAttachment } from './AttachmentViewer';
+import { ChatCopyButton } from './ChatCopyButton';
 import type { ChatMessage, ContentBlock } from './chat-shared';
 import {
   buildChatMetaParts,
@@ -161,7 +162,7 @@ function getBlockRenderKey(block: ContentBlock, index: number, messagePrefix = '
 }
 
 
-function StreamingMarkdown({ text, highlightQuery, activeHighlight }: { text: string; highlightQuery?: string; activeHighlight?: boolean }) {
+function StreamingMarkdown({ text, highlightQuery, activeHighlight, blockUnsafePaymentInstructions = false }: { text: string; highlightQuery?: string; activeHighlight?: boolean; blockUnsafePaymentInstructions?: boolean }) {
   const [visibleText, setVisibleText] = useState(text);
   const frameRef = useRef<number | null>(null);
   const lastFrameAtRef = useRef(0);
@@ -222,12 +223,12 @@ function StreamingMarkdown({ text, highlightQuery, activeHighlight }: { text: st
 
   return (
     <div className="chat-bubble-content streaming-cursor">
-      <MarkdownContent text={visibleText} highlightQuery={highlightQuery} activeHighlight={activeHighlight} />
+      <MarkdownContent text={visibleText} highlightQuery={highlightQuery} activeHighlight={activeHighlight} blockUnsafePaymentInstructions={blockUnsafePaymentInstructions} />
     </div>
   );
 }
 
-function ThinkingBlockView({ block, highlightQuery, activeHighlight }: { block: ContentBlock; highlightQuery?: string; activeHighlight?: boolean }) {
+function ThinkingBlockView({ block, highlightQuery, activeHighlight, blockUnsafePaymentInstructions = false }: { block: ContentBlock; highlightQuery?: string; activeHighlight?: boolean; blockUnsafePaymentInstructions?: boolean }) {
   const [manualToggle, setManualToggle] = useState<boolean | null>(null);
   const isOpen = manualToggle ?? false;
   const thinkingText = String(block.thinking || '');
@@ -258,7 +259,7 @@ function ThinkingBlockView({ block, highlightQuery, activeHighlight }: { block: 
         <span className="thinking-block-label">Internal Thoughts</span>
         {!isOpen && (
           <span className="thinking-block-preview">
-            <MarkdownContent text={preview} className="thinking-block-preview-md" highlightQuery={highlightQuery} activeHighlight={activeHighlight} />
+            <MarkdownContent text={preview} className="thinking-block-preview-md" highlightQuery={highlightQuery} activeHighlight={activeHighlight} blockUnsafePaymentInstructions={blockUnsafePaymentInstructions} />
           </span>
         )}
         {block.streaming ? (
@@ -274,8 +275,8 @@ function ThinkingBlockView({ block, highlightQuery, activeHighlight }: { block: 
           <div className="thinking-block-body">
             {hasThinkingText ? (
               block.streaming
-                ? <StreamingMarkdown text={thinkingText} highlightQuery={highlightQuery} activeHighlight={activeHighlight} />
-                : <MarkdownContent text={thinkingText} className="thinking-block-markdown" highlightQuery={highlightQuery} activeHighlight={activeHighlight} />
+                ? <StreamingMarkdown text={thinkingText} highlightQuery={highlightQuery} activeHighlight={activeHighlight} blockUnsafePaymentInstructions={blockUnsafePaymentInstructions} />
+                : <MarkdownContent text={thinkingText} className="thinking-block-markdown" highlightQuery={highlightQuery} activeHighlight={activeHighlight} blockUnsafePaymentInstructions={blockUnsafePaymentInstructions} />
             ) : (
               <div className="chat-bubble-content streaming-cursor">Thinking...</div>
             )}
@@ -590,6 +591,7 @@ function renderAssistantBlocks(
   conversationId?: string,
   highlightQuery?: string,
   activeHighlight?: boolean,
+  blockUnsafePaymentInstructions = false,
 ): ReactNode[] {
   const nodes: ReactNode[] = [];
   let toolGroup: ContentBlock[] = [];
@@ -607,6 +609,7 @@ function renderAssistantBlocks(
       conversationId,
       highlightQuery,
       activeHighlight,
+      blockUnsafePaymentInstructions,
     ));
     thinkingGroup = [];
   };
@@ -643,7 +646,7 @@ function renderAssistantBlocks(
     }
 
     flushGroups();
-    nodes.push(renderBlock(block, index, streaming, messagePrefix, conversationId, highlightQuery, activeHighlight));
+    nodes.push(renderBlock(block, index, streaming, messagePrefix, conversationId, highlightQuery, activeHighlight, blockUnsafePaymentInstructions));
   });
 
   flushGroups();
@@ -765,18 +768,19 @@ function renderBlock(
   conversationId?: string,
   highlightQuery?: string,
   activeHighlight?: boolean,
+  blockUnsafePaymentInstructions = false,
 ): ReactNode {
   const blockKey = getBlockRenderKey(block, index, messagePrefix);
 
   if (block.type === 'text') {
     if (block.streaming) {
-      return <StreamingMarkdown key={blockKey} text={String(block.text || '')} highlightQuery={highlightQuery} activeHighlight={activeHighlight} />;
+      return <StreamingMarkdown key={blockKey} text={String(block.text || '')} highlightQuery={highlightQuery} activeHighlight={activeHighlight} blockUnsafePaymentInstructions={blockUnsafePaymentInstructions} />;
     }
-    return <MarkdownContent key={blockKey} text={String(block.text || '')} highlightQuery={highlightQuery} activeHighlight={activeHighlight} />;
+    return <MarkdownContent key={blockKey} text={String(block.text || '')} highlightQuery={highlightQuery} activeHighlight={activeHighlight} blockUnsafePaymentInstructions={blockUnsafePaymentInstructions} />;
   }
 
   if (block.type === 'thinking') {
-    return <ThinkingBlockView key={blockKey} block={block} highlightQuery={highlightQuery} activeHighlight={activeHighlight} />;
+    return <ThinkingBlockView key={blockKey} block={block} highlightQuery={highlightQuery} activeHighlight={activeHighlight} blockUnsafePaymentInstructions={blockUnsafePaymentInstructions} />;
   }
 
   if (block.type === 'file') {
@@ -830,35 +834,25 @@ function extractPlainText(content: unknown): string {
 }
 
 function CopyResponseButton({ content }: { content: unknown }) {
-  const text = extractPlainText(content);
-  const { copied, copy } = useCopyToClipboard(text, 2000);
+  const getText = useCallback(() => extractPlainText(content), [content]);
+  const confirmCopy = useCallback((text: string) => {
+    const artifacts = findSensitiveChatArtifacts(text);
+    if (artifacts.length === 0) return true;
+    return window.confirm(
+      'This response contains hidden addresses or gated links. AntSeed will never ask you to send funds, deposit, top up, connect a wallet, or approve transactions from chat. Copy the original response anyway?',
+    );
+  }, []);
 
   return (
-    <Tooltip.Provider delayDuration={300}>
-      <Tooltip.Root>
-        <Tooltip.Trigger asChild>
-          <button
-            type="button"
-            className={`${styles.copyResponseBtn}${copied ? ` ${styles.copyResponseBtnCopied}` : ''}`}
-            onClick={() => copy()}
-            aria-label={copied ? 'Copied!' : 'Copy response'}
-          >
-            <HugeiconsIcon
-              icon={copied ? Tick02Icon : Copy01Icon}
-              size={16}
-              color="currentColor"
-              strokeWidth={2}
-            />
-          </button>
-        </Tooltip.Trigger>
-        <Tooltip.Portal>
-          <Tooltip.Content className={styles.tooltipContent} sideOffset={5}>
-            {copied ? 'Copied!' : 'Copy'}
-            <Tooltip.Arrow className={styles.tooltipArrow} />
-          </Tooltip.Content>
-        </Tooltip.Portal>
-      </Tooltip.Root>
-    </Tooltip.Provider>
+    <ChatCopyButton
+      getText={getText}
+      onBeforeCopy={confirmCopy}
+      className={styles.copyResponseBtn}
+      copiedClassName={styles.copyResponseBtnCopied}
+      iconSize={16}
+      timeoutMs={2000}
+      ariaLabel="Copy response"
+    />
   );
 }
 
@@ -895,9 +889,9 @@ export function ChatBubble({ message, streaming = false, onOpenPreview, conversa
   const content = useMemo(() => {
     if (message.role === 'assistant') {
       if (Array.isArray(message.content)) {
-        return renderAssistantBlocks(message.content as ContentBlock[], isStreamingBubble, messagePrefix, onOpenPreview, conversationId, searchQuery, searchActive);
+        return renderAssistantBlocks(message.content as ContentBlock[], isStreamingBubble, messagePrefix, onOpenPreview, conversationId, searchQuery, searchActive, true);
       }
-      return <MarkdownContent text={String(message.content)} highlightQuery={searchQuery} activeHighlight={searchActive} />;
+      return <MarkdownContent text={String(message.content)} highlightQuery={searchQuery} activeHighlight={searchActive} blockUnsafePaymentInstructions />;
     }
 
     if (typeof message.content === 'string') {
@@ -905,7 +899,7 @@ export function ChatBubble({ message, streaming = false, onOpenPreview, conversa
     }
 
     if (Array.isArray(message.content)) {
-      return (message.content as ContentBlock[]).map((block, index) => renderBlock(block, index, isStreamingBubble, messagePrefix, conversationId, searchQuery, searchActive));
+      return (message.content as ContentBlock[]).map((block, index) => renderBlock(block, index, isStreamingBubble, messagePrefix, conversationId, searchQuery, searchActive, false));
     }
 
     return <div className="chat-bubble-content">{JSON.stringify(message.content)}</div>;

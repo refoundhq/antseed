@@ -42,6 +42,7 @@ describe('EmissionsClient', () => {
     expect(typeof client.getGenesis).toBe('function');
     expect(typeof client.getHalvingInterval).toBe('function');
     expect(typeof client.getShares).toBe('function');
+    expect(typeof client.getEpochParams).toBe('function');
     expect(typeof client.epochTotalSellerPoints).toBe('function');
     expect(typeof client.epochTotalBuyerPoints).toBe('function');
     expect(typeof client.userSellerPoints).toBe('function');

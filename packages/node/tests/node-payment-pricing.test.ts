@@ -405,7 +405,7 @@ describe('SellerRequestHandler payment pricing selection', () => {
     expect(response.statusCode).toBe(200);
   });
 
-  it('continues serving when delivered spend exactly matches the last accepted auth', async () => {
+  it('continues serving when delivered spend exactly matches the last accepted auth and reserve covers the next estimate', async () => {
     const provider = makeProvider(1, 1, { name: 'paid-tier', services: ['local-test'] });
     provider.handleRequest = vi.fn(async (req) => ({ requestId: req.requestId, statusCode: 200, headers: { 'content-type': 'application/json' }, body: new TextEncoder().encode(JSON.stringify({ ok: true })) }));
 
@@ -413,7 +413,7 @@ describe('SellerRequestHandler payment pricing selection', () => {
     const sendNeedAuth = vi.fn();
     const handler = new SellerRequestHandler({
       providers: [provider],
-      sellerPaymentManager: makeSpmMock({ getCumulativeSpend: () => 2_184n, getAcceptedCumulative: () => 2_184n }),
+      sellerPaymentManager: makeSpmMock({ getCumulativeSpend: () => 2_184n, getAcceptedCumulative: () => 2_184n, getReserveMax: () => 1_000_000n }),
       sessionTracker: null,
       channelsClient: {} as any,
       announcer: null,
@@ -434,6 +434,52 @@ describe('SellerRequestHandler payment pricing selection', () => {
     expect(responseFrames).toHaveLength(1);
     const response = decodeHttpResponse(responseFrames[0]!.message.payload);
     expect(response.statusCode).toBe(200);
+  });
+
+  it('closes below-threshold channels when the next estimate exceeds locked reserve', async () => {
+    const provider = makeProvider(0, 1_000_000, { name: 'paid-tier', services: ['local-test'] });
+    provider.handleRequest = vi.fn(async (req) => ({ requestId: req.requestId, statusCode: 200, headers: { 'content-type': 'application/json' }, body: new TextEncoder().encode(JSON.stringify({ ok: true })) }));
+
+    const sendPaymentRequired = vi.fn();
+    const sendNeedAuth = vi.fn();
+    const settleSession = vi.fn(async () => {});
+    const handler = new SellerRequestHandler({
+      providers: [provider],
+      sellerPaymentManager: makeSpmMock({
+        getCumulativeSpend: () => 500_000n,
+        getAcceptedCumulative: () => 500_000n,
+        getReserveMax: () => 1_000_000n,
+        settleSession,
+      }),
+      sessionTracker: null,
+      channelsClient: {} as any,
+      announcer: null,
+      emit: () => false,
+    });
+
+    const sentFrames: Uint8Array[] = [];
+    const conn = { send(frame: Uint8Array) { sentFrames.push(frame); } } as any;
+    const paymentMux = { sendNeedAuth, sendPaymentRequired } as any;
+    const { mux } = handler.handleConnection(conn, 'b'.repeat(40), paymentMux);
+
+    await mux.handleFrame({ type: MessageType.HttpRequest, messageId: 1, payload: encodeHttpRequest({ requestId: 'req-estimate-exceeds-reserve', method: 'POST', path: '/v1/chat/completions', headers: { 'content-type': 'application/json' }, body: new TextEncoder().encode(JSON.stringify({ model: 'local-test', max_tokens: 1 })) }) });
+
+    expect(provider.handleRequest).not.toHaveBeenCalled();
+    expect(sendNeedAuth).not.toHaveBeenCalled();
+    expect(settleSession).toHaveBeenCalledWith('b'.repeat(40));
+    expect(sendPaymentRequired).toHaveBeenCalledWith(expect.objectContaining({ code: PAYMENT_CODE_CHANNEL_EXHAUSTED, requiredCumulativeAmount: '500000', reserveMaxAmount: '1000000' }));
+    const response = decodeHttpResponse(decodeFrame(sentFrames[0]!)!.message.payload);
+    const body = JSON.parse(new TextDecoder().decode(response.body));
+    expect(response.statusCode).toBe(402);
+    expect(body).toMatchObject({
+      code: PAYMENT_CODE_CHANNEL_EXHAUSTED,
+      requiredCumulativeAmount: '500000',
+      reserveMaxAmount: '1000000',
+      estimatedRequestCost: '1000000',
+      remainingLockedReserve: '500000',
+      estimatedMaxOutputTokens: '1',
+    });
+    expect(BigInt(body.estimatedInputTokens)).toBeGreaterThan(0n);
   });
 
   it('stops serving when delivered spend is already at the reserve ceiling', async () => {

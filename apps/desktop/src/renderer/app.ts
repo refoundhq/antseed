@@ -1,3 +1,4 @@
+import '@antseed/ui/styles';
 import { initChatModule } from './modules/chat';
 import { initSettingsModule } from './modules/settings';
 import { initRuntimeModule } from './modules/runtime';

@@ -5,6 +5,7 @@ import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { ActionModal } from '../layout/ActionModal';
 import { useSetOperator } from '../hooks/useSetOperator';
 import type { PaymentConfig } from '../types';
+import { Button } from './Button';
 
 interface AuthorizeWalletModalProps {
   isOpen: boolean;
@@ -95,14 +96,13 @@ export function AuthorizeWalletModal({
             <div className="authorize-wallet-step-label">Step 1 — Connect a wallet</div>
             <ConnectButton.Custom>
               {({ openConnectModal, mounted }) => (
-                <button
-                  type="button"
-                  className="btn-primary"
+                <Button
+                  fullWidth
                   onClick={openConnectModal}
                   disabled={!mounted}
                 >
                   Connect wallet
-                </button>
+                </Button>
               )}
             </ConnectButton.Custom>
           </div>
@@ -114,14 +114,13 @@ export function AuthorizeWalletModal({
         )}
 
         <div className="authorize-wallet-actions">
-          <button
-            type="button"
-            className="btn-primary"
+          <Button
+            fullWidth
             onClick={() => void run()}
             disabled={!isConnected || running || !config}
           >
             {running ? 'Authorizing…' : 'Authorize this wallet'}
-          </button>
+          </Button>
           <button
             type="button"
             className="btn-link"
