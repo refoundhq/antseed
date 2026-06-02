@@ -471,7 +471,15 @@ describe('SellerRequestHandler payment pricing selection', () => {
     const response = decodeHttpResponse(decodeFrame(sentFrames[0]!)!.message.payload);
     const body = JSON.parse(new TextDecoder().decode(response.body));
     expect(response.statusCode).toBe(402);
-    expect(body).toMatchObject({ code: PAYMENT_CODE_CHANNEL_EXHAUSTED, requiredCumulativeAmount: '500000', reserveMaxAmount: '1000000' });
+    expect(body).toMatchObject({
+      code: PAYMENT_CODE_CHANNEL_EXHAUSTED,
+      requiredCumulativeAmount: '500000',
+      reserveMaxAmount: '1000000',
+      estimatedRequestCost: '1000000',
+      remainingLockedReserve: '500000',
+      estimatedMaxOutputTokens: '1',
+    });
+    expect(BigInt(body.estimatedInputTokens)).toBeGreaterThan(0n);
   });
 
   it('stops serving when delivered spend is already at the reserve ceiling', async () => {

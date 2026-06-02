@@ -203,12 +203,14 @@ export class SellerRequestHandler {
               debugLog(`[SellerHandler] Caught up before 402 for ${buyerPeerId.slice(0, 12)}... (spent=${spent} accepted=${accepted})`);
             }
           }
-          const estimatedRequestCost = this._estimateMaxRequestCostUsdc(request, requestPricing);
-          const wouldExceedLockedReserve = reserveMax > 0n
+          const requestCostEstimate = this._estimateMaxRequestCostUsdc(request, requestPricing);
+          const estimatedRequestCost = requestCostEstimate?.cost ?? 0n;
+          const remainingLockedReserve = reserveMax > spent ? reserveMax - spent : 0n;
+          const estimatedCostExceedsLockedReserve = reserveMax > 0n
             && estimatedRequestCost > 0n
-            && spent + estimatedRequestCost > reserveMax;
+            && estimatedRequestCost > remainingLockedReserve;
 
-          if (isBlocked || (spent > 0n && (spent > accepted || isAtExactSpendLimit)) || wouldExceedLockedReserve) {
+          if (isBlocked || (spent > 0n && (spent > accepted || isAtExactSpendLimit)) || estimatedCostExceedsLockedReserve) {
             const baseRequirements = spm.getPaymentRequirements(
               request.requestId, buyerPeerId, requestPricing,
             );
@@ -220,7 +222,7 @@ export class SellerRequestHandler {
             // work that cannot fit inside the currently locked reserve.
             const target = spent;
             const isAlreadyExhausted = reserveMax > 0n && (accepted >= reserveMax || target > reserveMax);
-            const isFullyExhausted = isBlocked || wouldExceedLockedReserve || isAlreadyExhausted;
+            const isFullyExhausted = isBlocked || estimatedCostExceedsLockedReserve || isAlreadyExhausted;
             const requirements = {
               ...baseRequirements,
               requiredCumulativeAmount: target.toString(),
@@ -234,11 +236,11 @@ export class SellerRequestHandler {
               let reason = 'fully exhausted';
               if (isBlocked) {
                 reason = 'blocked';
-              } else if (wouldExceedLockedReserve) {
+              } else if (estimatedCostExceedsLockedReserve) {
                 reason = 'insufficient locked reserve for estimated request';
               }
-              debugLog(`[SellerHandler] Session ${reason} for ${buyerPeerId.slice(0, 12)}... (spent=${spent} accepted=${accepted} target=${target} reserveMax=${reserveMax} estimatedRequestCost=${estimatedRequestCost}) — returning 402`);
-              if (isBlocked || isAlreadyExhausted || wouldExceedLockedReserve) {
+              debugLog(`[SellerHandler] Session ${reason} for ${buyerPeerId.slice(0, 12)}... (spent=${spent} accepted=${accepted} target=${target} reserveMax=${reserveMax} remainingLockedReserve=${remainingLockedReserve} estimatedRequestCost=${estimatedRequestCost} estimatedInputTokens=${requestCostEstimate?.inputTokens ?? 0} estimatedMaxOutputTokens=${requestCostEstimate?.maxOutputTokens ?? 0}) — returning 402`);
+              if (isBlocked || isAlreadyExhausted || estimatedCostExceedsLockedReserve) {
                 // Default settleSession() performs final close(); do not use
                 // settleOnly here because exhausted channels must release the
                 // buyer's unused reserve before the buyer opens a replacement.
@@ -264,6 +266,12 @@ export class SellerRequestHandler {
                 channelId: requirements.channelId,
                 ...(requirements.reserveMaxAmount != null ? { reserveMaxAmount: requirements.reserveMaxAmount } : {}),
                 ...(requirements.code != null ? { code: requirements.code } : {}),
+                ...(estimatedCostExceedsLockedReserve ? {
+                  estimatedRequestCost: estimatedRequestCost.toString(),
+                  remainingLockedReserve: remainingLockedReserve.toString(),
+                  estimatedInputTokens: String(requestCostEstimate?.inputTokens ?? 0),
+                  estimatedMaxOutputTokens: String(requestCostEstimate?.maxOutputTokens ?? 0),
+                } : {}),
                 ...(requirements.inputUsdPerMillion != null ? { inputUsdPerMillion: requirements.inputUsdPerMillion } : {}),
                 ...(requirements.outputUsdPerMillion != null ? { outputUsdPerMillion: requirements.outputUsdPerMillion } : {}),
                 ...(requirements.cachedInputUsdPerMillion != null ? { cachedInputUsdPerMillion: requirements.cachedInputUsdPerMillion } : {}),
@@ -573,18 +581,22 @@ export class SellerRequestHandler {
   private _estimateMaxRequestCostUsdc(
     request: SerializedHttpRequest,
     pricing: ServicePricing,
-  ): bigint {
+  ): { cost: bigint; inputTokens: number; maxOutputTokens: number } | null {
     if (!this._isJsonRequest(request)) {
-      return 0n;
+      return null;
     }
     const body = this._parseJsonObject(request.body);
     if (!body) {
-      return 0n;
+      return null;
     }
 
     const inputTokens = estimateTokensFromBytes(request.body);
     const maxOutputTokens = this._extractMaxOutputTokens(body);
-    return computeCostUsdc(inputTokens, maxOutputTokens, pricing);
+    return {
+      cost: computeCostUsdc(inputTokens, maxOutputTokens, pricing),
+      inputTokens,
+      maxOutputTokens,
+    };
   }
 
   private _extractMaxOutputTokens(body: Record<string, unknown>): number {
