@@ -240,6 +240,95 @@ contract AntseedUsageVerificationTest is Test {
         }));
     }
 
+    function test_commit_rejectsInvalidSellerSignature() public {
+        IAntseedUsageVerification.UsageClaim memory claim = _claim(1, 0, 1, 1, 1, 1, 1);
+        bytes32 buyerNonce = keccak256("buyer nonce");
+        bytes32 sellerNonce = keccak256("seller nonce");
+        bytes32 claimHash = usage.hashUsageClaim(claim);
+        bytes32 buyerRevealHash = usage.revealHash(claimHash, buyerNonce);
+        bytes32 sellerRevealHash = usage.revealHash(claimHash, sellerNonce);
+        uint256 epoch = usage.currentEpoch();
+        (bytes memory buyerSig,) =
+            _signCommits(claimHash, buyerRevealHash, sellerRevealHash, epoch);
+        bytes32 sellerStructHash = keccak256(abi.encode(
+            usage.USAGE_COMMIT_TYPEHASH(),
+            claimHash,
+            sellerRevealHash,
+            epoch,
+            usage.PARTY_SELLER()
+        ));
+        bytes32 sellerDigest = keccak256(abi.encodePacked("\x19\x01", usage.domainSeparator(), sellerStructHash));
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(0xBAD, sellerDigest);
+        bytes memory attackerSellerSig = abi.encodePacked(r, s, v);
+        address recovered = ecrecover(sellerDigest, v, r, s);
+        assertNotEq(recovered, seller);
+
+        vm.expectRevert(AntseedUsageVerification.InvalidSignature.selector);
+        usage.commitPair(AntseedUsageVerification.CommitPairInput({
+            claimHash: claimHash,
+            channelId: channelId,
+            buyer: buyer,
+            seller: seller,
+            sellerAgentId: agentId,
+            serviceKey: serviceKey,
+            buyerRevealHash: buyerRevealHash,
+            sellerRevealHash: sellerRevealHash,
+            expectedEpoch: epoch,
+            buyerSig: buyerSig,
+            sellerSig: attackerSellerSig
+        }));
+    }
+
+    function test_reveal_rejectsWrongSellerNonce() public {
+        IAntseedUsageVerification.UsageClaim memory claim = _claim(100, 0, 100, 40, 2, 900, 900);
+        bytes32 buyerNonce = keccak256("buyer nonce");
+        bytes32 sellerNonce = keccak256("seller nonce");
+        _commitClaim(claim, buyerNonce, sellerNonce);
+
+        vm.expectRevert(AntseedUsageVerification.InvalidCommit.selector);
+        usage.revealPair(claim, buyerNonce, keccak256("wrong seller nonce"));
+    }
+
+    function test_reveal_rejectsChannelPartyMismatch() public {
+        IAntseedUsageVerification.UsageClaim memory claim = _claim(100, 0, 100, 40, 2, 900, 900);
+        bytes32 buyerNonce = keccak256("buyer nonce");
+        bytes32 sellerNonce = keccak256("seller nonce");
+        _commitClaim(claim, buyerNonce, sellerNonce);
+
+        channels.setChannel(channelId, buyer, address(0xBAD), 1000);
+
+        vm.expectRevert(AntseedUsageVerification.ChannelMismatch.selector);
+        usage.revealPair(claim, buyerNonce, sellerNonce);
+    }
+
+    function test_reveal_rejectsSellerAgentMismatch() public {
+        IAntseedUsageVerification.UsageClaim memory claim = _claim(100, 0, 100, 40, 2, 900, 900);
+        bytes32 buyerNonce = keccak256("buyer nonce");
+        bytes32 sellerNonce = keccak256("seller nonce");
+        _commitClaim(claim, buyerNonce, sellerNonce);
+
+        staking.setAgentId(seller, agentId + 1);
+
+        vm.expectRevert(AntseedUsageVerification.SellerAgentMismatch.selector);
+        usage.revealPair(claim, buyerNonce, sellerNonce);
+    }
+
+    function test_reveal_rejectsNonMonotonicUsageSnapshot() public {
+        IAntseedUsageVerification.UsageClaim memory firstClaim = _claim(100, 0, 100, 40, 2, 900, 900);
+        bytes32 firstBuyerNonce = keccak256("first buyer nonce");
+        bytes32 firstSellerNonce = keccak256("first seller nonce");
+        _commitClaim(firstClaim, firstBuyerNonce, firstSellerNonce);
+        usage.revealPair(firstClaim, firstBuyerNonce, firstSellerNonce);
+
+        IAntseedUsageVerification.UsageClaim memory lowerClaim = _claim(99, 0, 99, 40, 2, 900, 900);
+        bytes32 lowerBuyerNonce = keccak256("lower buyer nonce");
+        bytes32 lowerSellerNonce = keccak256("lower seller nonce");
+        _commitClaim(lowerClaim, lowerBuyerNonce, lowerSellerNonce);
+
+        vm.expectRevert(AntseedUsageVerification.NonMonotonicClaim.selector);
+        usage.revealPair(lowerClaim, lowerBuyerNonce, lowerSellerNonce);
+    }
+
     function _claim(
         uint256 inputTokens,
         uint256 cachedInputTokens,
@@ -281,5 +370,30 @@ contract AntseedUsageVerificationTest is Test {
         (uint8 sv, bytes32 sr, bytes32 ss) = vm.sign(sellerPk, sellerDigest);
         buyerSig = abi.encodePacked(br, bs, bv);
         sellerSig = abi.encodePacked(sr, ss, sv);
+    }
+
+    function _commitClaim(IAntseedUsageVerification.UsageClaim memory claim, bytes32 buyerNonce, bytes32 sellerNonce)
+        internal
+        returns (bytes32 claimHash)
+    {
+        claimHash = usage.hashUsageClaim(claim);
+        bytes32 buyerRevealHash = usage.revealHash(claimHash, buyerNonce);
+        bytes32 sellerRevealHash = usage.revealHash(claimHash, sellerNonce);
+        (bytes memory buyerSig, bytes memory sellerSig) =
+            _signCommits(claimHash, buyerRevealHash, sellerRevealHash, usage.currentEpoch());
+
+        usage.commitPair(AntseedUsageVerification.CommitPairInput({
+            claimHash: claimHash,
+            channelId: claim.channelId,
+            buyer: claim.buyer,
+            seller: claim.seller,
+            sellerAgentId: claim.sellerAgentId,
+            serviceKey: claim.serviceKey,
+            buyerRevealHash: buyerRevealHash,
+            sellerRevealHash: sellerRevealHash,
+            expectedEpoch: usage.currentEpoch(),
+            buyerSig: buyerSig,
+            sellerSig: sellerSig
+        }));
     }
 }

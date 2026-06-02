@@ -117,16 +117,31 @@ async function signedCommitRequest(options: {
 
 function captureMux() {
   return {
+    sentCommitRequests: [] as unknown[],
     sentCommitResponses: [] as unknown[],
+    sentCommitProofs: [] as unknown[],
+    sentRevealPackages: [] as unknown[],
     sentRevealResponses: [] as unknown[],
+    sendCommitRequest(payload: unknown) {
+      this.sentCommitRequests.push(payload);
+    },
     sendCommitResponse(payload: unknown) {
       this.sentCommitResponses.push(payload);
+    },
+    sendCommitProof(payload: unknown) {
+      this.sentCommitProofs.push(payload);
+    },
+    sendRevealPackage(payload: unknown) {
+      this.sentRevealPackages.push(payload);
     },
     sendRevealResponse(payload: unknown) {
       this.sentRevealResponses.push(payload);
     },
   } as unknown as VerificationMux & {
+    sentCommitRequests: unknown[];
     sentCommitResponses: unknown[];
+    sentCommitProofs: unknown[];
+    sentRevealPackages: unknown[];
     sentRevealResponses: unknown[];
   };
 }
@@ -255,6 +270,97 @@ describe('usage verification buyer validation', () => {
 });
 
 describe('usage verification seller retry behavior', () => {
+  it('submits commitPair after the buyer accepts the seller usage commit', async () => {
+    const dir = tempDir();
+    const buyer = Wallet.createRandom();
+    const seller = Wallet.createRandom();
+    const manager = new SellerUsageVerificationManager(identity(seller), config(dir));
+    const mux = captureMux();
+    const currentEpoch = vi.fn().mockResolvedValue(0n);
+    const commitPair = vi.fn().mockResolvedValue('0xcommit');
+    (manager.client as unknown as { currentEpoch: typeof currentEpoch; commitPair: typeof commitPair }).currentEpoch = currentEpoch;
+    (manager.client as unknown as { currentEpoch: typeof currentEpoch; commitPair: typeof commitPair }).commitPair = commitPair;
+
+    await manager.recordAndRequestCommit({
+      requestId: REQUEST_ID,
+      channel: {
+        sessionId: CHANNEL_ID,
+        peerId: SELLER_PEER_ID,
+        role: 'seller',
+        buyerEvmAddr: buyer.address,
+        sellerEvmAddr: seller.address,
+        nonce: 1,
+        authMax: '2500',
+        deadline: Math.floor(Date.now() / 1000) + 900,
+        previousSessionId: '0x' + '00'.repeat(32),
+        previousConsumption: '0',
+        tokensDelivered: '0',
+        requestCount: 0,
+        reservedAt: Date.now(),
+        settledAt: null,
+        settledAmount: null,
+        status: 'active',
+        latestBuyerSig: null,
+        latestSpendingAuthSig: null,
+        latestMetadata: null,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      },
+      providerName: 'openai',
+      serviceName: 'gpt-4o-mini',
+      inputTokens: 100n,
+      cachedInputTokens: 10n,
+      freshInputTokens: 90n,
+      outputTokens: 25n,
+      costUsdc: 2500n,
+      paymentCumulativeAmount: 2500n,
+      mux,
+    });
+
+    expect(mux.sentCommitRequests).toHaveLength(1);
+    const request = mux.sentCommitRequests[0] as Awaited<ReturnType<typeof signedCommitRequest>>;
+    const buyerRevealHash = computeUsageRevealHash(request.claimHash, BUYER_NONCE);
+    const buyerSig = await signUsageCommit(
+      buyer,
+      makeUsageVerificationDomain(CHAIN_ID, USAGE_CONTRACT),
+      {
+        claimHash: request.claimHash,
+        revealHash: buyerRevealHash,
+        expectedEpoch: BigInt(request.expectedEpoch),
+        party: USAGE_PARTY_BUYER,
+      },
+    );
+
+    await manager.handleCommitResponse({
+      requestId: REQUEST_ID,
+      accepted: true,
+      claimHash: request.claimHash,
+      revealHash: buyerRevealHash,
+      buyerSig,
+    }, mux);
+
+    manager.close();
+    rmSync(dir, { recursive: true, force: true });
+
+    expect(commitPair).toHaveBeenCalledTimes(1);
+    expect(commitPair.mock.calls[0][1]).toMatchObject({
+      claimHash: request.claimHash,
+      channelId: CHANNEL_ID,
+      buyer: buyer.address,
+      seller: seller.address,
+      expectedEpoch: 0n,
+      buyerRevealHash,
+      buyerSig,
+    });
+    expect(mux.sentCommitProofs).toHaveLength(1);
+    expect(mux.sentRevealPackages).toHaveLength(1);
+    expect(mux.sentRevealPackages[0]).toMatchObject({
+      requestId: REQUEST_ID,
+      claimHash: request.claimHash,
+      party: 'seller',
+    });
+  });
+
   it('does not retry the same permanently failing committed reveal forever', async () => {
     const dir = tempDir();
     const seller = Wallet.createRandom();
