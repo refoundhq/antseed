@@ -105,7 +105,7 @@ export class BuyerRequestHandler {
       negotiator.bpm.trackRequestService(req.requestId, requestedService);
     }
     if (requestedService) {
-      this._deps.usageVerification?.trackRequestService(req.requestId, requestedService);
+      this._deps.usageVerification?.trackRequestService(req.requestId, requestedService, peer.peerId);
     }
 
     let startTime = Date.now();

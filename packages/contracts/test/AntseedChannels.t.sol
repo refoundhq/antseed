@@ -247,6 +247,25 @@ contract AntseedChannelsTest is Test {
         assertEq(available, 0); // all 100 USDC reserved in Deposits
     }
 
+    function test_getUsageVerificationChannel_returnsStableFields() public {
+        bytes32 salt = keccak256("usage-verification-accessor");
+        bytes32 channelId = doReserve(salt, USDC_100, USDC_100);
+
+        (address usageBuyer, address usageSeller, uint256 usageSettled) =
+            channels.getUsageVerificationChannel(channelId);
+        assertEq(usageBuyer, buyer);
+        assertEq(usageSeller, seller);
+        assertEq(usageSettled, 0);
+
+        uint128 settleAmount = USDC_30;
+        bytes memory metaSig = signSpendingAuth(BUYER_PK, channelId, settleAmount, 100, 25);
+        vm.prank(seller);
+        channels.settle(channelId, settleAmount, encodeMetadata(100, 25), metaSig);
+
+        (,, usageSettled) = channels.getUsageVerificationChannel(channelId);
+        assertEq(usageSettled, settleAmount);
+    }
+
     function test_reserve_revert_sellerNotStaked() public {
         createBuyer(BUYER_PK, USDC_100);
         // Register seller but don't stake

@@ -12,6 +12,10 @@ interface IAntseedChannels {
     function getAgentStats(uint256 agentId) external view returns (AgentStats memory);
     function activeChannelCount(address seller) external view returns (uint256);
     function computeChannelId(address buyer, address seller, bytes32 salt) external pure returns (bytes32);
+    function getUsageVerificationChannel(bytes32 channelId)
+        external
+        view
+        returns (address buyer, address seller, uint256 settled);
 
     function reserve(
         address buyer,

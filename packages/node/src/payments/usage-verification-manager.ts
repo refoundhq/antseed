@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import type { AbstractSigner } from 'ethers';
+import { verifyTypedData, type AbstractSigner } from 'ethers';
 import type { Identity } from '../p2p/identity.js';
 import type { VerificationMux } from '../p2p/verification-mux.js';
 import type { StakingClient } from './evm/staking-client.js';
@@ -21,6 +21,7 @@ import {
   computeUsageRevealHash,
   makeUsageVerificationDomain,
   signUsageCommit,
+  USAGE_COMMIT_TYPES,
   USAGE_CLAIM_VERSION,
   USAGE_PARTY_BUYER,
   USAGE_PARTY_SELLER,
@@ -28,6 +29,10 @@ import {
 import type { UsageClaimMessage } from './evm/signatures.js';
 import { debugWarn } from '../utils/debug.js';
 import { computeCostUsdc, type ServicePricing } from './pricing.js';
+
+const REVEAL_RETRY_BASE_MS = 60_000;
+const REVEAL_RETRY_MAX_MS = 15 * 60_000;
+const REVEAL_RETRY_MAX_ATTEMPTS = 8;
 
 export interface UsageVerificationConfig extends UsageVerificationClientConfig {
   chainId: number;
@@ -46,6 +51,14 @@ export interface SellerUsageRecordInput {
   costUsdc: bigint;
   paymentCumulativeAmount: bigint;
   mux: VerificationMux;
+}
+
+export interface BuyerUsageVerificationValidationSource {
+  getActiveSession(sellerPeerId: string): StoredChannel | null;
+  getResponseTokenTotals(sellerPeerId: string): { input: number; output: number; requests: number } | null;
+  getVerifiedCost(sellerPeerId: string): bigint;
+  getCumulativeAmount(sellerPeerId: string): bigint;
+  getCurrentEpoch?(): Promise<bigint> | bigint;
 }
 
 export class SellerUsageVerificationManager {
@@ -189,7 +202,7 @@ export class SellerUsageVerificationManager {
   }
 
   async retryCommittedReveals(limit = 25): Promise<void> {
-    const committed = this._store.listAttestationsByStatus('committed', limit);
+    const committed = this._store.listRetryableCommitted(Date.now(), limit);
     for (const attestation of committed) {
       if (!attestation.buyerNonce || !attestation.sellerNonce) continue;
       try {
@@ -200,8 +213,15 @@ export class SellerUsageVerificationManager {
           attestation.sellerNonce,
         );
         this._store.updateAttestationStatus(attestation.claimHash, 'revealed', { revealTxHash: txHash });
-      } catch {
-        // Payment coverage may still be pending; leave as committed for the next retry.
+      } catch (err) {
+        if (isTerminalRevealError(err)) {
+          this._store.updateAttestationStatus(attestation.claimHash, 'failed');
+        } else if ((attestation.attemptCount ?? 0) + 1 >= REVEAL_RETRY_MAX_ATTEMPTS) {
+          this._store.updateAttestationStatus(attestation.claimHash, 'failed');
+        } else {
+          const nextRetryAt = Date.now() + revealRetryDelayMs((attestation.attemptCount ?? 0) + 1);
+          this._store.recordRevealRetry(attestation.claimHash, errorMessage(err), nextRetryAt);
+        }
       }
     }
   }
@@ -240,25 +260,34 @@ export class SellerUsageVerificationManager {
 export class BuyerUsageVerificationManager {
   private readonly _identity: Identity;
   private _signer: AbstractSigner;
+  private readonly _client: UsageVerificationClient;
   private readonly _domain: ReturnType<typeof makeUsageVerificationDomain>;
   private readonly _store: UsageVerificationStore;
-  private readonly _requestService = new Map<string, string>();
+  private readonly _requestContext = new Map<string, { service: string; sellerPeerId?: string }>();
+  private _validationSource: BuyerUsageVerificationValidationSource | null = null;
 
-  constructor(identity: Identity, config: UsageVerificationConfig) {
+  constructor(identity: Identity, config: UsageVerificationConfig, validationSource?: BuyerUsageVerificationValidationSource) {
     this._identity = identity;
     this._signer = identity.wallet;
+    this._client = new UsageVerificationClient(config);
     this._domain = makeUsageVerificationDomain(config.chainId, config.contractAddress);
     this._store = new UsageVerificationStore(config.dataDir);
+    this._validationSource = validationSource ?? null;
   }
 
   setSigner(signer: AbstractSigner): void { this._signer = signer; }
 
-  trackRequestService(requestId: string, service: string): void {
-    this._requestService.set(requestId, service);
+  setValidationSource(source: BuyerUsageVerificationValidationSource | null): void {
+    this._validationSource = source;
+  }
+
+  trackRequestService(requestId: string, service: string, sellerPeerId?: string): void {
+    this._requestContext.set(requestId, { service, ...(sellerPeerId ? { sellerPeerId } : {}) });
   }
 
   async handleCommitRequest(payload: VerificationCommitRequestPayload, mux: VerificationMux): Promise<void> {
-    const expectedService = this._requestService.get(payload.requestId);
+    const requestContext = this._requestContext.get(payload.requestId);
+    const expectedService = requestContext?.service;
     if (expectedService && expectedService !== payload.claim.serviceName) {
       mux.sendCommitResponse({
         requestId: payload.requestId,
@@ -276,6 +305,20 @@ export class BuyerUsageVerificationManager {
     const claimHash = computeUsageClaimHash(claimPayloadToMessage(payload.claim));
     if (claimHash !== payload.claimHash) {
       mux.sendCommitResponse({ requestId: payload.requestId, accepted: false, claimHash: payload.claimHash, reason: 'claim hash mismatch' });
+      return;
+    }
+    if (!this._verifySellerCommitSignature(payload)) {
+      mux.sendCommitResponse({ requestId: payload.requestId, accepted: false, claimHash: payload.claimHash, reason: 'seller signature mismatch' });
+      return;
+    }
+    const epochError = await this._validateExpectedEpoch(payload.expectedEpoch);
+    if (epochError) {
+      mux.sendCommitResponse({ requestId: payload.requestId, accepted: false, claimHash: payload.claimHash, reason: epochError });
+      return;
+    }
+    const validationError = this._validateAgainstBuyerState(payload, requestContext?.sellerPeerId);
+    if (validationError) {
+      mux.sendCommitResponse({ requestId: payload.requestId, accepted: false, claimHash: payload.claimHash, reason: validationError });
       return;
     }
 
@@ -338,6 +381,54 @@ export class BuyerUsageVerificationManager {
   }
 
   close(): void { this._store.close(); }
+
+  private _verifySellerCommitSignature(payload: VerificationCommitRequestPayload): boolean {
+    try {
+      const recovered = verifyTypedData(
+        this._domain,
+        USAGE_COMMIT_TYPES,
+        {
+          claimHash: payload.claimHash,
+          revealHash: payload.revealHash,
+          expectedEpoch: BigInt(payload.expectedEpoch),
+          party: USAGE_PARTY_SELLER,
+        },
+        payload.sellerSig,
+      );
+      return recovered.toLowerCase() === payload.claim.seller.toLowerCase();
+    } catch {
+      return false;
+    }
+  }
+
+  private async _validateExpectedEpoch(expectedEpoch: string): Promise<string | null> {
+    try {
+      const currentEpoch = this._validationSource?.getCurrentEpoch
+        ? await this._validationSource.getCurrentEpoch()
+        : await this._client.currentEpoch();
+      return BigInt(expectedEpoch) === currentEpoch ? null : 'epoch mismatch';
+    } catch {
+      return 'epoch unavailable';
+    }
+  }
+
+  private _validateAgainstBuyerState(payload: VerificationCommitRequestPayload, sellerPeerId: string | undefined): string | null {
+    if (!this._validationSource || !sellerPeerId) return null;
+    const session = this._validationSource.getActiveSession(sellerPeerId);
+    if (!session) return 'no active buyer channel';
+    if (session.sessionId !== payload.claim.channelId) return 'channel mismatch';
+    if (session.buyerEvmAddr.toLowerCase() !== payload.claim.buyer.toLowerCase()) return 'channel buyer mismatch';
+    if (session.sellerEvmAddr.toLowerCase() !== payload.claim.seller.toLowerCase()) return 'channel seller mismatch';
+
+    const observed = this._validationSource.getResponseTokenTotals(sellerPeerId);
+    if (!observed) return 'no observed usage';
+    if (BigInt(payload.claim.cumulativeInputTokens) > BigInt(observed.input)) return 'input token total exceeds observed usage';
+    if (BigInt(payload.claim.cumulativeOutputTokens) > BigInt(observed.output)) return 'output token total exceeds observed usage';
+    if (BigInt(payload.claim.cumulativeRequestCount) > BigInt(observed.requests)) return 'request count exceeds observed usage';
+    if (BigInt(payload.claim.cumulativeCostUsdc) > this._validationSource.getVerifiedCost(sellerPeerId)) return 'cost exceeds buyer verified cost';
+    if (BigInt(payload.claim.paymentCumulativeAmount) > this._validationSource.getCumulativeAmount(sellerPeerId)) return 'payment exceeds buyer authorization';
+    return null;
+  }
 }
 
 export function claimPayloadToMessage(claim: VerificationUsageClaimPayload): UsageClaimMessage {
@@ -382,6 +473,27 @@ function snapshotToClaim(snapshot: UsageSnapshotRecord): VerificationUsageClaimP
 
 function randomNonce(): string {
   return '0x' + randomBytes(32).toString('hex');
+}
+
+function isTerminalRevealError(err: unknown): boolean {
+  const message = errorMessage(err);
+  return [
+    'InvalidCommit',
+    'InvalidSignature',
+    'ChannelMismatch',
+    'SellerAgentMismatch',
+    'NonMonotonicClaim',
+    'AlreadyRevealed',
+  ].some((needle) => message.includes(needle));
+}
+
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+function revealRetryDelayMs(attemptCount: number): number {
+  const exponent = Math.max(0, attemptCount - 1);
+  return Math.min(REVEAL_RETRY_BASE_MS * 2 ** exponent, REVEAL_RETRY_MAX_MS);
 }
 
 export function computeUsageCostFromTokens(params: {

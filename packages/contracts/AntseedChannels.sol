@@ -130,6 +130,15 @@ contract AntseedChannels is EIP712, Pausable, Ownable, ReentrancyGuard {
         return _agentStats[agentId];
     }
 
+    function getUsageVerificationChannel(bytes32 channelId)
+        external
+        view
+        returns (address buyer, address seller, uint256 settled)
+    {
+        Channel storage channel = channels[channelId];
+        return (channel.buyer, channel.seller, uint256(channel.settled));
+    }
+
     // ═══════════════════════════════════════════════════════════════════
     //                        CORE — RESERVE
     // ═══════════════════════════════════════════════════════════════════

@@ -43,6 +43,9 @@ export interface UsageAttestationRecord {
   commitTxHash: string | null;
   revealTxHash: string | null;
   status: UsageAttestationStatus;
+  attemptCount?: number;
+  lastError?: string | null;
+  nextRetryAt?: number;
   createdAt: number;
   updatedAt: number;
 }
@@ -55,6 +58,8 @@ export class UsageVerificationStore {
     upsertAttestation: Database.Statement;
     getAttestation: Database.Statement;
     listAttestationsByStatus: Database.Statement;
+    listRetryableCommitted: Database.Statement;
+    recordRevealRetry: Database.Statement;
     updateAttestationStatus: Database.Statement;
   };
 
@@ -100,11 +105,13 @@ export class UsageVerificationStore {
         INSERT INTO usage_verification_attestations (
           claim_hash, request_id, channel_id, service_key, epoch, claim_json,
           buyer_reveal_hash, seller_reveal_hash, buyer_nonce, seller_nonce,
-          buyer_sig, seller_sig, commit_tx_hash, reveal_tx_hash, status, created_at, updated_at
+          buyer_sig, seller_sig, commit_tx_hash, reveal_tx_hash, status,
+          attempt_count, last_error, next_retry_at, created_at, updated_at
         ) VALUES (
           @claimHash, @requestId, @channelId, @serviceKey, @epoch, @claimJson,
           @buyerRevealHash, @sellerRevealHash, @buyerNonce, @sellerNonce,
-          @buyerSig, @sellerSig, @commitTxHash, @revealTxHash, @status, @createdAt, @updatedAt
+          @buyerSig, @sellerSig, @commitTxHash, @revealTxHash, @status,
+          @attemptCount, @lastError, @nextRetryAt, @createdAt, @updatedAt
         )
         ON CONFLICT(claim_hash) DO UPDATE SET
           request_id = @requestId,
@@ -118,11 +125,16 @@ export class UsageVerificationStore {
           commit_tx_hash = @commitTxHash,
           reveal_tx_hash = @revealTxHash,
           status = @status,
+          attempt_count = @attemptCount,
+          last_error = @lastError,
+          next_retry_at = @nextRetryAt,
           updated_at = @updatedAt
       `),
       getAttestation: this._db.prepare('SELECT * FROM usage_verification_attestations WHERE claim_hash = ?'),
       listAttestationsByStatus: this._db.prepare('SELECT * FROM usage_verification_attestations WHERE status = ? ORDER BY updated_at LIMIT ?'),
-      updateAttestationStatus: this._db.prepare('UPDATE usage_verification_attestations SET status = ?, commit_tx_hash = COALESCE(?, commit_tx_hash), reveal_tx_hash = COALESCE(?, reveal_tx_hash), updated_at = ? WHERE claim_hash = ?'),
+      listRetryableCommitted: this._db.prepare('SELECT * FROM usage_verification_attestations WHERE status = ? AND next_retry_at <= ? ORDER BY updated_at LIMIT ?'),
+      recordRevealRetry: this._db.prepare('UPDATE usage_verification_attestations SET attempt_count = attempt_count + 1, last_error = ?, next_retry_at = ?, updated_at = ? WHERE claim_hash = ?'),
+      updateAttestationStatus: this._db.prepare('UPDATE usage_verification_attestations SET status = ?, commit_tx_hash = COALESCE(?, commit_tx_hash), reveal_tx_hash = COALESCE(?, reveal_tx_hash), next_retry_at = CASE WHEN ? IN (?, ?, ?) THEN 0 ELSE next_retry_at END, updated_at = ? WHERE claim_hash = ?'),
     };
   }
 
@@ -139,6 +151,9 @@ export class UsageVerificationStore {
     this._stmts.upsertAttestation.run({
       ...record,
       claimJson: JSON.stringify(record.claim),
+      attemptCount: record.attemptCount ?? 0,
+      lastError: record.lastError ?? null,
+      nextRetryAt: record.nextRetryAt ?? 0,
     });
   }
 
@@ -152,8 +167,17 @@ export class UsageVerificationStore {
     return rows.map(attestationFromRow);
   }
 
+  listRetryableCommitted(now = Date.now(), limit = 100): UsageAttestationRecord[] {
+    const rows = this._stmts.listRetryableCommitted.all('committed', now, limit) as AttestationRow[];
+    return rows.map(attestationFromRow);
+  }
+
+  recordRevealRetry(claimHash: string, error: string, nextRetryAt: number): void {
+    this._stmts.recordRevealRetry.run(error, nextRetryAt, Date.now(), claimHash);
+  }
+
   updateAttestationStatus(claimHash: string, status: UsageAttestationStatus, hashes?: { commitTxHash?: string; revealTxHash?: string }): void {
-    this._stmts.updateAttestationStatus.run(status, hashes?.commitTxHash ?? null, hashes?.revealTxHash ?? null, Date.now(), claimHash);
+    this._stmts.updateAttestationStatus.run(status, hashes?.commitTxHash ?? null, hashes?.revealTxHash ?? null, status, 'revealed', 'failed', 'pending_buyer', Date.now(), claimHash);
   }
 
   close(): void {
@@ -197,6 +221,9 @@ interface AttestationRow {
   commit_tx_hash: string | null;
   reveal_tx_hash: string | null;
   status: UsageAttestationStatus;
+  attempt_count?: number;
+  last_error?: string | null;
+  next_retry_at?: number;
   created_at: number;
   updated_at: number;
 }
@@ -240,6 +267,9 @@ function attestationFromRow(row: AttestationRow): UsageAttestationRecord {
     commitTxHash: row.commit_tx_hash,
     revealTxHash: row.reveal_tx_hash,
     status: row.status,
+    attemptCount: row.attempt_count ?? 0,
+    lastError: row.last_error ?? null,
+    nextRetryAt: row.next_retry_at ?? 0,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

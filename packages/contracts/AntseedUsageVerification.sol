@@ -8,25 +8,9 @@ import "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
 import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 
 import {IAntseedRegistry} from "./interfaces/IAntseedRegistry.sol";
+import {IAntseedChannels} from "./interfaces/IAntseedChannels.sol";
 import {IAntseedStaking} from "./interfaces/IAntseedStaking.sol";
 import {IAntseedUsageVerification} from "./interfaces/IAntseedUsageVerification.sol";
-
-interface IAntseedChannelsUsageView {
-    function channels(bytes32 channelId)
-        external
-        view
-        returns (
-            address buyer,
-            address seller,
-            uint128 deposit,
-            uint128 settled,
-            bytes32 metadataHash,
-            uint256 deadline,
-            uint256 settledAt,
-            uint256 closeRequestedAt,
-            uint8 status
-        );
-}
 
 /**
  * @title AntseedUsageVerification
@@ -345,9 +329,10 @@ contract AntseedUsageVerification is IAntseedUsageVerification, EIP712, Pausable
     function _verifyPaymentCoverage(UsageClaim calldata claim) internal view {
         address channelsAddress = registry.channels();
         if (channelsAddress == address(0)) revert InvalidAddress();
-        (address buyer, address seller,, uint128 settled,,,,,) = IAntseedChannelsUsageView(channelsAddress).channels(claim.channelId);
+        (address buyer, address seller, uint256 settled) =
+            IAntseedChannels(channelsAddress).getUsageVerificationChannel(claim.channelId);
         if (buyer != claim.buyer || seller != claim.seller) revert ChannelMismatch();
-        if (uint256(settled) < claim.paymentCumulativeAmount) revert PaymentNotCovered();
+        if (settled < claim.paymentCumulativeAmount) revert PaymentNotCovered();
 
         address stakingAddress = registry.staking();
         if (stakingAddress != address(0)) {

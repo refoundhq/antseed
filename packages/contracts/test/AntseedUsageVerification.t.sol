@@ -33,6 +33,15 @@ contract MockChannelsForUsageVerification {
             status: 1
         });
     }
+
+    function getUsageVerificationChannel(bytes32 channelId)
+        external
+        view
+        returns (address buyer, address seller, uint256 settled)
+    {
+        Channel storage channel = channels[channelId];
+        return (channel.buyer, channel.seller, uint256(channel.settled));
+    }
 }
 
 contract MockStakingForUsageVerification {
