@@ -44,6 +44,36 @@ contract MockChannelsForUsageVerification {
     }
 }
 
+contract MockLegacyChannelsForUsageVerification {
+    struct Channel {
+        address buyer;
+        address seller;
+        uint128 deposit;
+        uint128 settled;
+        bytes32 metadataHash;
+        uint256 deadline;
+        uint256 settledAt;
+        uint256 closeRequestedAt;
+        uint8 status;
+    }
+
+    mapping(bytes32 => Channel) public channels;
+
+    function setChannel(bytes32 channelId, address buyer, address seller, uint128 settled) external {
+        channels[channelId] = Channel({
+            buyer: buyer,
+            seller: seller,
+            deposit: settled,
+            settled: settled,
+            metadataHash: bytes32(0),
+            deadline: block.timestamp + 1 days,
+            settledAt: block.timestamp,
+            closeRequestedAt: 0,
+            status: 1
+        });
+    }
+}
+
 contract MockStakingForUsageVerification {
     mapping(address => uint256) public agentIds;
 
@@ -124,6 +154,41 @@ contract AntseedUsageVerificationTest is Test {
         assertEq(sellerStats.costUsdc, 900);
         assertEq(sellerStats.attestationCount, 2);
         assertEq(buyerStats.inputTokens, 100);
+    }
+
+    function test_reveal_supportsLegacyChannelsTupleView() public {
+        MockLegacyChannelsForUsageVerification legacyChannels = new MockLegacyChannelsForUsageVerification();
+        legacyChannels.setChannel(channelId, buyer, seller, 1000);
+        registry.setChannels(address(legacyChannels));
+
+        IAntseedUsageVerification.UsageClaim memory claim = _claim(100, 25, 75, 40, 2, 900, 900);
+        bytes32 buyerNonce = keccak256("legacy buyer nonce");
+        bytes32 sellerNonce = keccak256("legacy seller nonce");
+        bytes32 claimHash = usage.hashUsageClaim(claim);
+        bytes32 buyerRevealHash = usage.revealHash(claimHash, buyerNonce);
+        bytes32 sellerRevealHash = usage.revealHash(claimHash, sellerNonce);
+        (bytes memory buyerSig, bytes memory sellerSig) =
+            _signCommits(claimHash, buyerRevealHash, sellerRevealHash, usage.currentEpoch());
+
+        usage.commitPair(AntseedUsageVerification.CommitPairInput({
+            claimHash: claimHash,
+            channelId: channelId,
+            buyer: buyer,
+            seller: seller,
+            sellerAgentId: agentId,
+            serviceKey: serviceKey,
+            buyerRevealHash: buyerRevealHash,
+            sellerRevealHash: sellerRevealHash,
+            expectedEpoch: usage.currentEpoch(),
+            buyerSig: buyerSig,
+            sellerSig: sellerSig
+        }));
+
+        usage.revealPair(claim, buyerNonce, sellerNonce);
+
+        IAntseedUsageVerification.UsageStats memory sellerStats = usage.getSellerServiceStats(agentId, serviceKey, 0);
+        assertEq(sellerStats.inputTokens, 100);
+        assertEq(sellerStats.attestationCount, 2);
     }
 
     function test_reveal_requiresPaymentCoverage() public {

@@ -12,6 +12,23 @@ import {IAntseedChannels} from "./interfaces/IAntseedChannels.sol";
 import {IAntseedStaking} from "./interfaces/IAntseedStaking.sol";
 import {IAntseedUsageVerification} from "./interfaces/IAntseedUsageVerification.sol";
 
+interface IAntseedChannelsLegacyUsageView {
+    function channels(bytes32 channelId)
+        external
+        view
+        returns (
+            address buyer,
+            address seller,
+            uint128 deposit,
+            uint128 settled,
+            bytes32 metadataHash,
+            uint256 deadline,
+            uint256 settledAt,
+            uint256 closeRequestedAt,
+            uint8 status
+        );
+}
+
 /**
  * @title AntseedUsageVerification
  * @notice No-funds service-scoped usage fact layer for AntSeed requests.
@@ -329,8 +346,7 @@ contract AntseedUsageVerification is IAntseedUsageVerification, EIP712, Pausable
     function _verifyPaymentCoverage(UsageClaim calldata claim) internal view {
         address channelsAddress = registry.channels();
         if (channelsAddress == address(0)) revert InvalidAddress();
-        (address buyer, address seller, uint256 settled) =
-            IAntseedChannels(channelsAddress).getUsageVerificationChannel(claim.channelId);
+        (address buyer, address seller, uint256 settled) = _readChannelForUsageVerification(channelsAddress, claim.channelId);
         if (buyer != claim.buyer || seller != claim.seller) revert ChannelMismatch();
         if (settled < claim.paymentCumulativeAmount) revert PaymentNotCovered();
 
@@ -338,6 +354,24 @@ contract AntseedUsageVerification is IAntseedUsageVerification, EIP712, Pausable
         if (stakingAddress != address(0)) {
             uint256 actualAgentId = IAntseedStaking(stakingAddress).getAgentId(claim.seller);
             if (actualAgentId != claim.sellerAgentId) revert SellerAgentMismatch();
+        }
+    }
+
+    function _readChannelForUsageVerification(address channelsAddress, bytes32 channelId)
+        internal
+        view
+        returns (address buyer, address seller, uint256 settled)
+    {
+        try IAntseedChannels(channelsAddress).getUsageVerificationChannel(channelId) returns (
+            address accessorBuyer,
+            address accessorSeller,
+            uint256 accessorSettled
+        ) {
+            return (accessorBuyer, accessorSeller, accessorSettled);
+        } catch {
+            (address legacyBuyer, address legacySeller,, uint128 legacySettled,,,,,) =
+                IAntseedChannelsLegacyUsageView(channelsAddress).channels(channelId);
+            return (legacyBuyer, legacySeller, uint256(legacySettled));
         }
     }
 
