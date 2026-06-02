@@ -121,7 +121,6 @@ contract DeployBaseSepolia is Script {
         antseedRegistry.setDeposits(deposits);
         antseedRegistry.setStaking(staking);
         antseedRegistry.setEmissions(emissions);
-        antseedRegistry.setUsageVerification(usageVerification);
         antseedRegistry.setAntsToken(antsToken);
         antseedRegistry.setIdentityRegistry(IDENTITY_REGISTRY);
         antseedRegistry.setProtocolReserve(protocolReserve);

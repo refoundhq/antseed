@@ -8,9 +8,15 @@ import "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
 import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 
 import {IAntseedRegistry} from "./interfaces/IAntseedRegistry.sol";
-import {IAntseedChannels} from "./interfaces/IAntseedChannels.sol";
 import {IAntseedStaking} from "./interfaces/IAntseedStaking.sol";
 import {IAntseedUsageVerification} from "./interfaces/IAntseedUsageVerification.sol";
+
+interface IAntseedChannelsUsageAccessor {
+    function getUsageVerificationChannel(bytes32 channelId)
+        external
+        view
+        returns (address buyer, address seller, uint256 settled);
+}
 
 interface IAntseedChannelsLegacyUsageView {
     function channels(bytes32 channelId)
@@ -362,7 +368,7 @@ contract AntseedUsageVerification is IAntseedUsageVerification, EIP712, Pausable
         view
         returns (address buyer, address seller, uint256 settled)
     {
-        try IAntseedChannels(channelsAddress).getUsageVerificationChannel(channelId) returns (
+        try IAntseedChannelsUsageAccessor(channelsAddress).getUsageVerificationChannel(channelId) returns (
             address accessorBuyer,
             address accessorSeller,
             uint256 accessorSettled

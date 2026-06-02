@@ -114,7 +114,6 @@ contract AntseedUsageVerificationTest is Test {
 
         registry.setChannels(address(channels));
         registry.setStaking(address(staking));
-        registry.setUsageVerification(address(usage));
         staking.setAgentId(seller, agentId);
         channels.setChannel(channelId, buyer, seller, 1000);
     }

@@ -126,7 +126,6 @@ contract Deploy is Script {
         antseedRegistry.setDeposits(deposits);
         antseedRegistry.setStaking(staking);
         antseedRegistry.setEmissions(emissions);
-        antseedRegistry.setUsageVerification(usageVerification);
         antseedRegistry.setAntsToken(antsToken);
         antseedRegistry.setIdentityRegistry(identityRegistry);
         antseedRegistry.setProtocolReserve(protocolReserve);
