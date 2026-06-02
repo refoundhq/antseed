@@ -238,7 +238,7 @@ export class SellerRequestHandler {
                 reason = 'insufficient locked reserve for estimated request';
               }
               debugLog(`[SellerHandler] Session ${reason} for ${buyerPeerId.slice(0, 12)}... (spent=${spent} accepted=${accepted} target=${target} reserveMax=${reserveMax} estimatedRequestCost=${estimatedRequestCost}) — returning 402`);
-              if (isBlocked || isAlreadyExhausted) {
+              if (isBlocked || isAlreadyExhausted || wouldExceedLockedReserve) {
                 // Default settleSession() performs final close(); do not use
                 // settleOnly here because exhausted channels must release the
                 // buyer's unused reserve before the buyer opens a replacement.
