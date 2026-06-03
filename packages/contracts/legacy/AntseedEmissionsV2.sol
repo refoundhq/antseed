@@ -235,9 +235,7 @@ contract AntseedEmissionsV2 is Ownable, Pausable, ReentrancyGuard {
 
         emit SellerPointsAccrued(seller, epoch, creditedSellerPoints);
         emit BuyerPointsAccrued(buyer, epoch, creditedBuyerPoints);
-        emit PairPointsAccrued(
-            channelId, buyer, seller, epoch, pointsDelta, creditedSellerPoints, creditedBuyerPoints
-        );
+        emit PairPointsAccrued(channelId, buyer, seller, epoch, pointsDelta, creditedSellerPoints, creditedBuyerPoints);
     }
 
     function _snapshotEpoch(uint256 epoch) internal {
@@ -262,8 +260,7 @@ contract AntseedEmissionsV2 is Ownable, Pausable, ReentrancyGuard {
         IAntseedPointsPolicy policy = pointsPolicy;
         if (address(policy) == address(0)) return (rawPoints, rawPoints);
         try policy.points(channelId, buyer, seller, rawPoints) returns (
-            uint256 weightedSellerPoints,
-            uint256 weightedBuyerPoints
+            uint256 weightedSellerPoints, uint256 weightedBuyerPoints
         ) {
             return (weightedSellerPoints, weightedBuyerPoints);
         } catch {

@@ -2,7 +2,7 @@
 pragma solidity ^0.8.24;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
-import {IAntseedRegistry} from "../interfaces/IAntseedRegistry.sol";
+import { IAntseedRegistry } from "../interfaces/IAntseedRegistry.sol";
 
 /**
  * @title AntseedRegistry
@@ -11,7 +11,6 @@ import {IAntseedRegistry} from "../interfaces/IAntseedRegistry.sol";
  *         and looks up sibling addresses on demand.
  */
 contract AntseedRegistry is IAntseedRegistry, Ownable {
-
     address public override channels;
     address public override stats;
     address public override deposits;
@@ -23,9 +22,10 @@ contract AntseedRegistry is IAntseedRegistry, Ownable {
     address public override teamWallet;
 
     error InvalidAddress();
+
     event AddressUpdated(string indexed key, address indexed newAddress);
 
-    constructor() Ownable(msg.sender) {}
+    constructor() Ownable(msg.sender) { }
 
     function setChannels(address _channels) external onlyOwner {
         if (_channels == address(0)) revert InvalidAddress();

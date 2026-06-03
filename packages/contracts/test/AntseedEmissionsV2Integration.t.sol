@@ -215,7 +215,11 @@ contract AntseedEmissionsV2IntegrationTest is Test {
         channels.settle(channelId, cumulativeAmount, metadata, sig);
     }
 
-    function _signReserveAuth(bytes32 channelId, uint128 maxAmount, uint256 deadline) internal view returns (bytes memory) {
+    function _signReserveAuth(bytes32 channelId, uint128 maxAmount, uint256 deadline)
+        internal
+        view
+        returns (bytes memory)
+    {
         bytes32 structHash = keccak256(abi.encode(RESERVE_AUTH_TYPEHASH, channelId, maxAmount, deadline));
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(BUYER_PK, _hashTypedDataChannels(structHash));
         return abi.encodePacked(r, s, v);
@@ -226,7 +230,8 @@ contract AntseedEmissionsV2IntegrationTest is Test {
         view
         returns (bytes memory)
     {
-        bytes32 structHash = keccak256(abi.encode(SPENDING_AUTH_TYPEHASH, channelId, cumulativeAmount, keccak256(metadata)));
+        bytes32 structHash =
+            keccak256(abi.encode(SPENDING_AUTH_TYPEHASH, channelId, cumulativeAmount, keccak256(metadata)));
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(BUYER_PK, _hashTypedDataChannels(structHash));
         return abi.encodePacked(r, s, v);
     }

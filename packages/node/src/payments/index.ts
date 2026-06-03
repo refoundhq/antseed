@@ -58,10 +58,6 @@ export type { ANTSTokenClientConfig } from './evm/ants-token-client.js';
 export { EmissionsClient } from './evm/emissions-client.js';
 export type { EmissionsClientConfig, EmissionsEpochParams } from './evm/emissions-client.js';
 
-// Subscription Pool
-export { SubPoolClient } from './evm/subpool-client.js';
-export type { SubPoolClientConfig } from './evm/subpool-client.js';
-
 // Channel persistence
 export { ChannelStore, CHANNEL_STATUS } from './channel-store.js';
 export type { StoredChannel, StoredReceipt } from './channel-store.js';

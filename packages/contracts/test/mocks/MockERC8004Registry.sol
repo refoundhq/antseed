@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-import {IERC8004Registry} from "../../interfaces/IERC8004Registry.sol";
+import { IERC8004Registry } from "../../interfaces/IERC8004Registry.sol";
 
 /**
  * @title MockERC8004Registry
@@ -26,7 +26,7 @@ contract MockERC8004Registry is IERC8004Registry {
         emit Registered(agentId, msg.sender);
     }
 
-    function register(string calldata /* uri */) external returns (uint256 agentId) {
+    function register(string calldata /* uri */ ) external returns (uint256 agentId) {
         agentId = _nextId++;
         _owners[agentId] = msg.sender;
         _balances[msg.sender]++;

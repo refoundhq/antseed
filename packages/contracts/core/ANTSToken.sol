@@ -4,13 +4,13 @@ pragma solidity ^0.8.24;
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 
-import {IAntseedRegistry} from "../interfaces/IAntseedRegistry.sol";
+import { IAntseedRegistry } from "../interfaces/IAntseedRegistry.sol";
 
 contract ANTSToken is ERC20, Ownable {
     uint256 public constant MAX_SUPPLY = 1_040_000_000e18; // 1.04B ANTS
 
     IAntseedRegistry public registry;
-    bool public transfersEnabled;       // Phase 1: false. One-way toggle to true.
+    bool public transfersEnabled; // Phase 1: false. One-way toggle to true.
     mapping(address => bool) public transferWhitelist;
 
     error NotEmissionsContract();
@@ -23,7 +23,7 @@ contract ANTSToken is ERC20, Ownable {
     event WhitelistUpdated(address indexed account, bool allowed);
 
     constructor() ERC20("AntSeed", "ANTS") Ownable(msg.sender) {
-        transfersEnabled = false;   // Phase 1: non-transferable
+        transfersEnabled = false; // Phase 1: non-transferable
     }
 
     function setRegistry(address _registry) external onlyOwner {

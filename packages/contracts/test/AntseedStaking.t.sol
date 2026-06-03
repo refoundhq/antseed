@@ -8,7 +8,7 @@ import "../payments/AntseedChannels.sol";
 import "../core/AntseedRegistry.sol";
 import "./mocks/MockERC8004Registry.sol";
 import "./mocks/MockUSDC.sol";
-import {IAntseedChannels} from "../interfaces/IAntseedChannels.sol";
+import { IAntseedChannels } from "../interfaces/IAntseedChannels.sol";
 
 /// @dev Minimal mock that exposes activeChannelCount + getAgentStats for Staking tests.
 contract MockChannelsForStaking {

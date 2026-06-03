@@ -487,8 +487,8 @@ export default function Home(): JSX.Element {
         <div className={styles.antsOrb}><img src="/logos/antseed-mark.svg" alt="ANTS" /></div>
         <div>
           <span className={styles.kicker}>Network utility</span>
-          <h2>$ANTS will power Subscription Pools, reputation and more.</h2>
-          <p>As AntSeed grows from individual requests to recurring agent workloads, ANTS becomes the coordination layer for access, incentives, and subscription pool utility.</p>
+          <h2>$ANTS will power stake-backed routing, reputation and more.</h2>
+          <p>As AntSeed grows from individual requests to recurring agent workloads, ANTS becomes the coordination layer for access, incentives, and network utility.</p>
         </div>
         <Link to="/ants-token" className={styles.antsUtilityCta}>Explore ANTS →</Link>
       </section>

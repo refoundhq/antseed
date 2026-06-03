@@ -3,8 +3,8 @@ pragma solidity ^0.8.24;
 
 import "forge-std/Script.sol";
 
-import {ISetRegistry, ISetWriter} from "../interfaces/IAntseedWiring.sol";
-import {AntseedRegistry} from "../core/AntseedRegistry.sol";
+import { ISetRegistry, ISetWriter } from "../interfaces/IAntseedWiring.sol";
+import { AntseedRegistry } from "../core/AntseedRegistry.sol";
 
 /**
  * @title UpgradeBaseSepolia
@@ -25,11 +25,11 @@ import {AntseedRegistry} from "../core/AntseedRegistry.sol";
  */
 contract UpgradeBaseSepolia is Script {
     // ─── Existing contracts (kept as-is) ────────────────────────────
-    address constant USDC           = 0xcA04797CaB6B412Cee6798B7314a05AdFDc3Cf23;
-    address constant STAKING        = 0x1CB76B197a20E41f9AA01806B41C59e16Cad46a7;
-    address constant EMISSIONS      = 0x9B30DAcfC20F0927fFD49fB0B84cf3EB83976a33;
-    address constant ANTS_TOKEN     = 0x10B2B40d7aDEBAB0f8a9567fc90973Fbb997aE61;
-    address constant IDENTITY       = 0x8004A818BFB912233c491871b3d84c89A494BD9e;
+    address constant USDC = 0xcA04797CaB6B412Cee6798B7314a05AdFDc3Cf23;
+    address constant STAKING = 0x1CB76B197a20E41f9AA01806B41C59e16Cad46a7;
+    address constant EMISSIONS = 0x9B30DAcfC20F0927fFD49fB0B84cf3EB83976a33;
+    address constant ANTS_TOKEN = 0x10B2B40d7aDEBAB0f8a9567fc90973Fbb997aE61;
+    address constant IDENTITY = 0x8004A818BFB912233c491871b3d84c89A494BD9e;
 
     function run() external {
         uint256 deployerPrivateKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
@@ -59,27 +59,29 @@ contract UpgradeBaseSepolia is Script {
         // 2. AntseedStats (new)
         bytes memory statsBytecode = vm.getCode("AntseedStats.sol:AntseedStats");
         address stats;
-        assembly { stats := create(0, add(statsBytecode, 0x20), mload(statsBytecode)) }
+        assembly {
+            stats := create(0, add(statsBytecode, 0x20), mload(statsBytecode))
+        }
         require(stats != address(0), "Stats deploy failed");
         console.log("AntseedStats:         ", stats);
 
         // 3. AntseedDeposits(usdc) — new logic (direct payouts)
-        bytes memory depositsBytecode = abi.encodePacked(
-            vm.getCode("AntseedDeposits.sol:AntseedDeposits"),
-            abi.encode(USDC)
-        );
+        bytes memory depositsBytecode =
+            abi.encodePacked(vm.getCode("AntseedDeposits.sol:AntseedDeposits"), abi.encode(USDC));
         address deposits;
-        assembly { deposits := create(0, add(depositsBytecode, 0x20), mload(depositsBytecode)) }
+        assembly {
+            deposits := create(0, add(depositsBytecode, 0x20), mload(depositsBytecode))
+        }
         require(deposits != address(0), "Deposits deploy failed");
         console.log("AntseedDeposits:      ", deposits);
 
         // 4. AntseedChannels(registry) — new logic
-        bytes memory channelsBytecode = abi.encodePacked(
-            vm.getCode("AntseedChannels.sol:AntseedChannels"),
-            abi.encode(address(registry))
-        );
+        bytes memory channelsBytecode =
+            abi.encodePacked(vm.getCode("AntseedChannels.sol:AntseedChannels"), abi.encode(address(registry)));
         address channels;
-        assembly { channels := create(0, add(channelsBytecode, 0x20), mload(channelsBytecode)) }
+        assembly {
+            channels := create(0, add(channelsBytecode, 0x20), mload(channelsBytecode))
+        }
         require(channels != address(0), "Channels deploy failed");
         console.log("AntseedChannels:      ", channels);
 

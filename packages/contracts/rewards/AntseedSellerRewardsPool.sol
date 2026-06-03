@@ -18,36 +18,56 @@ import { IAntseedSellerClaimPolicy } from "../interfaces/IAntseedSellerClaimPoli
  *         Sellers claim from their own locked balance subject to an optional
  *         seller claim policy. If no policy is configured, claims are blocked
  *         until a policy is introduced.
+ *
+ *         Important behavior:
+ *           - This is custody for locked seller rewards only. It does not
+ *             calculate usage points, pool rewards, APY caps, or bootstrap
+ *             security weight.
+ *           - `recordLockedReward` is accounting-only and can only be called by
+ *             the configured emissions contract. The corresponding ANTS must
+ *             already have been minted/transferred to this pool.
+ *           - Claim eligibility is intentionally delegated to a policy contract
+ *             so launch/bootstrap rules can change without changing custody.
  */
 contract AntseedSellerRewardsPool is Ownable, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
+    // ─── External Contracts ──────────────────────────────────────────
     IAntseedRegistry public registry;
     IAntseedSellerClaimPolicy public sellerClaimPolicy;
 
+    // ─── Locked Reward Accounting ────────────────────────────────────
     mapping(address => uint256) public lockedRewards;
     uint256 public totalLockedRewards;
 
+    // ─── Events ──────────────────────────────────────────────────────
     event LockedRewardRecorded(address indexed seller, uint256 amount);
     event SellerRewardsClaimed(address indexed seller, address indexed recipient, uint256 amount);
     event RegistrySet(address indexed registry);
     event SellerClaimPolicySet(address indexed policy);
 
+    // ─── Custom Errors ───────────────────────────────────────────────
     error InvalidAddress();
     error InvalidAmount();
     error NotEmissionsContract();
     error NoSellerClaimPolicy();
     error NothingToClaim();
 
+    // ─── Modifiers ───────────────────────────────────────────────────
     modifier onlyEmissions() {
         if (msg.sender != registry.emissions()) revert NotEmissionsContract();
         _;
     }
 
+    // ─── Constructor ─────────────────────────────────────────────────
     constructor(address _registry) Ownable(msg.sender) {
         if (_registry == address(0)) revert InvalidAddress();
         registry = IAntseedRegistry(_registry);
     }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //                        CORE — RECORD LOCKED REWARDS
+    // ═══════════════════════════════════════════════════════════════════
 
     function recordLockedReward(address seller, uint256 amount) external onlyEmissions {
         if (seller == address(0)) revert InvalidAddress();
@@ -58,6 +78,10 @@ contract AntseedSellerRewardsPool is Ownable, ReentrancyGuard {
 
         emit LockedRewardRecorded(seller, amount);
     }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //                        CORE — CLAIM LOCKED REWARDS
+    // ═══════════════════════════════════════════════════════════════════
 
     function claim(address recipient) external nonReentrant {
         if (recipient == address(0)) revert InvalidAddress();
@@ -77,6 +101,10 @@ contract AntseedSellerRewardsPool is Ownable, ReentrancyGuard {
 
         emit SellerRewardsClaimed(msg.sender, recipient, amount);
     }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //                        ADMIN FUNCTIONS
+    // ═══════════════════════════════════════════════════════════════════
 
     function setSellerClaimPolicy(address policy) external onlyOwner {
         sellerClaimPolicy = IAntseedSellerClaimPolicy(policy);

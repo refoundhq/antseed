@@ -1,0 +1,150 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.24;
+
+interface IAntseedSellerPools {
+    event RegistrySet(address indexed registry);
+    event SellerRewardsPoolSet(address indexed sellerRewardsPool);
+    event StakeCreated(
+        uint256 indexed positionId,
+        address indexed staker,
+        uint256 indexed agentId,
+        uint256 amount,
+        uint256 weightAmount,
+        uint256 stakeStartEpoch,
+        uint256 stakeEndEpoch
+    );
+    event StakeMoved(
+        uint256 indexed oldPositionId,
+        uint256 indexed newPositionId,
+        address indexed staker,
+        uint256 fromAgentId,
+        uint256 toAgentId
+    );
+    event StakeWithdrawn(
+        uint256 indexed positionId, address indexed staker, uint256 returnedAmount, uint256 slashedAmount
+    );
+    event RewardStakerSet(address indexed rewardStaker, bool allowed);
+    event BootstrapCommitmentRecorded(
+        address indexed seller, uint256 indexed agentId, uint256 amount, uint256 startEpoch, uint256 stakeEndEpoch
+    );
+    event BootstrapCommitmentMatched(
+        address indexed seller, uint256 indexed agentId, uint256 amount, uint256 totalMatchedAmount
+    );
+    event StakerRewardsRestaked(
+        address indexed staker,
+        uint256 indexed sourcePositionId,
+        uint256 indexed newPositionId,
+        uint256 amount,
+        uint256 weightAmount,
+        uint256 stakeStartEpoch,
+        uint256 stakeEndEpoch
+    );
+    event PoolConfigSet(
+        uint256 minStakeEpochs,
+        uint256 maxStakeEpochs,
+        uint256 stakeActivationDelay,
+        uint256 maxSlashBps,
+        uint256 minEarlyExitSlashBps
+    );
+    event ApyCapSet(uint256 maxApyBps, uint256 epochsPerYear);
+    event BootstrapConfigSet(uint256 cap, uint256 weightBps);
+    event RestakedRewardWeightBonusSet(uint256 bonusBps);
+    event MoveWeightPenaltySet(uint256 penaltyBps);
+    event StakerActiveStakeUpdated(
+        address indexed staker, uint256 indexed agentId, uint256 totalActiveStake, uint256 agentActiveStake
+    );
+
+    error InvalidAddress();
+    error InvalidValue();
+    error InvalidPosition();
+    error NotPositionOwner();
+    error StakeDurationOutOfBounds();
+    error PositionClosed();
+    error AlreadyWithdrawn();
+    error NotRewardStaker();
+    error BootstrapUnavailable();
+    error BootstrapNotFound();
+    error BootstrapMatchExceeded();
+    error BootstrapAlreadyActive();
+    error BootstrapClosed();
+    error NotAgentOwner();
+
+    function stake(uint256 agentId, uint256 amount, uint256 stakeEpochs) external returns (uint256 positionId);
+    function stakeFor(address staker, uint256 agentId, uint256 amount, uint256 stakeEpochs)
+        external
+        returns (uint256 positionId);
+    function moveStake(uint256 positionId, uint256 toAgentId) external returns (uint256 newPositionId);
+    function moveStakes(uint256[] calldata positionIds, uint256 toAgentId)
+        external
+        returns (uint256[] memory newPositionIds);
+    function withdrawStake(uint256 positionId) external;
+    function withdrawStakes(uint256[] calldata positionIds)
+        external
+        returns (uint256 returnedAmount, uint256 slashedAmount);
+    function stakeMintedReward(address staker, uint256 sourcePositionId, uint256 amount, uint256 stakeEpochs)
+        external
+        returns (uint256 newPositionId);
+    function ownerOf(uint256 positionId) external view returns (address owner);
+    function matchBootstrapCommitment(uint256 amount) external returns (uint256 positionId);
+    function activateBootstrapCommitment(uint256 agentId) external returns (uint256);
+    function setRestakedRewardWeightBonus(uint256 bonusBps) external;
+    function setMoveWeightPenalty(uint256 penaltyBps) external;
+    function setRewardStaker(address rewardStaker, bool allowed) external;
+    function setPoolConfig(
+        uint256 minStakeEpochs,
+        uint256 maxStakeEpochs,
+        uint256 stakeActivationDelay,
+        uint256 maxSlashBps,
+        uint256 minEarlyExitSlashBps
+    ) external;
+    function currentEpoch() external view returns (uint256);
+    function agentIdForSeller(address seller) external view returns (uint256);
+
+    function hasPoolAtEpoch(uint256 agentId, uint256 epoch) external view returns (bool);
+    function hasPoolAtEpoch(address seller, uint256 epoch) external view returns (bool);
+    function poolWeightAtEpoch(uint256 agentId, uint256 epoch) external view returns (uint256 weight);
+    function poolWeightAtEpoch(address seller, uint256 epoch) external view returns (uint256 weight);
+    function positionWeightAtEpoch(uint256 positionId, uint256 epoch) external view returns (uint256 weight);
+    function positionRewardCapAtEpoch(uint256 positionId, uint256 epoch) external view returns (uint256 cap);
+    function bootstrapWeightAtEpoch(uint256 agentId, uint256 epoch) external view returns (uint256 weight);
+    function bootstrapWeightAtEpoch(address seller, uint256 epoch) external view returns (uint256 weight);
+    function bootstrapRewardCapAtEpoch(address seller, uint256 epoch) external view returns (uint256 cap);
+    function poolPowerWeightAtEpoch(uint256 agentId, uint256 epoch) external view returns (uint256 weight);
+    function poolPowerWeightAtEpoch(address seller, uint256 epoch) external view returns (uint256 weight);
+    function totalPowerWeightAtEpoch(uint256 epoch) external view returns (uint256 weight);
+    function currentPoolSecurityWeight(uint256 agentId) external returns (uint256 weight);
+    function currentPoolSecurityWeight(address seller) external returns (uint256 weight);
+    function currentTotalSecurityWeight() external returns (uint256 weight);
+    function currentPoolSecurityShareBps(uint256 agentId) external returns (uint256 shareBps);
+    function currentPoolSecurityShareBps(address seller) external returns (uint256 shareBps);
+
+    function sellerBootstrapCommitment(address seller) external view returns (uint256);
+    function sellerBootstrapMatchedCommitment(address seller) external view returns (uint256);
+    function stakerTotalActiveStake(address staker) external view returns (uint256);
+    function stakerAgentActiveStake(address staker, uint256 agentId) external view returns (uint256);
+    function stakerPositionCount(address staker) external view returns (uint256);
+    function stakerPositionIdAt(address staker, uint256 index) external view returns (uint256);
+    function stakerPositionIds(address staker, uint256 offset, uint256 limit)
+        external
+        view
+        returns (uint256[] memory);
+    function poolActiveStakeAtEpoch(uint256 agentId, uint256 epoch) external view returns (uint256 activeStake);
+    function poolActiveStakeAtEpoch(address seller, uint256 epoch) external view returns (uint256 activeStake);
+    function positions(uint256 positionId)
+        external
+        view
+        returns (
+            address owner,
+            uint256 agentId,
+            uint256 amount,
+            uint256 weightAmount,
+            uint64 stakeStartEpoch,
+            uint64 stakeEndEpoch,
+            uint64 closedAtEpoch,
+            bool withdrawn
+        );
+    function bootstrapCommitments(address seller)
+        external
+        view
+        returns (uint256 agentId, uint256 amount, uint256 matchedAmount, uint64 startEpoch, uint64 stakeEndEpoch);
+}

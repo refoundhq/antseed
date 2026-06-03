@@ -1022,7 +1022,7 @@ export class BuyerPaymentNegotiator {
         `Check with "antseed buyer status"; top up with "antseed buyer deposit <amount>".`,
       );
     }
-    lines.push('- Seller may be overloaded or gated on subscription (try another peer).');
+    lines.push('- Seller may be overloaded or temporarily unavailable (try another peer).');
     lines.push('- Seller may be online but the payment process stalled (retry, or pin a different peer).');
 
     return `\nLikely causes:\n  ${lines.join('\n  ')}`;

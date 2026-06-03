@@ -419,7 +419,6 @@ export function registerSellerStartCommand(sellerCmd: Command): void {
           usdcContractAddress: config.payments.crypto?.usdcContractAddress,
           identityRegistryAddress: config.payments.crypto?.identityRegistryAddress,
           emissionsContractAddress: config.payments.crypto?.emissionsContractAddress,
-          subPoolContractAddress: config.payments.crypto?.subPoolContractAddress,
         })
         const defaultLockAmountUSDCBaseUnits = toUSDCBaseUnits(
           config.payments.crypto?.defaultLockAmountUSDC ?? defaultDepositAmountUSDC,

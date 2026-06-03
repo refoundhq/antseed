@@ -9,7 +9,6 @@ import {
 import {
   IdentityClient,
   EmissionsClient,
-  SubPoolClient,
   ChannelStore,
 } from '@antseed/node/payments';
 import type { Identity } from '@antseed/node';
@@ -102,7 +101,6 @@ type ResolvedCryptoConfig = NonNullable<AntseedConfig['payments']['crypto']> & {
   stakingContractAddress?: string;
   identityRegistryAddress?: string;
   emissionsContractAddress?: string;
-  subPoolContractAddress?: string;
   evmChainId: number;
 };
 
@@ -232,23 +230,6 @@ export function createEmissionsClient(config: AntseedConfig, overrides?: CryptoC
     rpcUrl: crypto.rpcUrl,
     ...fallbackClientOpts(crypto),
     contractAddress: crypto.emissionsContractAddress,
-    evmChainId: crypto.evmChainId,
-  });
-}
-
-/**
- * Create a SubPoolClient from the CLI config.
- */
-export function createSubPoolClient(config: AntseedConfig, overrides?: CryptoConfigOverrides): SubPoolClient {
-  const crypto = requireCryptoConfig(config, overrides);
-  if (!crypto.subPoolContractAddress) {
-    throw new Error('No subscription pool contract address configured. Set payments.crypto.subPoolContractAddress in your config file.');
-  }
-  return new SubPoolClient({
-    rpcUrl: crypto.rpcUrl,
-    ...fallbackClientOpts(crypto),
-    contractAddress: crypto.subPoolContractAddress,
-    usdcAddress: crypto.usdcContractAddress,
     evmChainId: crypto.evmChainId,
   });
 }

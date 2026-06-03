@@ -3,8 +3,8 @@ pragma solidity ^0.8.24;
 
 import "forge-std/Script.sol";
 
-import {ISetRegistry, ISetWriter} from "../interfaces/IAntseedWiring.sol";
-import {AntseedRegistry} from "../core/AntseedRegistry.sol";
+import { ISetRegistry, ISetWriter } from "../interfaces/IAntseedWiring.sol";
+import { AntseedRegistry } from "../core/AntseedRegistry.sol";
 
 /**
  * @title DeployBaseMainnet
@@ -49,7 +49,9 @@ contract DeployBaseMainnet is Script {
         // 1. ANTSToken
         bytes memory tokenBytecode = vm.getCode("ANTSToken.sol:ANTSToken");
         address antsToken;
-        assembly { antsToken := create(0, add(tokenBytecode, 0x20), mload(tokenBytecode)) }
+        assembly {
+            antsToken := create(0, add(tokenBytecode, 0x20), mload(tokenBytecode))
+        }
         require(antsToken != address(0), "ANTSToken deploy failed");
         console.log("ANTSToken:            ", antsToken);
 
@@ -59,38 +61,41 @@ contract DeployBaseMainnet is Script {
 
         // 3. AntseedStaking(usdc, registry)
         bytes memory stakingBytecode = abi.encodePacked(
-            vm.getCode("AntseedStaking.sol:AntseedStaking"),
-            abi.encode(USDC, address(antseedRegistry))
+            vm.getCode("AntseedStaking.sol:AntseedStaking"), abi.encode(USDC, address(antseedRegistry))
         );
         address staking;
-        assembly { staking := create(0, add(stakingBytecode, 0x20), mload(stakingBytecode)) }
+        assembly {
+            staking := create(0, add(stakingBytecode, 0x20), mload(stakingBytecode))
+        }
         require(staking != address(0), "Staking deploy failed");
         console.log("AntseedStaking:       ", staking);
 
         // 4. AntseedDeposits(usdc)
-        bytes memory depositsBytecode = abi.encodePacked(
-            vm.getCode("AntseedDeposits.sol:AntseedDeposits"),
-            abi.encode(USDC)
-        );
+        bytes memory depositsBytecode =
+            abi.encodePacked(vm.getCode("AntseedDeposits.sol:AntseedDeposits"), abi.encode(USDC));
         address deposits;
-        assembly { deposits := create(0, add(depositsBytecode, 0x20), mload(depositsBytecode)) }
+        assembly {
+            deposits := create(0, add(depositsBytecode, 0x20), mload(depositsBytecode))
+        }
         require(deposits != address(0), "Deposits deploy failed");
         console.log("AntseedDeposits:      ", deposits);
 
         // 5. AntseedChannels(registry)
-        bytes memory channelsBytecode = abi.encodePacked(
-            vm.getCode("AntseedChannels.sol:AntseedChannels"),
-            abi.encode(address(antseedRegistry))
-        );
+        bytes memory channelsBytecode =
+            abi.encodePacked(vm.getCode("AntseedChannels.sol:AntseedChannels"), abi.encode(address(antseedRegistry)));
         address channels;
-        assembly { channels := create(0, add(channelsBytecode, 0x20), mload(channelsBytecode)) }
+        assembly {
+            channels := create(0, add(channelsBytecode, 0x20), mload(channelsBytecode))
+        }
         require(channels != address(0), "Channels deploy failed");
         console.log("AntseedChannels:      ", channels);
 
         // 6. AntseedStats
         bytes memory statsBytecode = vm.getCode("AntseedStats.sol:AntseedStats");
         address stats;
-        assembly { stats := create(0, add(statsBytecode, 0x20), mload(statsBytecode)) }
+        assembly {
+            stats := create(0, add(statsBytecode, 0x20), mload(statsBytecode))
+        }
         require(stats != address(0), "Stats deploy failed");
         console.log("AntseedStats:         ", stats);
 
@@ -100,7 +105,9 @@ contract DeployBaseMainnet is Script {
             abi.encode(address(antseedRegistry), uint256(5_000_000e18), uint256(7 days))
         );
         address emissions;
-        assembly { emissions := create(0, add(emissionsBytecode, 0x20), mload(emissionsBytecode)) }
+        assembly {
+            emissions := create(0, add(emissionsBytecode, 0x20), mload(emissionsBytecode))
+        }
         require(emissions != address(0), "Emissions deploy failed");
         console.log("AntseedEmissions:     ", emissions);
 

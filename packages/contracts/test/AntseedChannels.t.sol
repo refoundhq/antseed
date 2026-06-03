@@ -41,12 +41,10 @@ contract AntseedChannelsTest is Test {
     uint256 constant STAKE_AMOUNT = 10_000_000; // MIN_SELLER_STAKE
 
     // AntSeed EIP-712 typehashes (must match contract)
-    bytes32 constant SPENDING_AUTH_TYPEHASH = keccak256(
-        "SpendingAuth(bytes32 channelId,uint256 cumulativeAmount,bytes32 metadataHash)"
-    );
-    bytes32 constant RESERVE_AUTH_TYPEHASH = keccak256(
-        "ReserveAuth(bytes32 channelId,uint128 maxAmount,uint256 deadline)"
-    );
+    bytes32 constant SPENDING_AUTH_TYPEHASH =
+        keccak256("SpendingAuth(bytes32 channelId,uint256 cumulativeAmount,bytes32 metadataHash)");
+    bytes32 constant RESERVE_AUTH_TYPEHASH =
+        keccak256("ReserveAuth(bytes32 channelId,uint128 maxAmount,uint256 deadline)");
 
     function setUp() public {
         buyer = vm.addr(BUYER_PK);
@@ -128,15 +126,9 @@ contract AntseedChannelsTest is Test {
         uint256 cumulativeInputTokens,
         uint256 cumulativeOutputTokens
     ) internal view returns (bytes memory) {
-        bytes32 metadataHash = keccak256(abi.encode(METADATA_VERSION, cumulativeInputTokens, cumulativeOutputTokens, uint256(0)));
-        bytes32 structHash = keccak256(
-            abi.encode(
-                SPENDING_AUTH_TYPEHASH,
-                channelId,
-                cumulativeAmount,
-                metadataHash
-            )
-        );
+        bytes32 metadataHash =
+            keccak256(abi.encode(METADATA_VERSION, cumulativeInputTokens, cumulativeOutputTokens, uint256(0)));
+        bytes32 structHash = keccak256(abi.encode(SPENDING_AUTH_TYPEHASH, channelId, cumulativeAmount, metadataHash));
         bytes32 digest = _hashTypedDataChannels(structHash);
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(pk, digest);
         return abi.encodePacked(r, s, v);
@@ -145,20 +137,12 @@ contract AntseedChannelsTest is Test {
     /**
      * @dev Sign an AntSeed ReserveAuth (our EIP-712 domain, version "7")
      */
-    function signReserveAuth(
-        uint256 pk,
-        bytes32 channelId,
-        uint128 maxAmount,
-        uint256 deadline
-    ) internal view returns (bytes memory) {
-        bytes32 structHash = keccak256(
-            abi.encode(
-                RESERVE_AUTH_TYPEHASH,
-                channelId,
-                maxAmount,
-                deadline
-            )
-        );
+    function signReserveAuth(uint256 pk, bytes32 channelId, uint128 maxAmount, uint256 deadline)
+        internal
+        view
+        returns (bytes memory)
+    {
+        bytes32 structHash = keccak256(abi.encode(RESERVE_AUTH_TYPEHASH, channelId, maxAmount, deadline));
         bytes32 digest = _hashTypedDataChannels(structHash);
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(pk, digest);
         return abi.encodePacked(r, s, v);
@@ -166,10 +150,11 @@ contract AntseedChannelsTest is Test {
 
     uint256 constant METADATA_VERSION = 1;
 
-    function encodeMetadata(
-        uint256 cumulativeInputTokens,
-        uint256 cumulativeOutputTokens
-    ) internal pure returns (bytes memory) {
+    function encodeMetadata(uint256 cumulativeInputTokens, uint256 cumulativeOutputTokens)
+        internal
+        pure
+        returns (bytes memory)
+    {
         return abi.encode(METADATA_VERSION, cumulativeInputTokens, cumulativeOutputTokens, uint256(0));
     }
 
@@ -191,11 +176,7 @@ contract AntseedChannelsTest is Test {
     /**
      * @dev Full reserve helper: creates buyer+seller, computes channelId, signs, reserves.
      */
-    function doReserve(
-        bytes32 salt,
-        uint128 maxAmount,
-        uint256 buyerDeposit
-    ) internal returns (bytes32 channelId) {
+    function doReserve(bytes32 salt, uint128 maxAmount, uint256 buyerDeposit) internal returns (bytes32 channelId) {
         createBuyer(BUYER_PK, buyerDeposit);
         createSeller(SELLER_PK);
 
@@ -344,17 +325,8 @@ contract AntseedChannelsTest is Test {
         channels.close(channelId, finalAmount, encodeMetadata(inputTokens, outputTokens), metaSig);
 
         // Assert channel state
-        (
-            ,
-            ,
-            ,
-            uint128 sSettled,
-            ,
-            ,
-            uint256 sSettledAt,
-            ,
-            AntseedChannels.ChannelStatus sStatus
-        ) = channels.channels(channelId);
+        (,,, uint128 sSettled,,, uint256 sSettledAt,, AntseedChannels.ChannelStatus sStatus) =
+            channels.channels(channelId);
 
         assertTrue(sStatus == AntseedChannels.ChannelStatus.Settled);
         assertEq(sSettled, USDC_60);
@@ -390,7 +362,7 @@ contract AntseedChannelsTest is Test {
         vm.prank(seller);
         channels.close(channelId, finalAmount, encodeMetadata(10000, 5000), metaSig);
 
-        (,,,uint128 sSettled,,,,,AntseedChannels.ChannelStatus sStatus) = channels.channels(channelId);
+        (,,, uint128 sSettled,,,,, AntseedChannels.ChannelStatus sStatus) = channels.channels(channelId);
         assertEq(sSettled, USDC_100);
         assertTrue(sStatus == AntseedChannels.ChannelStatus.Settled);
 
@@ -469,7 +441,8 @@ contract AntseedChannelsTest is Test {
         channels.settle(channelId, amount1, encodeMetadata(1000, 500), metaSig1);
 
         // Channel still active
-        (,, uint128 sDeposit, uint128 sSettled,,,,, AntseedChannels.ChannelStatus sStatus) = channels.channels(channelId);
+        (,, uint128 sDeposit, uint128 sSettled,,,,, AntseedChannels.ChannelStatus sStatus) =
+            channels.channels(channelId);
         assertTrue(sStatus == AntseedChannels.ChannelStatus.Active);
         assertEq(sDeposit, USDC_100);
         assertEq(sSettled, USDC_30);
@@ -499,7 +472,7 @@ contract AntseedChannelsTest is Test {
         channels.close(channelId, finalAmount, encodeMetadata(3000, 1500), metaSig2);
 
         // Channel settled
-        (,,,uint128 sSettled,,,,,AntseedChannels.ChannelStatus sStatus) = channels.channels(channelId);
+        (,,, uint128 sSettled,,,,, AntseedChannels.ChannelStatus sStatus) = channels.channels(channelId);
         assertTrue(sStatus == AntseedChannels.ChannelStatus.Settled);
         assertEq(sSettled, USDC_60);
 
@@ -539,7 +512,7 @@ contract AntseedChannelsTest is Test {
         channels.withdraw(channelId);
 
         // Channel timed out (withdrawn)
-        (,,,,,,,,AntseedChannels.ChannelStatus sStatus) = channels.channels(channelId);
+        (,,,,,,,, AntseedChannels.ChannelStatus sStatus) = channels.channels(channelId);
         assertTrue(sStatus == AntseedChannels.ChannelStatus.TimedOut);
 
         // Full deposit returned to buyer
@@ -614,7 +587,7 @@ contract AntseedChannelsTest is Test {
         vm.prank(seller);
         channels.close(channelId, finalAmount, encodeMetadata(5000, 2000), metaSig);
 
-        (,,,uint128 sSettled,,,,,AntseedChannels.ChannelStatus sStatus) = channels.channels(channelId);
+        (,,, uint128 sSettled,,,,, AntseedChannels.ChannelStatus sStatus) = channels.channels(channelId);
         assertTrue(sStatus == AntseedChannels.ChannelStatus.Settled);
         assertEq(sSettled, USDC_60);
 
@@ -787,7 +760,7 @@ contract AntseedChannelsTest is Test {
         vm.prank(seller);
         channels.reserve(buyer, salt, USDC_50, deadline, reserveSig);
 
-        (,,,,,,,,AntseedChannels.ChannelStatus sStatus) = channels.channels(channelId);
+        (,,,,,,,, AntseedChannels.ChannelStatus sStatus) = channels.channels(channelId);
         assertTrue(sStatus == AntseedChannels.ChannelStatus.Active);
     }
 
@@ -814,10 +787,13 @@ contract AntseedChannelsTest is Test {
         bytes memory reserveSig = signReserveAuth(BUYER_PK, channelId, newMax, newDeadline);
 
         vm.prank(seller);
-        channels.topUp(channelId, settleAmount, encodeMetadata(5000, 2000), spendingSig, newMax, newDeadline, reserveSig);
+        channels.topUp(
+            channelId, settleAmount, encodeMetadata(5000, 2000), spendingSig, newMax, newDeadline, reserveSig
+        );
 
         // Verify channel state updated
-        (,, uint128 sDeposit, uint128 sSettled,,uint256 sDeadline,,,AntseedChannels.ChannelStatus sStatus) = channels.channels(channelId);
+        (,, uint128 sDeposit, uint128 sSettled,, uint256 sDeadline,,, AntseedChannels.ChannelStatus sStatus) =
+            channels.channels(channelId);
         assertTrue(sStatus == AntseedChannels.ChannelStatus.Active);
         assertEq(sDeposit, USDC_150);
         assertEq(sSettled, settleAmount);
@@ -846,7 +822,9 @@ contract AntseedChannelsTest is Test {
 
         vm.prank(seller);
         vm.expectRevert(AntseedChannels.TopUpThresholdNotMet.selector);
-        channels.topUp(channelId, settleAmount, encodeMetadata(3000, 1000), spendingSig, newMax, newDeadline, reserveSig);
+        channels.topUp(
+            channelId, settleAmount, encodeMetadata(3000, 1000), spendingSig, newMax, newDeadline, reserveSig
+        );
     }
 
     function test_topUp_revert_newAmountNotHigher() public {
@@ -863,7 +841,9 @@ contract AntseedChannelsTest is Test {
 
         vm.prank(seller);
         vm.expectRevert(AntseedChannels.TopUpAmountTooLow.selector);
-        channels.topUp(channelId, settleAmount, encodeMetadata(5000, 2000), spendingSig, USDC_100, newDeadline, reserveSig);
+        channels.topUp(
+            channelId, settleAmount, encodeMetadata(5000, 2000), spendingSig, USDC_100, newDeadline, reserveSig
+        );
     }
 
     function test_topUp_revert_notSeller() public {
@@ -878,7 +858,9 @@ contract AntseedChannelsTest is Test {
 
         vm.prank(randomUser);
         vm.expectRevert(AntseedChannels.NotAuthorized.selector);
-        channels.topUp(channelId, settleAmount, encodeMetadata(5000, 2000), spendingSig, newMax, newDeadline, reserveSig);
+        channels.topUp(
+            channelId, settleAmount, encodeMetadata(5000, 2000), spendingSig, newMax, newDeadline, reserveSig
+        );
     }
 
     function test_topUp_revert_expiredDeadline() public {
@@ -893,7 +875,9 @@ contract AntseedChannelsTest is Test {
 
         vm.prank(seller);
         vm.expectRevert(AntseedChannels.ChannelExpired.selector);
-        channels.topUp(channelId, settleAmount, encodeMetadata(5000, 2000), spendingSig, newMax, pastDeadline, reserveSig);
+        channels.topUp(
+            channelId, settleAmount, encodeMetadata(5000, 2000), spendingSig, newMax, pastDeadline, reserveSig
+        );
     }
 
     function test_topUp_revert_invalidSignature() public {
@@ -923,7 +907,9 @@ contract AntseedChannelsTest is Test {
         bytes memory reserveSig = signReserveAuth(BUYER_PK, channelId, newMax, newDeadline);
 
         vm.prank(seller);
-        channels.topUp(channelId, settleAmount1, encodeMetadata(5000, 2000), spendingSig1, newMax, newDeadline, reserveSig);
+        channels.topUp(
+            channelId, settleAmount1, encodeMetadata(5000, 2000), spendingSig1, newMax, newDeadline, reserveSig
+        );
 
         // Continue settling up to 120 cumulative
         uint128 settleAmount2 = 120_000_000;
@@ -959,18 +945,10 @@ contract AntseedChannelsTest is Test {
     //                   OPERATOR TESTS
     // ═══════════════════════════════════════════════════════════════════
 
-    bytes32 constant SET_OPERATOR_TYPEHASH = keccak256(
-        "SetOperator(address operator,uint256 nonce)"
-    );
+    bytes32 constant SET_OPERATOR_TYPEHASH = keccak256("SetOperator(address operator,uint256 nonce)");
 
-    function signSetOperator(
-        uint256 buyerPk,
-        address operator,
-        uint256 nonce
-    ) internal view returns (bytes memory) {
-        bytes32 structHash = keccak256(
-            abi.encode(SET_OPERATOR_TYPEHASH, operator, nonce)
-        );
+    function signSetOperator(uint256 buyerPk, address operator, uint256 nonce) internal view returns (bytes memory) {
+        bytes32 structHash = keccak256(abi.encode(SET_OPERATOR_TYPEHASH, operator, nonce));
         bytes32 digest = _hashTypedDataDeposits(structHash);
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(buyerPk, digest);
         return abi.encodePacked(r, s, v);
@@ -1080,7 +1058,7 @@ contract AntseedChannelsTest is Test {
         vm.prank(buyerOperator);
         channels.requestClose(channelId);
 
-        (,,,,,,,uint256 closeRequestedAt,) = channels.channels(channelId);
+        (,,,,,,, uint256 closeRequestedAt,) = channels.channels(channelId);
         assertTrue(closeRequestedAt > 0);
     }
 
@@ -1125,5 +1103,4 @@ contract AntseedChannelsTest is Test {
         vm.expectRevert(AntseedChannels.NotAuthorized.selector);
         channels.requestClose(channelId);
     }
-
 }

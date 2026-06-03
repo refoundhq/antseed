@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import { ERC20 } from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 
 /**
  * @dev Minimal replica of Venice's DIEM contract for Foundry tests.
@@ -16,6 +16,7 @@ contract MockDiem is ERC20 {
         uint256 coolDownEnd;
         uint256 coolDownAmount;
     }
+
     mapping(address => StakedInfo) public stakedInfos;
     uint256 public totalStaked;
 
@@ -23,9 +24,13 @@ contract MockDiem is ERC20 {
         cooldownDuration = _cooldownDuration;
     }
 
-    function mint(address to, uint256 amount) external { _mint(to, amount); }
+    function mint(address to, uint256 amount) external {
+        _mint(to, amount);
+    }
 
-    function setCooldownDuration(uint256 _cd) external { cooldownDuration = _cd; }
+    function setCooldownDuration(uint256 _cd) external {
+        cooldownDuration = _cd;
+    }
 
     function stake(uint256 amount) external {
         require(amount > 0, "STAKE_ZERO");

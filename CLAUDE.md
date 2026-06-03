@@ -108,7 +108,6 @@ packages/contracts/
 ├── AntseedChannels.sol      Payment channel lifecycle, ReserveAuth + SpendingAuth (swappable, holds NO USDC)
 ├── AntseedEmissions.sol     ANTS token emissions (USDC volume-based)
 ├── AntseedSlashing.sol      Swappable slashing logic for staked sellers
-├── AntseedSubPool.sol       Subscription pool
 ├── ANTSToken.sol            ANTS ERC-20 token (52M max supply)
 ├── MockERC8004Registry.sol  Mock ERC-8004 IdentityRegistry (local testing only)
 └── MockUSDC.sol             Test USDC
