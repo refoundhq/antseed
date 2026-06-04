@@ -2,7 +2,7 @@
 pragma solidity ^0.8.24;
 
 import "forge-std/Test.sol";
-import "../payments/AntseedChannels.sol";
+import { IAntseedChannels } from "../interfaces/IAntseedChannels.sol";
 import "../payments/AntseedDeposits.sol";
 import "../staking/AntseedStaking.sol";
 import "./mocks/MockERC8004Registry.sol";
@@ -17,7 +17,7 @@ contract AntseedChannelsTest is Test {
     AntseedStats public externalStats;
     AntseedStaking public staking;
     AntseedDeposits public deposits;
-    AntseedChannels public channels;
+    IAntseedChannels public channels;
 
     // Deterministic private keys
     uint256 constant BUYER_PK = 0xA11CE;
@@ -57,7 +57,8 @@ contract AntseedChannelsTest is Test {
         antseedRegistry = new AntseedRegistry();
         staking = new AntseedStaking(address(usdc), address(antseedRegistry));
         deposits = new AntseedDeposits(address(usdc));
-        channels = new AntseedChannels(address(antseedRegistry));
+        channels =
+            IAntseedChannels(deployCode("AntseedChannels.sol:AntseedChannels", abi.encode(address(antseedRegistry))));
         externalStats = new AntseedStats();
 
         // Wire registry
@@ -207,7 +208,7 @@ contract AntseedChannelsTest is Test {
             uint256 sDeadline,
             uint256 sSettledAt,
             ,
-            AntseedChannels.ChannelStatus sStatus
+            IAntseedChannels.ChannelStatus sStatus
         ) = channels.channels(channelId);
 
         assertEq(sBuyer, buyer);
@@ -216,7 +217,7 @@ contract AntseedChannelsTest is Test {
         assertEq(sSettled, 0);
         assertGt(sDeadline, 0);
         assertEq(sSettledAt, 0);
-        assertTrue(sStatus == AntseedChannels.ChannelStatus.Active);
+        assertTrue(sStatus == IAntseedChannels.ChannelStatus.Active);
 
         // USDC stays in Deposits (locked via reserved)
         assertEq(usdc.balanceOf(address(channels)), 0);
@@ -241,7 +242,7 @@ contract AntseedChannelsTest is Test {
         bytes memory reserveSig = signReserveAuth(BUYER_PK, channelId, USDC_50, deadline);
 
         vm.prank(seller);
-        vm.expectRevert(AntseedChannels.SellerNotStaked.selector);
+        vm.expectRevert(IAntseedChannels.SellerNotStaked.selector);
         channels.reserve(buyer, salt, USDC_50, deadline, reserveSig);
     }
 
@@ -256,7 +257,7 @@ contract AntseedChannelsTest is Test {
         bytes memory reserveSig = signReserveAuth(BUYER_PK, channelId, USDC_50, pastDeadline);
 
         vm.prank(seller);
-        vm.expectRevert(AntseedChannels.ChannelExpired.selector);
+        vm.expectRevert(IAntseedChannels.ChannelExpired.selector);
         channels.reserve(buyer, salt, USDC_50, pastDeadline, reserveSig);
     }
 
@@ -272,7 +273,7 @@ contract AntseedChannelsTest is Test {
         bytes memory badSig = signReserveAuth(RANDOM_PK, channelId, USDC_50, deadline);
 
         vm.prank(seller);
-        vm.expectRevert(AntseedChannels.InvalidSignature.selector);
+        vm.expectRevert(IAntseedChannels.InvalidSignature.selector);
         channels.reserve(buyer, salt, USDC_50, deadline, badSig);
     }
 
@@ -290,7 +291,7 @@ contract AntseedChannelsTest is Test {
         bytes memory reserveSig = signReserveAuth(BUYER_PK, channelId, overCap, deadline);
 
         vm.prank(seller);
-        vm.expectRevert(AntseedChannels.FirstSignCapExceeded.selector);
+        vm.expectRevert(IAntseedChannels.FirstSignCapExceeded.selector);
         channels.reserve(buyer, salt, overCap, deadline, reserveSig);
     }
 
@@ -303,7 +304,7 @@ contract AntseedChannelsTest is Test {
         bytes memory reserveSig = signReserveAuth(BUYER_PK, channelId, USDC_30, deadline);
 
         vm.prank(seller);
-        vm.expectRevert(AntseedChannels.ChannelExists.selector);
+        vm.expectRevert(IAntseedChannels.ChannelExists.selector);
         channels.reserve(buyer, salt, USDC_30, deadline, reserveSig);
     }
 
@@ -325,10 +326,10 @@ contract AntseedChannelsTest is Test {
         channels.close(channelId, finalAmount, encodeMetadata(inputTokens, outputTokens), metaSig);
 
         // Assert channel state
-        (,,, uint128 sSettled,,, uint256 sSettledAt,, AntseedChannels.ChannelStatus sStatus) =
+        (,,, uint128 sSettled,,, uint256 sSettledAt,, IAntseedChannels.ChannelStatus sStatus) =
             channels.channels(channelId);
 
-        assertTrue(sStatus == AntseedChannels.ChannelStatus.Settled);
+        assertTrue(sStatus == IAntseedChannels.ChannelStatus.Settled);
         assertEq(sSettled, USDC_60);
         assertGt(sSettledAt, 0);
 
@@ -347,7 +348,7 @@ contract AntseedChannelsTest is Test {
 
         // Stats updated
         uint256 sellerAgentId = staking.getAgentId(seller);
-        AntseedChannels.AgentStats memory s = channels.getAgentStats(sellerAgentId);
+        IAntseedChannels.AgentStats memory s = channels.getAgentStats(sellerAgentId);
         assertEq(s.channelCount, 1);
         assertEq(s.totalVolumeUsdc, USDC_60);
     }
@@ -362,9 +363,9 @@ contract AntseedChannelsTest is Test {
         vm.prank(seller);
         channels.close(channelId, finalAmount, encodeMetadata(10000, 5000), metaSig);
 
-        (,,, uint128 sSettled,,,,, AntseedChannels.ChannelStatus sStatus) = channels.channels(channelId);
+        (,,, uint128 sSettled,,,,, IAntseedChannels.ChannelStatus sStatus) = channels.channels(channelId);
         assertEq(sSettled, USDC_100);
-        assertTrue(sStatus == AntseedChannels.ChannelStatus.Settled);
+        assertTrue(sStatus == IAntseedChannels.ChannelStatus.Settled);
 
         // Buyer should have 0 available (no refund)
         (uint256 available,,) = deposits.getBuyerBalance(buyer);
@@ -394,7 +395,7 @@ contract AntseedChannelsTest is Test {
         bytes memory metaSig = signSpendingAuth(BUYER_PK, channelId, USDC_60, 0, 0);
 
         vm.prank(randomUser);
-        vm.expectRevert(AntseedChannels.NotAuthorized.selector);
+        vm.expectRevert(IAntseedChannels.NotAuthorized.selector);
         channels.close(channelId, USDC_60, encodeMetadata(0, 0), metaSig);
     }
 
@@ -406,7 +407,7 @@ contract AntseedChannelsTest is Test {
         bytes memory badMetaSig = signSpendingAuth(RANDOM_PK, channelId, USDC_60, 0, 0);
 
         vm.prank(seller);
-        vm.expectRevert(AntseedChannels.InvalidSignature.selector);
+        vm.expectRevert(IAntseedChannels.InvalidSignature.selector);
         channels.close(channelId, USDC_60, encodeMetadata(0, 0), badMetaSig);
     }
 
@@ -422,7 +423,7 @@ contract AntseedChannelsTest is Test {
         // Try again — channel already Settled
         bytes memory metaSig2 = signSpendingAuth(BUYER_PK, channelId, USDC_30, 0, 0);
         vm.prank(seller);
-        vm.expectRevert(AntseedChannels.ChannelNotActive.selector);
+        vm.expectRevert(IAntseedChannels.ChannelNotActive.selector);
         channels.close(channelId, USDC_30, encodeMetadata(0, 0), metaSig2);
     }
 
@@ -441,9 +442,9 @@ contract AntseedChannelsTest is Test {
         channels.settle(channelId, amount1, encodeMetadata(1000, 500), metaSig1);
 
         // Channel still active
-        (,, uint128 sDeposit, uint128 sSettled,,,,, AntseedChannels.ChannelStatus sStatus) =
+        (,, uint128 sDeposit, uint128 sSettled,,,,, IAntseedChannels.ChannelStatus sStatus) =
             channels.channels(channelId);
-        assertTrue(sStatus == AntseedChannels.ChannelStatus.Active);
+        assertTrue(sStatus == IAntseedChannels.ChannelStatus.Active);
         assertEq(sDeposit, USDC_100);
         assertEq(sSettled, USDC_30);
 
@@ -472,8 +473,8 @@ contract AntseedChannelsTest is Test {
         channels.close(channelId, finalAmount, encodeMetadata(3000, 1500), metaSig2);
 
         // Channel settled
-        (,,, uint128 sSettled,,,,, AntseedChannels.ChannelStatus sStatus) = channels.channels(channelId);
-        assertTrue(sStatus == AntseedChannels.ChannelStatus.Settled);
+        (,,, uint128 sSettled,,,,, IAntseedChannels.ChannelStatus sStatus) = channels.channels(channelId);
+        assertTrue(sStatus == IAntseedChannels.ChannelStatus.Settled);
         assertEq(sSettled, USDC_60);
 
         // Total seller payouts = payout from 30 (settle) + payout from delta 30 (close)
@@ -501,7 +502,7 @@ contract AntseedChannelsTest is Test {
 
         // Can't withdraw yet — need to wait for grace period (15 min)
         vm.prank(buyerOperator);
-        vm.expectRevert(AntseedChannels.CloseNotReady.selector);
+        vm.expectRevert(IAntseedChannels.CloseNotReady.selector);
         channels.withdraw(channelId);
 
         // Warp past grace period
@@ -512,8 +513,8 @@ contract AntseedChannelsTest is Test {
         channels.withdraw(channelId);
 
         // Channel timed out (withdrawn)
-        (,,,,,,,, AntseedChannels.ChannelStatus sStatus) = channels.channels(channelId);
-        assertTrue(sStatus == AntseedChannels.ChannelStatus.TimedOut);
+        (,,,,,,,, IAntseedChannels.ChannelStatus sStatus) = channels.channels(channelId);
+        assertTrue(sStatus == IAntseedChannels.ChannelStatus.TimedOut);
 
         // Full deposit returned to buyer
         (uint256 available,,) = deposits.getBuyerBalance(buyer);
@@ -526,12 +527,12 @@ contract AntseedChannelsTest is Test {
 
         // Seller can't request close
         vm.prank(seller);
-        vm.expectRevert(AntseedChannels.NotAuthorized.selector);
+        vm.expectRevert(IAntseedChannels.NotAuthorized.selector);
         channels.requestClose(channelId);
 
         // Random user can't request close
         vm.prank(randomUser);
-        vm.expectRevert(AntseedChannels.NotAuthorized.selector);
+        vm.expectRevert(IAntseedChannels.NotAuthorized.selector);
         channels.requestClose(channelId);
     }
 
@@ -543,7 +544,7 @@ contract AntseedChannelsTest is Test {
         channels.requestClose(channelId);
 
         vm.prank(buyerOperator);
-        vm.expectRevert(AntseedChannels.CloseAlreadyRequested.selector);
+        vm.expectRevert(IAntseedChannels.CloseAlreadyRequested.selector);
         channels.requestClose(channelId);
     }
 
@@ -558,7 +559,7 @@ contract AntseedChannelsTest is Test {
 
         // Seller can't withdraw
         vm.prank(seller);
-        vm.expectRevert(AntseedChannels.NotAuthorized.selector);
+        vm.expectRevert(IAntseedChannels.NotAuthorized.selector);
         channels.withdraw(channelId);
     }
 
@@ -568,7 +569,7 @@ contract AntseedChannelsTest is Test {
 
         // withdraw without calling requestClose first
         vm.prank(buyerOperator);
-        vm.expectRevert(AntseedChannels.CloseNotReady.selector);
+        vm.expectRevert(IAntseedChannels.CloseNotReady.selector);
         channels.withdraw(channelId);
     }
 
@@ -587,8 +588,8 @@ contract AntseedChannelsTest is Test {
         vm.prank(seller);
         channels.close(channelId, finalAmount, encodeMetadata(5000, 2000), metaSig);
 
-        (,,, uint128 sSettled,,,,, AntseedChannels.ChannelStatus sStatus) = channels.channels(channelId);
-        assertTrue(sStatus == AntseedChannels.ChannelStatus.Settled);
+        (,,, uint128 sSettled,,,,, IAntseedChannels.ChannelStatus sStatus) = channels.channels(channelId);
+        assertTrue(sStatus == IAntseedChannels.ChannelStatus.Settled);
         assertEq(sSettled, USDC_60);
 
         // Buyer gets refund of 40 USDC
@@ -611,8 +612,8 @@ contract AntseedChannelsTest is Test {
         vm.prank(seller);
         channels.settle(channelId, amount, encodeMetadata(1000, 500), metaSig);
 
-        (,,, uint128 sSettled,,,,, AntseedChannels.ChannelStatus sStatus) = channels.channels(channelId);
-        assertTrue(sStatus == AntseedChannels.ChannelStatus.Active);
+        (,,, uint128 sSettled,,,,, IAntseedChannels.ChannelStatus sStatus) = channels.channels(channelId);
+        assertTrue(sStatus == IAntseedChannels.ChannelStatus.Active);
         assertEq(sSettled, USDC_30);
     }
 
@@ -654,7 +655,7 @@ contract AntseedChannelsTest is Test {
         channels.close(channelId, USDC_50, encodeMetadata(inputToks, outputToks), metaSig);
 
         uint256 sellerAgentId = staking.getAgentId(seller);
-        AntseedChannels.AgentStats memory s = channels.getAgentStats(sellerAgentId);
+        IAntseedChannels.AgentStats memory s = channels.getAgentStats(sellerAgentId);
         assertEq(s.channelCount, 1);
         assertEq(s.totalVolumeUsdc, USDC_50);
     }
@@ -702,7 +703,7 @@ contract AntseedChannelsTest is Test {
     }
 
     function test_setPlatformFeeBps_revert_aboveMax() public {
-        vm.expectRevert(AntseedChannels.InvalidFee.selector);
+        vm.expectRevert(IAntseedChannels.InvalidFee.selector);
         channels.setPlatformFeeBps(1001);
     }
 
@@ -713,7 +714,7 @@ contract AntseedChannelsTest is Test {
     }
 
     function test_setRegistry_revert_zeroAddress() public {
-        vm.expectRevert(AntseedChannels.InvalidAddress.selector);
+        vm.expectRevert(IAntseedChannels.InvalidAddress.selector);
         channels.setRegistry(address(0));
     }
 
@@ -760,8 +761,8 @@ contract AntseedChannelsTest is Test {
         vm.prank(seller);
         channels.reserve(buyer, salt, USDC_50, deadline, reserveSig);
 
-        (,,,,,,,, AntseedChannels.ChannelStatus sStatus) = channels.channels(channelId);
-        assertTrue(sStatus == AntseedChannels.ChannelStatus.Active);
+        (,,,,,,,, IAntseedChannels.ChannelStatus sStatus) = channels.channels(channelId);
+        assertTrue(sStatus == IAntseedChannels.ChannelStatus.Active);
     }
 
     function test_pause_revert_notOwner() public {
@@ -792,9 +793,9 @@ contract AntseedChannelsTest is Test {
         );
 
         // Verify channel state updated
-        (,, uint128 sDeposit, uint128 sSettled,, uint256 sDeadline,,, AntseedChannels.ChannelStatus sStatus) =
+        (,, uint128 sDeposit, uint128 sSettled,, uint256 sDeadline,,, IAntseedChannels.ChannelStatus sStatus) =
             channels.channels(channelId);
-        assertTrue(sStatus == AntseedChannels.ChannelStatus.Active);
+        assertTrue(sStatus == IAntseedChannels.ChannelStatus.Active);
         assertEq(sDeposit, USDC_150);
         assertEq(sSettled, settleAmount);
         assertEq(sDeadline, newDeadline);
@@ -821,7 +822,7 @@ contract AntseedChannelsTest is Test {
         bytes memory reserveSig = signReserveAuth(BUYER_PK, channelId, newMax, newDeadline);
 
         vm.prank(seller);
-        vm.expectRevert(AntseedChannels.TopUpThresholdNotMet.selector);
+        vm.expectRevert(IAntseedChannels.TopUpThresholdNotMet.selector);
         channels.topUp(
             channelId, settleAmount, encodeMetadata(3000, 1000), spendingSig, newMax, newDeadline, reserveSig
         );
@@ -840,7 +841,7 @@ contract AntseedChannelsTest is Test {
         bytes memory reserveSig = signReserveAuth(BUYER_PK, channelId, USDC_100, newDeadline);
 
         vm.prank(seller);
-        vm.expectRevert(AntseedChannels.TopUpAmountTooLow.selector);
+        vm.expectRevert(IAntseedChannels.TopUpAmountTooLow.selector);
         channels.topUp(
             channelId, settleAmount, encodeMetadata(5000, 2000), spendingSig, USDC_100, newDeadline, reserveSig
         );
@@ -857,7 +858,7 @@ contract AntseedChannelsTest is Test {
         bytes memory reserveSig = signReserveAuth(BUYER_PK, channelId, newMax, newDeadline);
 
         vm.prank(randomUser);
-        vm.expectRevert(AntseedChannels.NotAuthorized.selector);
+        vm.expectRevert(IAntseedChannels.NotAuthorized.selector);
         channels.topUp(
             channelId, settleAmount, encodeMetadata(5000, 2000), spendingSig, newMax, newDeadline, reserveSig
         );
@@ -874,7 +875,7 @@ contract AntseedChannelsTest is Test {
         bytes memory reserveSig = signReserveAuth(BUYER_PK, channelId, newMax, pastDeadline);
 
         vm.prank(seller);
-        vm.expectRevert(AntseedChannels.ChannelExpired.selector);
+        vm.expectRevert(IAntseedChannels.ChannelExpired.selector);
         channels.topUp(
             channelId, settleAmount, encodeMetadata(5000, 2000), spendingSig, newMax, pastDeadline, reserveSig
         );
@@ -891,7 +892,7 @@ contract AntseedChannelsTest is Test {
         bytes memory badSig = signReserveAuth(RANDOM_PK, channelId, newMax, newDeadline);
 
         vm.prank(seller);
-        vm.expectRevert(AntseedChannels.InvalidSignature.selector);
+        vm.expectRevert(IAntseedChannels.InvalidSignature.selector);
         channels.topUp(channelId, settleAmount, encodeMetadata(5000, 2000), spendingSig, newMax, newDeadline, badSig);
     }
 
@@ -923,8 +924,8 @@ contract AntseedChannelsTest is Test {
         vm.prank(seller);
         channels.close(channelId, finalAmount, encodeMetadata(10000, 4000), closeSig);
 
-        (,,, uint128 sSettledFinal,,,,, AntseedChannels.ChannelStatus sStatusFinal) = channels.channels(channelId);
-        assertTrue(sStatusFinal == AntseedChannels.ChannelStatus.Settled);
+        (,,, uint128 sSettledFinal,,,,, IAntseedChannels.ChannelStatus sStatusFinal) = channels.channels(channelId);
+        assertTrue(sStatusFinal == IAntseedChannels.ChannelStatus.Settled);
         assertEq(sSettledFinal, 130_000_000);
 
         // Buyer refund = 150 - 130 = 20 USDC
@@ -1090,7 +1091,7 @@ contract AntseedChannelsTest is Test {
 
         // Random user cannot close
         vm.prank(randomUser);
-        vm.expectRevert(AntseedChannels.NotAuthorized.selector);
+        vm.expectRevert(IAntseedChannels.NotAuthorized.selector);
         channels.requestClose(channelId);
     }
 
@@ -1100,7 +1101,7 @@ contract AntseedChannelsTest is Test {
 
         // Seller is not the operator — should not be able to close
         vm.prank(seller);
-        vm.expectRevert(AntseedChannels.NotAuthorized.selector);
+        vm.expectRevert(IAntseedChannels.NotAuthorized.selector);
         channels.requestClose(channelId);
     }
 }

@@ -799,10 +799,7 @@ contract AntseedEmissionsGateTest is Test {
         bytes32 sellerPoolProgramId = keccak256("recognized-seller-usage-v1");
         bytes32 buyerProgramId = keccak256("recognized-buyer-usage-v1");
         address washBuyer = address(0x9999);
-        uint256 honestBuyerCount = 1_000;
-        uint256 honestBuyerVolume = 1_000;
-        uint256 honestTotalVolume = honestBuyerCount * honestBuyerVolume;
-        uint256 washVolume = 100_000_000_000;
+        StressRun memory run;
 
         _deployGate(4);
 
@@ -825,73 +822,77 @@ contract AntseedEmissionsGateTest is Test {
         token.approve(address(sellerPools), 1_000_000 ether);
         sellerAgentLookup.setAgent(seller, _agentId(seller));
         identityRegistry.setOwner(_agentId(seller), seller);
-        uint256 honestPositionId = sellerPools.stake(_agentId(seller), 1_000_000 ether, 52);
+        run.firstPositionId = sellerPools.stake(_agentId(seller), 1_000_000 ether, 52);
         vm.stopPrank();
 
         vm.startPrank(otherSeller);
         token.approve(address(sellerPools), 100 ether);
         sellerAgentLookup.setAgent(otherSeller, _agentId(otherSeller));
         identityRegistry.setOwner(_agentId(otherSeller), otherSeller);
-        uint256 washPositionId = sellerPools.stake(_agentId(otherSeller), 100 ether, 52);
+        run.washPositionId = sellerPools.stake(_agentId(otherSeller), 100 ether, 52);
         vm.stopPrank();
 
-        _warpGateEpoch(5);
-        for (uint256 i = 0; i < honestBuyerCount; i++) {
-            address honestBuyer = address(uint160(0x20000 + i));
-            usageAccounting.accruePoints(
-                keccak256(abi.encodePacked("honest", i)), honestBuyer, seller, honestBuyerVolume
-            );
+        {
+            uint256 honestBuyerCount = 1_000;
+            uint256 honestBuyerVolume = 1_000;
+            uint256 honestTotalVolume = honestBuyerCount * honestBuyerVolume;
+            uint256 washVolume = 100_000_000_000;
+
+            _warpGateEpoch(5);
+            for (uint256 i = 0; i < honestBuyerCount; i++) {
+                address honestBuyer = address(uint160(0x20000 + i));
+                usageAccounting.accruePoints(
+                    keccak256(abi.encodePacked("honest", i)), honestBuyer, seller, honestBuyerVolume
+                );
+            }
+            usageAccounting.accruePoints(keccak256("wash"), washBuyer, otherSeller, washVolume);
+
+            uint256 honestAgentId = _agentId(seller);
+            uint256 washAgentId = _agentId(otherSeller);
+            uint256 honestPower = sellerPools.poolPowerWeightAtEpoch(honestAgentId, 5);
+            uint256 washPower = sellerPools.poolPowerWeightAtEpoch(washAgentId, 5);
+            run.firstWeightedPoints = honestTotalVolume * honestPower;
+            run.washWeightedPoints = washVolume * washPower;
+            run.expectedTotalWeightedPoints = run.firstWeightedPoints + run.washWeightedPoints;
+
+            assertEq(usageAccounting.agentPoolPointsByEpoch(5, honestAgentId), honestTotalVolume);
+            assertEq(usageAccounting.agentPoolPointsByEpoch(5, washAgentId), washVolume);
+            assertEq(usageAccounting.weightedPoolPointsByEpoch(5, washAgentId), washVolume * washPower);
+            assertEq(usageAccounting.weightedPoolPointsByEpoch(5, honestAgentId), run.firstWeightedPoints);
+            assertEq(usageAccounting.weightedPoolPointsByEpoch(5, washAgentId), run.washWeightedPoints);
+            assertEq(usageAccounting.totalWeightedPoolPointsByEpoch(5), run.expectedTotalWeightedPoints);
+
+            assertEq(usageAccounting.weightedBuyerPointsByEpoch(5, washBuyer), run.washWeightedPoints);
+            assertEq(usageAccounting.totalWeightedBuyerPointsByEpoch(5), run.expectedTotalWeightedPoints);
         }
-        usageAccounting.accruePoints(keccak256("wash"), washBuyer, otherSeller, washVolume);
-
-        uint256 honestAgentId = _agentId(seller);
-        uint256 washAgentId = _agentId(otherSeller);
-        uint256 honestPower = sellerPools.poolPowerWeightAtEpoch(honestAgentId, 5);
-        uint256 washPower = sellerPools.poolPowerWeightAtEpoch(washAgentId, 5);
-        uint256 expectedWashWeightedPoints = washVolume * washPower;
-        uint256 expectedHonestWeightedPoints = honestTotalVolume * honestPower;
-        uint256 expectedTotalWeightedPoints = expectedHonestWeightedPoints + expectedWashWeightedPoints;
-        uint256 expectedWashBuyerWeightedPoints = washVolume * washPower;
-        uint256 expectedTotalBuyerWeightedPoints = expectedHonestWeightedPoints + expectedWashBuyerWeightedPoints;
-
-        assertEq(usageAccounting.agentPoolPointsByEpoch(5, honestAgentId), honestTotalVolume);
-        assertEq(usageAccounting.agentPoolPointsByEpoch(5, washAgentId), washVolume);
-        assertEq(usageAccounting.weightedPoolPointsByEpoch(5, washAgentId), washVolume * washPower);
-        assertEq(usageAccounting.weightedPoolPointsByEpoch(5, honestAgentId), expectedHonestWeightedPoints);
-        assertEq(usageAccounting.weightedPoolPointsByEpoch(5, washAgentId), expectedWashWeightedPoints);
-        assertEq(usageAccounting.totalWeightedPoolPointsByEpoch(5), expectedTotalWeightedPoints);
-
-        assertEq(usageAccounting.weightedBuyerPointsByEpoch(5, washBuyer), expectedWashBuyerWeightedPoints);
-        assertEq(usageAccounting.totalWeightedBuyerPointsByEpoch(5), expectedTotalBuyerWeightedPoints);
 
         _warpGateEpoch(6);
         uint256 sellerProgramBudget = programs.programEpochBudget(sellerPoolProgramId, 5);
         uint256 buyerProgramBudget = programs.programEpochBudget(buyerProgramId, 5);
-        uint256 expectedWashSellerReward =
-            (sellerProgramBudget * expectedWashWeightedPoints) / expectedTotalWeightedPoints;
-        uint256 expectedHonestSellerReward =
-            (sellerProgramBudget * expectedHonestWeightedPoints) / expectedTotalWeightedPoints;
-        uint256 expectedWashBuyerReward =
-            (buyerProgramBudget * expectedWashBuyerWeightedPoints) / expectedTotalBuyerWeightedPoints;
 
         (uint256 honestGross, uint256 honestClaimable, uint256 honestBurned) =
-            sellerUsageRewards.pendingStakerReward(honestPositionId, 5);
+            sellerUsageRewards.pendingStakerReward(run.firstPositionId, 5);
         (uint256 washGross, uint256 washClaimable, uint256 washBurned) =
-            sellerUsageRewards.pendingStakerReward(washPositionId, 5);
-        assertEq(honestGross, expectedHonestSellerReward);
-        assertEq(washGross, expectedWashSellerReward);
+            sellerUsageRewards.pendingStakerReward(run.washPositionId, 5);
+        assertEq(honestGross, (sellerProgramBudget * run.firstWeightedPoints) / run.expectedTotalWeightedPoints);
+        assertEq(washGross, (sellerProgramBudget * run.washWeightedPoints) / run.expectedTotalWeightedPoints);
         assertEq(washBurned, washGross - washClaimable);
         assertEq(honestBurned, honestGross - honestClaimable);
 
-        uint256 washBuyerCap =
-            (buyerProgramBudget * buyerUsageRewards.MAX_REWARD_SHARE_BPS()) / buyerUsageRewards.BPS_DENOMINATOR();
-        uint256 cappedWashBuyerReward = expectedWashBuyerReward < washBuyerCap ? expectedWashBuyerReward : washBuyerCap;
-        assertEq(buyerUsageRewards.pendingBuyerReward(washBuyer, 5), cappedWashBuyerReward);
+        {
+            uint256 expectedWashBuyerReward =
+                (buyerProgramBudget * run.washWeightedPoints) / run.expectedTotalWeightedPoints;
+            uint256 washBuyerCap =
+                (buyerProgramBudget * buyerUsageRewards.MAX_REWARD_SHARE_BPS()) / buyerUsageRewards.BPS_DENOMINATOR();
+            uint256 cappedWashBuyerReward =
+                expectedWashBuyerReward < washBuyerCap ? expectedWashBuyerReward : washBuyerCap;
+            assertEq(buyerUsageRewards.pendingBuyerReward(washBuyer, 5), cappedWashBuyerReward);
+            assertLt(buyerUsageRewards.pendingBuyerReward(washBuyer, 5), expectedWashBuyerReward);
+        }
 
-        assertGt(expectedWashSellerReward, expectedHonestSellerReward);
+        assertGt(run.washWeightedPoints, run.firstWeightedPoints);
         assertLt(washClaimable, honestClaimable);
         assertLt(washClaimable, washGross);
-        assertLt(buyerUsageRewards.pendingBuyerReward(washBuyer, 5), expectedWashBuyerReward);
     }
 
     function test_stressThousandAgentsAndBuyersClaimFromSavedTotals() public {
@@ -920,6 +921,7 @@ contract AntseedEmissionsGateTest is Test {
         programs.setRewardProgram(sellerPoolProgramId, address(sellerUsageRewards), address(0), 7_000, 4, 0, true);
         programs.setRewardProgram(buyerProgramId, address(buyerUsageRewards), address(0), 500, 4, 0, true);
 
+        vm.pauseGasMetering();
         for (uint256 i = 0; i < agentCount; i++) {
             address seller_ = address(uint160(0x30000 + i));
             uint256 stakeAmount = seller_ == washSeller ? 100 ether : 1_000 ether;
@@ -928,6 +930,7 @@ contract AntseedEmissionsGateTest is Test {
             if (seller_ == firstSeller) run.firstPositionId = positionId;
             if (seller_ == washSeller) run.washPositionId = positionId;
         }
+        vm.resumeGasMetering();
 
         _warpGateEpoch(5);
         for (uint256 i = 0; i < agentCount; i++) {
@@ -1000,7 +1003,8 @@ contract AntseedEmissionsGateTest is Test {
         address poolSeller = _createSellerPool(sellerPools, seller, 5_000, keccak256("terms"));
 
         usageAccounting.accruePoints(keccak256("same-epoch"), buyer, seller, 10);
-        assertEq(usageAccounting.sellerPointsByEpoch(4, seller), 10);
+        assertEq(usageAccounting.sellerPointsByEpoch(4, seller), 0);
+        assertEq(usageAccounting.buyerPointsByEpoch(4, buyer), 0);
         assertEq(usageAccounting.poolPointsByEpoch(4, poolSeller), 0);
         assertEq(usageAccounting.weightedPoolPointsByEpoch(4, poolSeller), 0);
 

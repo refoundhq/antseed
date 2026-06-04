@@ -4,7 +4,7 @@ pragma solidity ^0.8.24;
 import "forge-std/Test.sol";
 
 import { ANTSToken } from "../core/ANTSToken.sol";
-import { AntseedChannels } from "../payments/AntseedChannels.sol";
+import { IAntseedChannels } from "../interfaces/IAntseedChannels.sol";
 import { AntseedDeposits } from "../payments/AntseedDeposits.sol";
 import { AntseedEmissions } from "../legacy/AntseedEmissions.sol";
 import { AntseedEmissionsV2 } from "../legacy/AntseedEmissionsV2.sol";
@@ -51,7 +51,7 @@ contract AntseedEmissionsV2IntegrationTest is Test {
     AntseedRegistry antseedRegistry;
     AntseedDeposits deposits;
     AntseedStaking staking;
-    AntseedChannels channels;
+    IAntseedChannels channels;
     AntseedEmissions legacyEmissions;
     AntseedEmissionsV2 emissionsV2;
     AntseedSellerRewardsPool rewardsPool;
@@ -72,7 +72,8 @@ contract AntseedEmissionsV2IntegrationTest is Test {
         antseedRegistry = new AntseedRegistry();
         deposits = new AntseedDeposits(address(usdc));
         staking = new AntseedStaking(address(usdc), address(antseedRegistry));
-        channels = new AntseedChannels(address(antseedRegistry));
+        channels =
+            IAntseedChannels(deployCode("AntseedChannels.sol:AntseedChannels", abi.encode(address(antseedRegistry))));
         legacyEmissions = new AntseedEmissions(address(antseedRegistry), INITIAL_EMISSION, EPOCH_DURATION);
 
         antseedRegistry.setChannels(address(channels));

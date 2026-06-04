@@ -2,17 +2,17 @@
 pragma solidity ^0.8.24;
 
 import "forge-std/Test.sol";
-import "../payments/AntseedChannels.sol";
+import { IAntseedChannels } from "../interfaces/IAntseedChannels.sol";
 import "../staking/AntseedStaking.sol";
 import "../core/AntseedRegistry.sol";
 import "../payments/AntseedDeposits.sol";
 import "./mocks/MockERC8004Registry.sol";
 import "./mocks/MockUSDC.sol";
 
-/// @dev Tests for AgentStats tracking within AntseedChannels.
+/// @dev Tests for AgentStats tracking within IAntseedChannels.
 ///      Uses the Channels contract directly (stats are now inline).
 contract AntseedStatsReputationTest is Test {
-    AntseedChannels public channelsContract;
+    IAntseedChannels public channelsContract;
     AntseedStaking public staking;
     AntseedRegistry public antseedRegistry;
     AntseedDeposits public deposits;
@@ -33,7 +33,8 @@ contract AntseedStatsReputationTest is Test {
 
         antseedRegistry = new AntseedRegistry();
         deposits = new AntseedDeposits(address(usdc));
-        channelsContract = new AntseedChannels(address(antseedRegistry));
+        channelsContract =
+            IAntseedChannels(deployCode("AntseedChannels.sol:AntseedChannels", abi.encode(address(antseedRegistry))));
         staking = new AntseedStaking(address(usdc), address(antseedRegistry));
 
         antseedRegistry.setChannels(address(channelsContract));
@@ -57,7 +58,7 @@ contract AntseedStatsReputationTest is Test {
     // ── getAgentStats ──
 
     function test_getAgentStats_empty() public view {
-        AntseedChannels.AgentStats memory s = channelsContract.getAgentStats(999);
+        IAntseedChannels.AgentStats memory s = channelsContract.getAgentStats(999);
         assertEq(s.channelCount, 0);
         assertEq(s.ghostCount, 0);
         assertEq(s.totalVolumeUsdc, 0);
