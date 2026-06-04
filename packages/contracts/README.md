@@ -93,9 +93,15 @@ channelId = keccak256(abi.encode(buyer, seller, salt))
 **Owner functions:**
 - `pause()` / `unpause()` — emergency circuit breaker
 
-### AntseedStats.sol
+### AntseedStats.sol / AntseedStatsV2.sol
 
-Optional external metadata sink keyed by ERC-8004 agentId plus buyer address. Writers are managed with `AccessControl`.
+Optional external metadata sink keyed by ERC-8004 agentId plus buyer address.
+`AntseedStats.sol` is the legacy deployed V1 sink and remains V1-compatible.
+New deployments should use `AntseedStatsV2.sol`, which accepts both V1 and
+V2 metadata. When constructed or configured with a legacy stats address,
+`AntseedStatsV2` forwards a V1-compatible metadata write to the legacy sink
+after recording V2 totals locally. The legacy stats contract must grant
+`AntseedStatsV2` writer permission for forwarding to succeed.
 
 - `setWriter(address writer, bool allowed)` — admin grants or revokes write access
 - `recordMetadata(uint256 agentId, address buyer, bytes32 channelId, bytes calldata metadata)` — decodes cumulative per-channel metadata, computes deltas, and aggregates buyer-level totals
@@ -148,7 +154,7 @@ ANTS emission controller using the Synthetix reward-per-point pattern. O(1) gas 
 2. **MockERC8004Registry** — deploy for local testing (on mainnet use deployed ERC-8004)
 3. **AntseedDeposits** — deploy with `(usdcAddress)`
 4. **AntseedStaking** — deploy with `(usdcAddress, registryAddress)`
-5. **AntseedStats** — optional: deploy, set in `AntseedRegistry`, and grant `WRITER_ROLE` to Channels
+5. **AntseedStatsV2** — optional: deploy, set in `AntseedRegistry`, and grant writer permission to Channels. Set `LEGACY_STATS` during deployment to forward V1-compatible writes to an already-deployed `AntseedStats`.
 6. **AntseedChannels** — deploy with `(registryAddress)`
 7. **AntseedEmissions** — deploy with `(antsTokenAddress, channelsAddress)`, then call `antsToken.setEmissionsContract(emissions)`
 8. **AntseedSubPool** — deploy with `(usdcAddress, registryAddress)`

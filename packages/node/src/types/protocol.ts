@@ -50,7 +50,7 @@ export interface SpendingAuthPayload {
   channelId: string;
   cumulativeAmount: string;
   metadataHash: string;         // bytes32 hex
-  metadata: string;             // hex-encoded abi.encode(version, inputTokens, outputTokens, requestCount)
+  metadata: string;             // hex-encoded V1 or V2 spending metadata
   spendingAuthSig: string;      // EIP-712 SpendingAuth signature (covers amount + metadata)
   // Only for initial reserve
   reserveSalt?: string;
@@ -136,4 +136,100 @@ export interface NeedAuthPayload {
   freshInputTokens?: string;
   /** Service/model name for service-specific pricing validation. */
   service?: string;
+}
+
+// ─── Peer-Verifiable Usage Reports (0x60-0x61) ─────────────────
+
+export interface ChannelUsageReportServiceUsageLeafPayload {
+  channelId: string;
+  serviceIdHash: string;
+  catalogLeafHash: string;
+  serviceMode: string;
+  cumulativeFreshInputTokens: string;
+  cumulativeCachedInputTokens: string;
+  cumulativeOutputTokens: string;
+  cumulativeRequestCount: string;
+  cumulativeAmountPaid: string;
+}
+
+export interface ChannelUsageReportCatalogLeafPayload {
+  sellerAgentId: string;
+  sellerAddress: string;
+  serviceIdHash: string;
+  tokenizerIdHash: string;
+  inputUsdPerMillion: string;
+  cachedInputUsdPerMillion: string;
+  outputUsdPerMillion: string;
+  serviceMode: string;
+  termsHash: string;
+  validFrom: string;
+  validUntil: string;
+}
+
+export interface ChannelUsageReportReceiptLeafPayload {
+  channelId: string;
+  requestIndex: string;
+  requestIdHash: string;
+  requestHash: string;
+  responseHash: string;
+  serviceIdHash: string;
+  catalogLeafHash: string;
+  freshInputTokens: string;
+  cachedInputTokens: string;
+  outputTokens: string;
+  costUsdc: string;
+  cumulativeAmountAfterRequest: string;
+}
+
+export interface ChannelUsageReportPayload {
+  channelId: string;
+  buyer: string;
+  seller: string;
+  sellerAgentId: string;
+  cumulativeAmount: string;
+  metadata: string;
+  metadataHash: string;
+  /** Public bytes32 used to deterministically assign verifier sellers. */
+  selectionBeacon: string;
+  /** Number of eligible seller verifiers selected for this report. */
+  verifierCount: number;
+  /** Required for paid usage; omitted for free-only reports. */
+  buyerSpendingAuthSig?: string;
+  catalogRoot: string;
+  sellerCatalogSig: string;
+  serviceUsageLeaves: ChannelUsageReportServiceUsageLeafPayload[];
+  serviceCatalogLeaves: ChannelUsageReportCatalogLeafPayload[];
+  catalogMerkleProofs: Record<string, string[]>;
+  receiptLeavesOrProofs: ChannelUsageReportReceiptLeafPayload[];
+  reportedAt: number;
+}
+
+export interface ChannelReportAttestationPayload {
+  channelId: string;
+  reportHash: string;
+  seller: string;
+  sellerAgentId: string;
+  buyer: string;
+  cumulativeAmount: string;
+  metadataHash: string;
+  catalogRoot: string;
+  usageByServiceRoot: string;
+  /**
+   * Verifier seller peer address / peerId, 40 lowercase hex chars or an EVM
+   * address. This is the identity that signed the attestation and can later be
+   * scored for reputation or emissions eligibility.
+   */
+  verifier: string;
+  verifierAgentId: string;
+  timestamp: number;
+  signature: string;
+}
+
+export interface UsageReportAckPayload {
+  channelId: string;
+  reportHash: string;
+  verifierAgentId: string;
+  accepted: boolean;
+  reason?: string;
+  attestation?: ChannelReportAttestationPayload;
 }

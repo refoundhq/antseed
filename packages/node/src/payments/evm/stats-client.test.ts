@@ -4,6 +4,7 @@ import { StatsClient } from './stats-client.js';
 
 const STATS_ABI = [
   'event MetadataRecorded(uint256 indexed agentId, address indexed buyer, bytes32 indexed channelId, bytes32 metadataHash, uint256 inputTokens, uint256 outputTokens, uint256 requestCount)',
+  'event UsageReportVerificationRecorded(bytes32 indexed reportHash, uint256 indexed sellerAgentId, uint256 indexed verifierAgentId, address seller, address buyer, address verifier, bytes32 channelId, bytes32 metadataHash, bytes32 catalogRoot, bytes32 usageByServiceRoot, uint256 cumulativeAmount, bool accepted)',
 ] as const;
 
 const CONTRACT_ADDRESS = '0x0000000000000000000000000000000000000001';
@@ -33,6 +34,48 @@ function buildLog(params: {
     params.inputTokens,
     params.outputTokens,
     params.requestCount,
+  ]);
+  return {
+    topics: encoded.topics,
+    data: encoded.data,
+    blockNumber: params.blockNumber,
+    transactionHash: params.transactionHash,
+    index: params.index,
+    address: CONTRACT_ADDRESS,
+  };
+}
+
+function buildVerificationLog(params: {
+  reportHash: string;
+  sellerAgentId: bigint;
+  verifierAgentId: bigint;
+  seller: string;
+  buyer: string;
+  verifier: string;
+  channelId: string;
+  metadataHash: string;
+  catalogRoot: string;
+  usageByServiceRoot: string;
+  cumulativeAmount: bigint;
+  accepted: boolean;
+  blockNumber: number;
+  transactionHash: string;
+  index: number;
+}) {
+  const iface = new ethers.Interface(STATS_ABI);
+  const encoded = iface.encodeEventLog('UsageReportVerificationRecorded', [
+    params.reportHash,
+    params.sellerAgentId,
+    params.verifierAgentId,
+    params.seller,
+    params.buyer,
+    params.verifier,
+    params.channelId,
+    params.metadataHash,
+    params.catalogRoot,
+    params.usageByServiceRoot,
+    params.cumulativeAmount,
+    params.accepted,
   ]);
   return {
     topics: encoded.topics,
@@ -151,5 +194,57 @@ describe('StatsClient', () => {
 
     // Only the valid MetadataRecorded log should be decoded; the bad one is filtered out
     expect(events).toHaveLength(1);
+  });
+
+  it('decodes UsageReportVerificationRecorded logs', async () => {
+    const reportHash = '0x' + '12'.repeat(32);
+    const seller = ethers.getAddress('0x0000000000000000000000000000000000000011');
+    const buyer = ethers.getAddress('0x0000000000000000000000000000000000000022');
+    const verifier = ethers.getAddress('0x0000000000000000000000000000000000000033');
+    const channelId = '0x' + 'ab'.repeat(32);
+    const metadataHash = '0x' + 'cd'.repeat(32);
+    const catalogRoot = '0x' + 'ef'.repeat(32);
+    const usageByServiceRoot = '0x' + '01'.repeat(32);
+    const transactionHash = '0x' + 'ff'.repeat(32);
+
+    const client = makeClient();
+    (client as any)._provider.getLogs = async () => [buildVerificationLog({
+      reportHash,
+      sellerAgentId: 42n,
+      verifierAgentId: 77n,
+      seller,
+      buyer,
+      verifier,
+      channelId,
+      metadataHash,
+      catalogRoot,
+      usageByServiceRoot,
+      cumulativeAmount: 50_000_000n,
+      accepted: true,
+      blockNumber: 100,
+      transactionHash,
+      index: 7,
+    })];
+
+    const events = await client.getUsageReportVerificationEvents({ fromBlock: 0, toBlock: 100 });
+
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      blockNumber: 100,
+      txHash: transactionHash,
+      logIndex: 7,
+      reportHash,
+      sellerAgentId: 42n,
+      verifierAgentId: 77n,
+      seller: seller.toLowerCase(),
+      buyer: buyer.toLowerCase(),
+      verifier: verifier.toLowerCase(),
+      channelId,
+      metadataHash,
+      catalogRoot,
+      usageByServiceRoot,
+      cumulativeAmount: 50_000_000n,
+      accepted: true,
+    });
   });
 });

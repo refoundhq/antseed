@@ -59,15 +59,65 @@ export {
   RESERVE_AUTH_TYPES,
   SET_OPERATOR_TYPES,
   computeMetadataHash,
+  computeEncodedMetadataHash,
+  decodeMetadata,
   encodeMetadata,
+  encodeMetadataV2,
   computeChannelId,
+  computeMerkleProof,
+  computeMerkleRoot,
+  hashReceiptLeaf,
+  hashServiceCatalogLeaf,
+  hashServiceUsageLeaf,
+  hashUtf8,
+  metadataV2MatchesServiceUsage,
+  sumServiceUsageLeaves,
+  verifyMerkleProof,
   ZERO_METADATA,
   ZERO_METADATA_HASH,
+  ZERO_BYTES32,
+  METADATA_V1_VERSION,
+  METADATA_V2_VERSION,
+  SERVICE_MODE_FREE,
+  SERVICE_MODE_PAID,
 } from './payments/evm/signatures.js';
-export type { SpendingAuthMessage, ReserveAuthMessage, SetOperatorMessage, SpendingAuthMetadata } from './payments/evm/signatures.js';
+export type {
+  DecodedSpendingAuthMetadata,
+  ReceiptLeaf,
+  ServiceCatalogLeaf,
+  ServiceUsageLeaf,
+  SpendingAuthMessage,
+  ReserveAuthMessage,
+  SetOperatorMessage,
+  SpendingAuthMetadata,
+  SpendingAuthMetadataV2,
+} from './payments/evm/signatures.js';
 export { NatTraversal, type NatMapping, type NatTraversalResult } from './p2p/nat-traversal.js';
 export { BuyerPaymentManager } from './payments/buyer-payment-manager.js';
 export type { BuyerPaymentConfig } from './payments/buyer-payment-manager.js';
+export {
+  createChannelReportAttestation,
+  createUsageReportAck,
+  encodeAttestationForSigning,
+  computeChannelUsageReportHash,
+  computeUsageReportVerifierSelectionSeed,
+  getUsageReportVerifierAssignment,
+  selectUsageReportVerifiers,
+  shouldVerifyUsageReport,
+  verifyChannelUsageReport,
+  verifyChannelReportAttestation,
+} from './payments/usage-report-verifier.js';
+export type {
+  SelectedUsageReportVerifier,
+  UsageReportVerifierCandidate,
+  UsageReportVerifierAssignmentOptions,
+  UsageReportVerifierIdentity,
+  UsageReportLocalVerifier,
+  UsageReportVerifierSelectionOptions,
+  UsageReportVerificationIssue,
+  UsageReportVerificationResult,
+  UsageReportVerifierOptions,
+} from './payments/usage-report-verifier.js';
 export { SellerPaymentManager } from './payments/seller-payment-manager.js';
 export type { SellerPaymentConfig } from './payments/seller-payment-manager.js';
 export { ChannelStore } from './payments/channel-store.js';

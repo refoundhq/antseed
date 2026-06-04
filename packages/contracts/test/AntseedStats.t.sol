@@ -104,4 +104,5 @@ contract AntseedStatsTest is Test {
         assertEq(buyerStats.totalOutputTokens, 40);
         assertEq(buyerStats.totalRequestCount, 2);
     }
+
 }

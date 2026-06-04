@@ -5,6 +5,8 @@ import type {
   AuthAckPayload,
   PaymentRequiredPayload,
   NeedAuthPayload,
+  ChannelUsageReportPayload,
+  UsageReportAckPayload,
 } from '../types/protocol.js';
 import { encodeFrame } from './message-protocol.js';
 import type { FramedMessage } from '../types/protocol.js';
@@ -16,6 +18,8 @@ const MESSAGE_TYPE_NAME: Record<number, string> = {
   [MessageType.AuthAck]: 'AuthAck',
   [MessageType.PaymentRequired]: 'PaymentRequired',
   [MessageType.NeedAuth]: 'NeedAuth',
+  [MessageType.PeerReport]: 'PeerReport',
+  [MessageType.ReportAck]: 'ReportAck',
 };
 
 export type PaymentMessageHandler<T> = (payload: T) => void | Promise<void>;
@@ -34,6 +38,8 @@ export class PaymentMux {
   private _onAuthAck?: PaymentMessageHandler<AuthAckPayload>;
   private _onPaymentRequired?: PaymentMessageHandler<PaymentRequiredPayload>;
   private _onNeedAuth?: PaymentMessageHandler<NeedAuthPayload>;
+  private _onPeerReport?: PaymentMessageHandler<ChannelUsageReportPayload>;
+  private _onReportAck?: PaymentMessageHandler<UsageReportAckPayload>;
 
   constructor(connection: PeerConnection) {
     this._connection = connection;
@@ -52,6 +58,12 @@ export class PaymentMux {
   onNeedAuth(handler: PaymentMessageHandler<NeedAuthPayload>): void {
     this._onNeedAuth = handler;
   }
+  onPeerReport(handler: PaymentMessageHandler<ChannelUsageReportPayload>): void {
+    this._onPeerReport = handler;
+  }
+  onReportAck(handler: PaymentMessageHandler<UsageReportAckPayload>): void {
+    this._onReportAck = handler;
+  }
 
   // --- Sending ---
   sendSpendingAuth(payload: SpendingAuthPayload): void {
@@ -65,6 +77,12 @@ export class PaymentMux {
   }
   sendNeedAuth(payload: NeedAuthPayload): void {
     this._send(MessageType.NeedAuth, codec.encodeNeedAuth(payload));
+  }
+  sendPeerReport(payload: ChannelUsageReportPayload): void {
+    this._send(MessageType.PeerReport, codec.encodePeerReport(payload));
+  }
+  sendReportAck(payload: UsageReportAckPayload): void {
+    this._send(MessageType.ReportAck, codec.encodeReportAck(payload));
   }
 
   // --- Receiving ---
@@ -88,14 +106,20 @@ export class PaymentMux {
       case MessageType.NeedAuth:
         await this._onNeedAuth?.(codec.decodeNeedAuth(frame.payload));
         return true;
+      case MessageType.PeerReport:
+        await this._onPeerReport?.(codec.decodePeerReport(frame.payload));
+        return true;
+      case MessageType.ReportAck:
+        await this._onReportAck?.(codec.decodeReportAck(frame.payload));
+        return true;
       default:
         return false;
     }
   }
 
-  /** Check if a message type is in the payment range (0x50-0x5F). */
+  /** Check if a message type is in the payment/report range handled here. */
   static isPaymentMessage(type: number): boolean {
-    return type >= 0x50 && type <= 0x5f;
+    return (type >= 0x50 && type <= 0x5f) || type === MessageType.PeerReport || type === MessageType.ReportAck;
   }
 
   private _send(type: MessageType, payload: Uint8Array): void {

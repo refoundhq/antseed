@@ -23,6 +23,7 @@ contract Deploy is Script {
         );
 
         address protocolReserve = vm.envOr("PROTOCOL_RESERVE", vm.addr(deployerPrivateKey));
+        address legacyStats = vm.envOr("LEGACY_STATS", address(0));
 
         // Read bytecodes from compiled artifacts
         bytes memory usdcBytecode = vm.getCode("MockUSDC.sol:MockUSDC");
@@ -83,12 +84,15 @@ contract Deploy is Script {
         require(channels != address(0), "Channels deploy failed");
         console.log("AntseedChannels:      ", channels);
 
-        // 8. AntseedStats
-        bytes memory statsBytecode = vm.getCode("AntseedStats.sol:AntseedStats");
+        // 8. AntseedStatsV2(legacyStats)
+        bytes memory statsBytecode = abi.encodePacked(
+            vm.getCode("AntseedStatsV2.sol:AntseedStatsV2"),
+            abi.encode(legacyStats)
+        );
         address stats;
         assembly { stats := create(0, add(statsBytecode, 0x20), mload(statsBytecode)) }
         require(stats != address(0), "Stats deploy failed");
-        console.log("AntseedStats:         ", stats);
+        console.log("AntseedStatsV2:       ", stats);
 
         // 9. AntseedEmissions(registry, initialEmission, epochDuration)
         bytes memory emissionsBytecode = abi.encodePacked(
@@ -124,6 +128,7 @@ contract Deploy is Script {
         // Channels and Staking already received the registry in their constructors,
         // but we include them here for uniformity so the pattern is obvious in upgrades.
         ISetRegistry(channels).setRegistry(address(antseedRegistry));
+        ISetRegistry(stats).setRegistry(address(antseedRegistry));
         ISetRegistry(deposits).setRegistry(address(antseedRegistry));
         ISetRegistry(staking).setRegistry(address(antseedRegistry));
         ISetRegistry(emissions).setRegistry(address(antseedRegistry));
@@ -132,6 +137,13 @@ contract Deploy is Script {
 
         // ---- Authorize Channels as Stats writer ----
         ISetWriter(stats).setWriter(channels, true);
+        if (legacyStats != address(0)) {
+            try ISetWriter(legacyStats).setWriter(stats, true) {
+                console.log("Legacy stats writer:  ", stats);
+            } catch {
+                console.log("Legacy stats writer authorization skipped");
+            }
+        }
 
         vm.stopBroadcast();
 

@@ -26,8 +26,12 @@ describe('PaymentMux', () => {
       expect(PaymentMux.isPaymentMessage(0x01)).toBe(false);
       expect(PaymentMux.isPaymentMessage(0x20)).toBe(false);
       expect(PaymentMux.isPaymentMessage(0x4f)).toBe(false);
-      expect(PaymentMux.isPaymentMessage(0x60)).toBe(false);
       expect(PaymentMux.isPaymentMessage(0xff)).toBe(false);
+    });
+
+    it('returns true for report message types', () => {
+      expect(PaymentMux.isPaymentMessage(MessageType.PeerReport)).toBe(true);
+      expect(PaymentMux.isPaymentMessage(MessageType.ReportAck)).toBe(true);
     });
   });
 
@@ -141,6 +145,57 @@ describe('PaymentMux', () => {
       const result = await mux.handleFrame(frame);
       expect(result).toBe(true);
       expect(handler).toHaveBeenCalledWith(payload);
+    });
+
+    it('dispatches PeerReport and ReportAck', async () => {
+      const conn = mockConnection();
+      const mux = new PaymentMux(conn);
+      const reportHandler = vi.fn();
+      const ackHandler = vi.fn();
+      mux.onPeerReport(reportHandler);
+      mux.onReportAck(ackHandler);
+
+      const reportPayload = {
+        channelId: '0x' + 'aa'.repeat(32),
+        buyer: '0x' + '11'.repeat(20),
+        seller: '0x' + '22'.repeat(20),
+        sellerAgentId: '42',
+        cumulativeAmount: '90000',
+        metadata: '0x' + 'dd'.repeat(288),
+        metadataHash: '0x' + 'cc'.repeat(32),
+        selectionBeacon: '0x' + '99'.repeat(32),
+        verifierCount: 3,
+        catalogRoot: '0x' + 'bb'.repeat(32),
+        sellerCatalogSig: '0x' + 'ee'.repeat(65),
+        serviceUsageLeaves: [],
+        serviceCatalogLeaves: [],
+        catalogMerkleProofs: {},
+        receiptLeavesOrProofs: [],
+        reportedAt: 1700000000,
+      };
+      const reportFrame: FramedMessage = {
+        type: MessageType.PeerReport,
+        messageId: 4,
+        payload: codec.encodePeerReport(reportPayload),
+      };
+
+      expect(await mux.handleFrame(reportFrame)).toBe(true);
+      expect(reportHandler).toHaveBeenCalledWith(reportPayload);
+
+      const ackPayload = {
+        channelId: reportPayload.channelId,
+        reportHash: '0x' + '99'.repeat(32),
+        verifierAgentId: '7',
+        accepted: true,
+      };
+      const ackFrame: FramedMessage = {
+        type: MessageType.ReportAck,
+        messageId: 5,
+        payload: codec.encodeReportAck(ackPayload),
+      };
+
+      expect(await mux.handleFrame(ackFrame)).toBe(true);
+      expect(ackHandler).toHaveBeenCalledWith(ackPayload);
     });
 
     it('returns true even with no handler registered', async () => {

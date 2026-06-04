@@ -31,6 +31,7 @@ contract DeployBaseSepolia is Script {
         address deployer = vm.addr(deployerPrivateKey);
         address protocolReserve = vm.envAddress("PROTOCOL_RESERVE");
         address teamWallet = vm.envAddress("TEAM_ADDRESS");
+        address legacyStats = vm.envOr("LEGACY_STATS", address(0));
 
         vm.startBroadcast(deployerPrivateKey);
 
@@ -88,12 +89,15 @@ contract DeployBaseSepolia is Script {
         require(channels != address(0), "Channels deploy failed");
         console.log("AntseedChannels:      ", channels);
 
-        // 7. AntseedStats
-        bytes memory statsBytecode = vm.getCode("AntseedStats.sol:AntseedStats");
+        // 7. AntseedStatsV2(legacyStats)
+        bytes memory statsBytecode = abi.encodePacked(
+            vm.getCode("AntseedStatsV2.sol:AntseedStatsV2"),
+            abi.encode(legacyStats)
+        );
         address stats;
         assembly { stats := create(0, add(statsBytecode, 0x20), mload(statsBytecode)) }
         require(stats != address(0), "Stats deploy failed");
-        console.log("AntseedStats:         ", stats);
+        console.log("AntseedStatsV2:       ", stats);
 
         // 8. AntseedEmissions(registry, initialEmission, epochDuration)
         bytes memory emissionsBytecode = abi.encodePacked(
@@ -118,6 +122,7 @@ contract DeployBaseSepolia is Script {
 
         // ---- Point each contract at the registry ----
         ISetRegistry(channels).setRegistry(address(antseedRegistry));
+        ISetRegistry(stats).setRegistry(address(antseedRegistry));
         ISetRegistry(deposits).setRegistry(address(antseedRegistry));
         ISetRegistry(staking).setRegistry(address(antseedRegistry));
         ISetRegistry(emissions).setRegistry(address(antseedRegistry));
@@ -125,6 +130,13 @@ contract DeployBaseSepolia is Script {
 
         // ---- Authorize Channels as Stats writer ----
         ISetWriter(stats).setWriter(channels, true);
+        if (legacyStats != address(0)) {
+            try ISetWriter(legacyStats).setWriter(stats, true) {
+                console.log("Legacy stats writer:  ", stats);
+            } catch {
+                console.log("Legacy stats writer authorization skipped");
+            }
+        }
 
         vm.stopBroadcast();
 

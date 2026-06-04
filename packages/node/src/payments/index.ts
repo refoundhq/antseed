@@ -42,13 +42,40 @@ export {
   RESERVE_AUTH_TYPES,
   SET_OPERATOR_TYPES,
   computeMetadataHash,
+  computeEncodedMetadataHash,
+  decodeMetadata,
   encodeMetadata,
+  encodeMetadataV2,
   METADATA_VERSION,
+  METADATA_V1_VERSION,
+  METADATA_V2_VERSION,
   computeChannelId,
+  computeMerkleProof,
+  computeMerkleRoot,
+  hashReceiptLeaf,
+  hashServiceCatalogLeaf,
+  hashServiceUsageLeaf,
+  hashUtf8,
+  metadataV2MatchesServiceUsage,
+  sumServiceUsageLeaves,
+  verifyMerkleProof,
   ZERO_METADATA,
   ZERO_METADATA_HASH,
+  ZERO_BYTES32,
+  SERVICE_MODE_FREE,
+  SERVICE_MODE_PAID,
 } from './evm/signatures.js';
-export type { SpendingAuthMessage, ReserveAuthMessage, SetOperatorMessage, SpendingAuthMetadata } from './evm/signatures.js';
+export type {
+  DecodedSpendingAuthMetadata,
+  ReceiptLeaf,
+  ServiceCatalogLeaf,
+  ServiceUsageLeaf,
+  SpendingAuthMessage,
+  ReserveAuthMessage,
+  SetOperatorMessage,
+  SpendingAuthMetadata,
+  SpendingAuthMetadataV2,
+} from './evm/signatures.js';
 
 // ANTS token
 export { ANTSTokenClient } from './evm/ants-token-client.js';
@@ -69,6 +96,31 @@ export type { StoredChannel, StoredReceipt } from './channel-store.js';
 // Buyer payment manager
 export { BuyerPaymentManager } from './buyer-payment-manager.js';
 export type { BuyerPaymentConfig, PerRequestAuthResult } from './buyer-payment-manager.js';
+
+// Peer-verifiable usage reports
+export {
+  createChannelReportAttestation,
+  createUsageReportAck,
+  encodeAttestationForSigning,
+  computeChannelUsageReportHash,
+  computeUsageReportVerifierSelectionSeed,
+  getUsageReportVerifierAssignment,
+  selectUsageReportVerifiers,
+  shouldVerifyUsageReport,
+  verifyChannelUsageReport,
+  verifyChannelReportAttestation,
+} from './usage-report-verifier.js';
+export type {
+  SelectedUsageReportVerifier,
+  UsageReportVerifierCandidate,
+  UsageReportVerifierAssignmentOptions,
+  UsageReportVerifierIdentity,
+  UsageReportLocalVerifier,
+  UsageReportVerifierSelectionOptions,
+  UsageReportVerificationIssue,
+  UsageReportVerificationResult,
+  UsageReportVerifierOptions,
+} from './usage-report-verifier.js';
 
 // Buyer payment negotiator (402 handling, SpendingAuth flow, cost tracking)
 export { BuyerPaymentNegotiator } from './buyer-payment-negotiator.js';

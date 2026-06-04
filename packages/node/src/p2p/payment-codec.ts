@@ -4,6 +4,11 @@ import {
   type AuthAckPayload,
   type PaymentRequiredPayload,
   type NeedAuthPayload,
+  type ChannelUsageReportPayload,
+  type ChannelUsageReportServiceUsageLeafPayload,
+  type ChannelUsageReportCatalogLeafPayload,
+  type ChannelUsageReportReceiptLeafPayload,
+  type UsageReportAckPayload,
 } from '../types/protocol.js';
 
 const encoder = new TextEncoder();
@@ -11,7 +16,7 @@ const decoder = new TextDecoder();
 
 // --- Validation helpers ---
 
-const MAX_PAYLOAD_SIZE = 65536; // 64KB
+const MAX_PAYLOAD_SIZE = 4 * 1024 * 1024; // Bounded JSON payloads; frames still cap at 64MB.
 
 function parseJson(data: Uint8Array): Record<string, unknown> {
   if (data.byteLength > MAX_PAYLOAD_SIZE) {
@@ -47,6 +52,14 @@ export function encodePaymentRequired(payload: PaymentRequiredPayload): Uint8Arr
 }
 
 export function encodeNeedAuth(payload: NeedAuthPayload): Uint8Array {
+  return encoder.encode(JSON.stringify(payload));
+}
+
+export function encodePeerReport(payload: ChannelUsageReportPayload): Uint8Array {
+  return encoder.encode(JSON.stringify(payload));
+}
+
+export function encodeReportAck(payload: UsageReportAckPayload): Uint8Array {
   return encoder.encode(JSON.stringify(payload));
 }
 
@@ -110,4 +123,152 @@ export function decodeNeedAuth(data: Uint8Array): NeedAuthPayload {
   if (typeof obj.freshInputTokens === 'string') result.freshInputTokens = obj.freshInputTokens;
   if (typeof obj.service === 'string') result.service = obj.service;
   return result;
+}
+
+export function decodePeerReport(data: Uint8Array): ChannelUsageReportPayload {
+  const obj = parseJson(data);
+  const result: ChannelUsageReportPayload = {
+    channelId: requireString(obj, 'channelId'),
+    buyer: requireString(obj, 'buyer'),
+    seller: requireString(obj, 'seller'),
+    sellerAgentId: requireString(obj, 'sellerAgentId'),
+    cumulativeAmount: requireString(obj, 'cumulativeAmount'),
+    metadata: requireString(obj, 'metadata'),
+    metadataHash: requireString(obj, 'metadataHash'),
+    selectionBeacon: requireString(obj, 'selectionBeacon'),
+    verifierCount: requireNumber(obj, 'verifierCount'),
+    catalogRoot: requireString(obj, 'catalogRoot'),
+    sellerCatalogSig: requireString(obj, 'sellerCatalogSig'),
+    serviceUsageLeaves: parseArray(obj, 'serviceUsageLeaves', parseServiceUsageLeaf),
+    serviceCatalogLeaves: parseArray(obj, 'serviceCatalogLeaves', parseCatalogLeaf),
+    catalogMerkleProofs: parseProofMap(obj.catalogMerkleProofs),
+    receiptLeavesOrProofs: parseArray(obj, 'receiptLeavesOrProofs', parseReceiptLeaf),
+    reportedAt: requireNumber(obj, 'reportedAt'),
+  };
+  if (typeof obj.buyerSpendingAuthSig === 'string') result.buyerSpendingAuthSig = obj.buyerSpendingAuthSig;
+  return result;
+}
+
+export function decodeReportAck(data: Uint8Array): UsageReportAckPayload {
+  const obj = parseJson(data);
+  const result: UsageReportAckPayload = {
+    channelId: requireString(obj, 'channelId'),
+    reportHash: requireString(obj, 'reportHash'),
+    verifierAgentId: requireString(obj, 'verifierAgentId'),
+    accepted: requireBoolean(obj, 'accepted'),
+  };
+  if (typeof obj.reason === 'string') result.reason = obj.reason;
+  if (typeof obj.attestation === 'object' && obj.attestation !== null && !Array.isArray(obj.attestation)) {
+    const attestation = obj.attestation as Record<string, unknown>;
+    result.attestation = {
+      channelId: requireString(attestation, 'channelId'),
+      reportHash: requireString(attestation, 'reportHash'),
+      seller: requireString(attestation, 'seller'),
+      sellerAgentId: requireString(attestation, 'sellerAgentId'),
+      buyer: requireString(attestation, 'buyer'),
+      cumulativeAmount: requireString(attestation, 'cumulativeAmount'),
+      metadataHash: requireString(attestation, 'metadataHash'),
+      catalogRoot: requireString(attestation, 'catalogRoot'),
+      usageByServiceRoot: requireString(attestation, 'usageByServiceRoot'),
+      verifier: requireString(attestation, 'verifier'),
+      verifierAgentId: requireString(attestation, 'verifierAgentId'),
+      timestamp: requireNumber(attestation, 'timestamp'),
+      signature: requireString(attestation, 'signature'),
+    };
+  }
+  return result;
+}
+
+function requireNumber(obj: Record<string, unknown>, field: string): number {
+  const val = obj[field];
+  if (typeof val !== 'number' || !Number.isFinite(val)) {
+    throw new Error(`Missing or invalid number field: ${field}`);
+  }
+  return val;
+}
+
+function requireBoolean(obj: Record<string, unknown>, field: string): boolean {
+  const val = obj[field];
+  if (typeof val !== 'boolean') {
+    throw new Error(`Missing or invalid boolean field: ${field}`);
+  }
+  return val;
+}
+
+function parseArray<T>(
+  obj: Record<string, unknown>,
+  field: string,
+  parseItem: (item: Record<string, unknown>) => T,
+): T[] {
+  const val = obj[field];
+  if (!Array.isArray(val)) {
+    throw new Error(`Missing or invalid array field: ${field}`);
+  }
+  return val.map((item, index) => {
+    if (typeof item !== 'object' || item === null || Array.isArray(item)) {
+      throw new Error(`Invalid object at ${field}[${index}]`);
+    }
+    return parseItem(item as Record<string, unknown>);
+  });
+}
+
+function parseProofMap(val: unknown): Record<string, string[]> {
+  if (typeof val !== 'object' || val === null || Array.isArray(val)) {
+    throw new Error('Missing or invalid proof map field: catalogMerkleProofs');
+  }
+  const out: Record<string, string[]> = {};
+  for (const [key, proof] of Object.entries(val)) {
+    if (!Array.isArray(proof) || proof.some((entry) => typeof entry !== 'string')) {
+      throw new Error(`Invalid Merkle proof for catalog leaf ${key}`);
+    }
+    out[key] = proof as string[];
+  }
+  return out;
+}
+
+function parseServiceUsageLeaf(obj: Record<string, unknown>): ChannelUsageReportServiceUsageLeafPayload {
+  return {
+    channelId: requireString(obj, 'channelId'),
+    serviceIdHash: requireString(obj, 'serviceIdHash'),
+    catalogLeafHash: requireString(obj, 'catalogLeafHash'),
+    serviceMode: requireString(obj, 'serviceMode'),
+    cumulativeFreshInputTokens: requireString(obj, 'cumulativeFreshInputTokens'),
+    cumulativeCachedInputTokens: requireString(obj, 'cumulativeCachedInputTokens'),
+    cumulativeOutputTokens: requireString(obj, 'cumulativeOutputTokens'),
+    cumulativeRequestCount: requireString(obj, 'cumulativeRequestCount'),
+    cumulativeAmountPaid: requireString(obj, 'cumulativeAmountPaid'),
+  };
+}
+
+function parseCatalogLeaf(obj: Record<string, unknown>): ChannelUsageReportCatalogLeafPayload {
+  return {
+    sellerAgentId: requireString(obj, 'sellerAgentId'),
+    sellerAddress: requireString(obj, 'sellerAddress'),
+    serviceIdHash: requireString(obj, 'serviceIdHash'),
+    tokenizerIdHash: requireString(obj, 'tokenizerIdHash'),
+    inputUsdPerMillion: requireString(obj, 'inputUsdPerMillion'),
+    cachedInputUsdPerMillion: requireString(obj, 'cachedInputUsdPerMillion'),
+    outputUsdPerMillion: requireString(obj, 'outputUsdPerMillion'),
+    serviceMode: requireString(obj, 'serviceMode'),
+    termsHash: requireString(obj, 'termsHash'),
+    validFrom: requireString(obj, 'validFrom'),
+    validUntil: requireString(obj, 'validUntil'),
+  };
+}
+
+function parseReceiptLeaf(obj: Record<string, unknown>): ChannelUsageReportReceiptLeafPayload {
+  return {
+    channelId: requireString(obj, 'channelId'),
+    requestIndex: requireString(obj, 'requestIndex'),
+    requestIdHash: requireString(obj, 'requestIdHash'),
+    requestHash: requireString(obj, 'requestHash'),
+    responseHash: requireString(obj, 'responseHash'),
+    serviceIdHash: requireString(obj, 'serviceIdHash'),
+    catalogLeafHash: requireString(obj, 'catalogLeafHash'),
+    freshInputTokens: requireString(obj, 'freshInputTokens'),
+    cachedInputTokens: requireString(obj, 'cachedInputTokens'),
+    outputTokens: requireString(obj, 'outputTokens'),
+    costUsdc: requireString(obj, 'costUsdc'),
+    cumulativeAmountAfterRequest: requireString(obj, 'cumulativeAmountAfterRequest'),
+  };
 }
