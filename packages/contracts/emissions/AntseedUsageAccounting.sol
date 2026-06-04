@@ -2,7 +2,6 @@
 pragma solidity ^0.8.24;
 
 import "@openzeppelin/contracts/access/Ownable2Step.sol";
-import "@openzeppelin/contracts/utils/math/Math.sol";
 import "@openzeppelin/contracts/utils/Pausable.sol";
 
 import { IAntseedPointsPolicy } from "../interfaces/IAntseedPointsPolicy.sol";
@@ -17,10 +16,10 @@ import { IAntseedUsageAccounting } from "../interfaces/IAntseedUsageAccounting.s
  *         Existing AntseedChannels still emits the legacy two-call sequence
  *         (`accrueSellerPoints`, then `accrueBuyerPoints`) to whatever the
  *         global registry exposes as `emissions()`. This contract is that
- *         settlement-facing endpoint. It records settled usage facts by buyer,
- *         seller, buyer/seller pair, and seller pool. For seller
- *         pools it also records weighted points as raw usage multiplied by the
- *         pool's frozen epoch power, so reward distribution is fully on-chain.
+ *         settlement-facing endpoint. It records settled usage facts by buyer
+ *         and agent id. The agent id is the seller-pool key. It also records
+ *         weighted points as raw usage multiplied by the agent pool's frozen
+ *         epoch power, so reward distribution is fully on-chain.
  *
  *         Important behavior:
  *           - This is the intermediate points layer. Seller-pool stake math does
@@ -31,9 +30,10 @@ import { IAntseedUsageAccounting } from "../interfaces/IAntseedUsageAccounting.s
  *           - Pool-weighted points are based on the pool power for the current
  *             epoch. Because pool power is precomputed and frozen per epoch,
  *             settlement can record usage without touching stake positions.
- *           - Seller-pool rewardable volume is capped by pool security share
- *             via `maxRewardableVolumeLeverageBps`, preventing tiny pools with
- *             huge volume from dominating seller-pool emissions.
+ *           - Usage against pools below `minimumAccountedPoolPower` is ignored.
+ *             Pool points are not capped here. Reputation, verification, and
+ *             wash-trading point shaping belongs in `pointsPolicy`; reward caps
+ *             are applied by reward programs when claims mint.
  *           - Buyer rewards are weighted by the seller pool the buyer used, so
  *             buyer points from stronger pools carry more reward weight. Buyer
  *             points are not capped by that seller pool's total epoch volume.
@@ -45,17 +45,11 @@ import { IAntseedUsageAccounting } from "../interfaces/IAntseedUsageAccounting.s
  *             `accruePoints` with buyer, seller, and channel id in one call.
  */
 contract AntseedUsageAccounting is IAntseedUsageAccounting, Ownable2Step, Pausable {
-    // ─── Constants ───────────────────────────────────────────────────
-    uint256 public constant BPS_DENOMINATOR = 10_000;
-    uint256 public constant MAX_REWARDABLE_VOLUME_LEVERAGE_BPS_CAP = 1_000_000;
-
     // ─── External Contracts ──────────────────────────────────────────
     IAntseedEmissionSchedule public immutable schedule;
     IAntseedSellerPools public sellerPools;
     IAntseedPointsPolicy public pointsPolicy;
-
-    // ─── Policy Config ───────────────────────────────────────────────
-    uint256 public maxRewardableVolumeLeverageBps = 100_000;
+    uint256 public minimumAccountedPoolPower = 1;
 
     // ─── Legacy Two-Call Settlement Pairing ──────────────────────────
     struct PendingSellerAccrual {
@@ -68,51 +62,15 @@ contract AntseedUsageAccounting is IAntseedUsageAccounting, Ownable2Step, Pausab
     // ─── Usage Recorder Permissions ─────────────────────────────────
     mapping(address => bool) public usageRecorders;
 
-    // ─── Raw And Weighted Usage Accounting ───────────────────────────
-    mapping(uint256 => uint256) public totalRawBuyerPointsByEpoch;
-    mapping(uint256 => uint256) public totalRawSellerPointsByEpoch;
-    mapping(uint256 => uint256) public totalRawPairPointsByEpoch;
-    mapping(uint256 => uint256) public totalRawPoolPointsByEpoch;
-    mapping(uint256 => uint256) public totalBuyerPoolPointsByEpoch;
-    mapping(uint256 => mapping(address => uint256)) public rawBuyerPointsByEpoch;
-    mapping(uint256 => mapping(address => uint256)) public rawSellerPointsByEpoch;
-    mapping(uint256 => mapping(address => mapping(address => uint256))) public rawBuyerSellerPointsByEpoch;
-    mapping(uint256 => mapping(uint256 => uint256)) public rawAgentPoolPointsByEpoch;
-    mapping(uint256 => mapping(address => mapping(uint256 => uint256))) public buyerAgentPoolPointsByEpoch;
-    mapping(uint256 => mapping(address => uint256)) public weightedBuyerPointsByEpoch;
-    mapping(uint256 => uint256) public totalWeightedBuyerPointsByEpoch;
-    mapping(uint256 => mapping(address => uint256)) public weightedSellerPointsByEpoch;
-    mapping(uint256 => uint256) public totalWeightedSellerPointsByEpoch;
-    mapping(uint256 => mapping(address => uint256)) public rawSellerPoolPointsByEpoch;
-    mapping(uint256 => mapping(address => uint256)) public sellerAgentIdByEpoch;
-    mapping(uint256 => mapping(uint256 => uint256)) public uncappedWeightedAgentPoolPointsByEpoch;
-    mapping(uint256 => mapping(uint256 => bool)) public epochAgentPoolSeen;
-    mapping(uint256 => uint256[]) public epochPoolAgentIds;
-
-    // ─── Events ──────────────────────────────────────────────────────
-    event SellerPoolsSet(address indexed sellerPools);
-    event PointsPolicySet(address indexed policy);
-    event MaxRewardableVolumeLeverageBpsSet(uint256 leverageBps);
-    event UsageRecorderSet(address indexed recorder, bool allowed);
-    event LegacySellerAccrualPending(address indexed seller, uint256 indexed epoch, uint256 pointsDelta);
-    event UsagePointsAccrued(
-        uint256 indexed epoch,
-        address indexed buyer,
-        address indexed seller,
-        uint256 poolAgentId,
-        uint256 rawPoints,
-        uint256 poolPower,
-        uint256 weightedPoints
-    );
-    event PendingSellerAccrualCleared(address indexed seller, uint256 pointsDelta);
-
-    // ─── Custom Errors ───────────────────────────────────────────────
-    error InvalidAddress();
-    error InvalidValue();
-    error NotUsageRecorder();
-    error PendingSellerAccrualExists();
-    error NoPendingSellerAccrual();
-    error AccrualDeltaMismatch();
+    // ─── Structured Usage Accounting ────────────────────────────────
+    UsageTotals private _totalUsage;
+    mapping(uint256 => UsageTotals) private _epochUsage;
+    mapping(address => BuyerUsage) private _buyerUsageTotal;
+    mapping(address => mapping(uint256 => BuyerUsage)) private _buyerAgentUsageTotal;
+    mapping(uint256 => mapping(address => BuyerUsage)) private _buyerEpochUsage;
+    mapping(uint256 => mapping(address => mapping(uint256 => BuyerUsage))) private _buyerAgentEpochUsage;
+    mapping(uint256 => mapping(uint256 => SellerUsage)) private _agentEpochUsage;
+    mapping(uint256 => mapping(address => uint256)) private _sellerAgentIdByEpoch;
 
     // ─── Modifiers ───────────────────────────────────────────────────
     modifier onlyUsageRecorder() {
@@ -189,10 +147,10 @@ contract AntseedUsageAccounting is IAntseedUsageAccounting, Ownable2Step, Pausab
         emit PointsPolicySet(policy);
     }
 
-    function setMaxRewardableVolumeLeverageBps(uint256 leverageBps) external onlyOwner {
-        if (leverageBps > MAX_REWARDABLE_VOLUME_LEVERAGE_BPS_CAP) revert InvalidValue();
-        maxRewardableVolumeLeverageBps = leverageBps;
-        emit MaxRewardableVolumeLeverageBpsSet(leverageBps);
+    function setMinimumAccountedPoolPower(uint256 minimumPoolPower) external onlyOwner {
+        if (minimumPoolPower == 0) revert InvalidValue();
+        minimumAccountedPoolPower = minimumPoolPower;
+        emit MinimumAccountedPoolPowerSet(minimumPoolPower);
     }
 
     function setUsageRecorder(address recorder, bool allowed) external onlyOwner {
@@ -220,116 +178,179 @@ contract AntseedUsageAccounting is IAntseedUsageAccounting, Ownable2Step, Pausab
 
         uint256 epoch = currentEpoch();
         IAntseedSellerPools pools = sellerPools;
-        uint256 agentId = address(pools) == address(0) ? 0 : pools.agentIdForSeller(seller);
-        uint256 poolPower = agentId == 0 ? 0 : pools.poolPowerWeightAtEpoch(agentId, epoch);
-        uint256 poolAgentId = poolPower == 0 ? 0 : agentId;
+        if (address(pools) == address(0)) return;
+
+        uint256 agentId = pools.agentIdForSeller(seller);
+        if (agentId == 0) return;
+
+        uint256 poolPower = pools.poolPowerWeightAtEpoch(agentId, epoch);
+        if (poolPower < minimumAccountedPoolPower) return;
+
         (uint256 sellerPoints, uint256 buyerPoints) = _policyPoints(channelId, buyer, seller, rawPoints);
+        if (sellerPoints == 0 && buyerPoints == 0) return;
+
+        {
+            UsageTotals storage totalUsage_ = _totalUsage;
+            totalUsage_.buyers.points += buyerPoints;
+            totalUsage_.sellers.points += sellerPoints;
+        }
+        {
+            UsageTotals storage epochUsage_ = _epochUsage[epoch];
+            epochUsage_.buyers.points += buyerPoints;
+            epochUsage_.sellers.points += sellerPoints;
+        }
+        _buyerUsageTotal[buyer].points += buyerPoints;
+        _buyerAgentUsageTotal[buyer][agentId].points += buyerPoints;
+        _buyerEpochUsage[epoch][buyer].points += buyerPoints;
+        _buyerAgentEpochUsage[epoch][buyer][agentId].points += buyerPoints;
+        _agentEpochUsage[epoch][agentId].points += sellerPoints;
+        if (_sellerAgentIdByEpoch[epoch][seller] == 0) _sellerAgentIdByEpoch[epoch][seller] = agentId;
+
         uint256 sellerWeightedPoints = sellerPoints * poolPower;
         uint256 buyerWeightedPoints = buyerPoints * poolPower;
 
-        totalRawBuyerPointsByEpoch[epoch] += rawPoints;
-        totalRawSellerPointsByEpoch[epoch] += sellerPoints;
-        totalRawPairPointsByEpoch[epoch] += rawPoints;
-        rawBuyerPointsByEpoch[epoch][buyer] += rawPoints;
-        rawSellerPointsByEpoch[epoch][seller] += sellerPoints;
-        rawBuyerSellerPointsByEpoch[epoch][buyer][seller] += rawPoints;
-        if (poolAgentId != 0) {
-            if (!epochAgentPoolSeen[epoch][poolAgentId]) {
-                epochAgentPoolSeen[epoch][poolAgentId] = true;
-                epochPoolAgentIds[epoch].push(poolAgentId);
-            }
-            rawAgentPoolPointsByEpoch[epoch][poolAgentId] += sellerPoints;
-            rawSellerPoolPointsByEpoch[epoch][seller] += sellerPoints;
-            if (sellerAgentIdByEpoch[epoch][seller] == 0) sellerAgentIdByEpoch[epoch][seller] = poolAgentId;
-            totalRawPoolPointsByEpoch[epoch] += sellerPoints;
-            uncappedWeightedAgentPoolPointsByEpoch[epoch][poolAgentId] += sellerWeightedPoints;
-            weightedSellerPointsByEpoch[epoch][seller] += sellerWeightedPoints;
-            totalWeightedSellerPointsByEpoch[epoch] += sellerWeightedPoints;
-            buyerAgentPoolPointsByEpoch[epoch][buyer][poolAgentId] += buyerPoints;
-            totalBuyerPoolPointsByEpoch[epoch] += buyerPoints;
-            weightedBuyerPointsByEpoch[epoch][buyer] += buyerWeightedPoints;
-            totalWeightedBuyerPointsByEpoch[epoch] += buyerWeightedPoints;
+        {
+            UsageTotals storage totalUsage_ = _totalUsage;
+            totalUsage_.buyers.weightedPoints += buyerWeightedPoints;
+            totalUsage_.sellers.weightedPoints += sellerWeightedPoints;
+            totalUsage_.sellers.poolPoints += sellerPoints;
         }
+        {
+            UsageTotals storage epochUsage_ = _epochUsage[epoch];
+            epochUsage_.buyers.weightedPoints += buyerWeightedPoints;
+            epochUsage_.sellers.weightedPoints += sellerWeightedPoints;
+            epochUsage_.sellers.poolPoints += sellerPoints;
+        }
+        _buyerUsageTotal[buyer].weightedPoints += buyerWeightedPoints;
+        _buyerAgentUsageTotal[buyer][agentId].weightedPoints += buyerWeightedPoints;
+        _buyerEpochUsage[epoch][buyer].weightedPoints += buyerWeightedPoints;
+        _buyerAgentEpochUsage[epoch][buyer][agentId].weightedPoints += buyerWeightedPoints;
+        _agentEpochUsage[epoch][agentId].poolPoints += sellerPoints;
+        _agentEpochUsage[epoch][agentId].weightedPoints += sellerWeightedPoints;
 
-        emit UsagePointsAccrued(epoch, buyer, seller, poolAgentId, rawPoints, poolPower, sellerWeightedPoints);
+        emit UsagePointsAccrued(
+            epoch,
+            buyer,
+            seller,
+            agentId,
+            rawPoints,
+            buyerPoints,
+            sellerPoints,
+            poolPower,
+            buyerWeightedPoints,
+            sellerWeightedPoints
+        );
     }
 
     // ═══════════════════════════════════════════════════════════════════
     //                        VIEWS
     // ═══════════════════════════════════════════════════════════════════
 
-    function rawPoolPointsByEpoch(uint256 epoch, address seller) public view returns (uint256) {
-        uint256 agentId = sellerAgentIdByEpoch[epoch][seller];
-        if (agentId == 0) return 0;
-        return rawAgentPoolPointsByEpoch[epoch][agentId];
+    function totalUsage() external view returns (UsageTotals memory) {
+        return _totalUsage;
     }
 
-    function buyerPoolPointsByEpoch(uint256 epoch, address buyer, address seller) public view returns (uint256) {
-        uint256 agentId = sellerAgentIdByEpoch[epoch][seller];
-        if (agentId == 0) return 0;
-        return buyerAgentPoolPointsByEpoch[epoch][buyer][agentId];
+    function epochUsage(uint256 epoch) external view returns (UsageTotals memory) {
+        return _epochUsage[epoch];
     }
 
-    function uncappedWeightedPoolPointsByEpoch(uint256 epoch, address seller) public view returns (uint256) {
-        uint256 agentId = sellerAgentIdByEpoch[epoch][seller];
+    function buyerUsageTotal(address buyer) external view returns (BuyerUsage memory) {
+        return _buyerUsageTotal[buyer];
+    }
+
+    function buyerAgentUsageTotal(address buyer, uint256 agentId) external view returns (BuyerUsage memory) {
+        return _buyerAgentUsageTotal[buyer][agentId];
+    }
+
+    function buyerEpochUsage(uint256 epoch, address buyer) external view returns (BuyerUsage memory) {
+        return _buyerEpochUsage[epoch][buyer];
+    }
+
+    function buyerAgentEpochUsage(uint256 epoch, address buyer, uint256 agentId)
+        external
+        view
+        returns (BuyerUsage memory)
+    {
+        return _buyerAgentEpochUsage[epoch][buyer][agentId];
+    }
+
+    function agentEpochUsage(uint256 epoch, uint256 agentId) external view returns (SellerUsage memory) {
+        return _agentEpochUsage[epoch][agentId];
+    }
+
+    function totalBuyerPointsByEpoch(uint256 epoch) external view returns (uint256) {
+        return _epochUsage[epoch].buyers.points;
+    }
+
+    function totalSellerPointsByEpoch(uint256 epoch) external view returns (uint256) {
+        return _epochUsage[epoch].sellers.points;
+    }
+
+    function totalPoolPointsByEpoch(uint256 epoch) external view returns (uint256) {
+        return _epochUsage[epoch].sellers.poolPoints;
+    }
+
+    function totalWeightedBuyerPointsByEpoch(uint256 epoch) external view returns (uint256) {
+        return _epochUsage[epoch].buyers.weightedPoints;
+    }
+
+    function totalWeightedSellerPointsByEpoch(uint256 epoch) external view returns (uint256) {
+        return _epochUsage[epoch].sellers.weightedPoints;
+    }
+
+    function buyerPointsByEpoch(uint256 epoch, address buyer) external view returns (uint256) {
+        return _buyerEpochUsage[epoch][buyer].points;
+    }
+
+    function sellerPointsByEpoch(uint256 epoch, address seller) external view returns (uint256) {
+        uint256 agentId = _sellerAgentIdByEpoch[epoch][seller];
+        return agentId == 0 ? 0 : _agentEpochUsage[epoch][agentId].points;
+    }
+
+    function weightedBuyerPointsByEpoch(uint256 epoch, address buyer) external view returns (uint256) {
+        return _buyerEpochUsage[epoch][buyer].weightedPoints;
+    }
+
+    function weightedAgentSellerPointsByEpoch(uint256 epoch, uint256 agentId) external view returns (uint256) {
+        return _agentEpochUsage[epoch][agentId].weightedPoints;
+    }
+
+    function weightedSellerPointsByEpoch(uint256 epoch, address seller) external view returns (uint256) {
+        uint256 agentId = _sellerAgentIdByEpoch[epoch][seller];
+        return agentId == 0 ? 0 : _agentEpochUsage[epoch][agentId].weightedPoints;
+    }
+
+    function agentPoolPointsByEpoch(uint256 epoch, uint256 agentId) external view returns (uint256) {
+        return _agentEpochUsage[epoch][agentId].poolPoints;
+    }
+
+    function sellerAgentIdByEpoch(uint256 epoch, address seller) external view returns (uint256) {
+        return _sellerAgentIdByEpoch[epoch][seller];
+    }
+
+    function poolPointsByEpoch(uint256 epoch, address seller) public view returns (uint256) {
+        uint256 agentId = _sellerAgentIdByEpoch[epoch][seller];
         if (agentId == 0) return 0;
-        return uncappedWeightedAgentPoolPointsByEpoch[epoch][agentId];
+        return _agentEpochUsage[epoch][agentId].poolPoints;
     }
 
     function weightedPoolPointsByEpoch(uint256 epoch, uint256 agentId) public view returns (uint256 weightedPoints) {
-        IAntseedSellerPools pools = sellerPools;
-        if (address(pools) == address(0)) return 0;
-
-        uint256 rewardablePoints = _rewardablePoolPoints(
-            epoch, agentId, rawAgentPoolPointsByEpoch[epoch][agentId], totalRawPoolPointsByEpoch[epoch]
-        );
-        uint256 poolPower = pools.poolPowerWeightAtEpoch(agentId, epoch);
-        weightedPoints = rewardablePoints * poolPower;
+        weightedPoints = _agentEpochUsage[epoch][agentId].weightedPoints;
     }
 
     function weightedPoolPointsByEpoch(uint256 epoch, address seller) public view returns (uint256 weightedPoints) {
-        uint256 agentId = sellerAgentIdByEpoch[epoch][seller];
+        uint256 agentId = _sellerAgentIdByEpoch[epoch][seller];
         if (agentId == 0) return 0;
-
-        uint256 rewardablePoints = _rewardablePoolPoints(
-            epoch, agentId, rawSellerPoolPointsByEpoch[epoch][seller], totalRawPoolPointsByEpoch[epoch]
-        );
-        IAntseedSellerPools pools = sellerPools;
-        if (address(pools) == address(0)) return 0;
-        uint256 poolPower = pools.poolPowerWeightAtEpoch(agentId, epoch);
-        weightedPoints = rewardablePoints * poolPower;
+        weightedPoints = _agentEpochUsage[epoch][agentId].weightedPoints;
     }
 
     function totalWeightedPoolPointsByEpoch(uint256 epoch) public view returns (uint256 totalWeightedPoints) {
-        uint256[] memory agentIds = epochPoolAgentIds[epoch];
-        for (uint256 i = 0; i < agentIds.length; i++) {
-            totalWeightedPoints += weightedPoolPointsByEpoch(epoch, agentIds[i]);
-        }
+        totalWeightedPoints = _epochUsage[epoch].sellers.weightedPoints;
     }
 
     // ═══════════════════════════════════════════════════════════════════
     //                        INTERNAL HELPERS
     // ═══════════════════════════════════════════════════════════════════
-
-    function _rewardablePoolPoints(uint256 epoch, uint256 agentId, uint256 rawPoints, uint256 totalRawPoints)
-        internal
-        view
-        returns (uint256)
-    {
-        IAntseedSellerPools pools = sellerPools;
-        if (address(pools) == address(0) || rawPoints == 0) return 0;
-
-        uint256 poolPower = pools.poolPowerWeightAtEpoch(agentId, epoch);
-        if (poolPower == 0) return 0;
-
-        uint256 totalPower = pools.totalPowerWeightAtEpoch(epoch);
-        uint256 leverageBps = maxRewardableVolumeLeverageBps;
-        if (totalPower == 0 || totalRawPoints == 0 || leverageBps == 0) return 0;
-
-        uint256 securityShareVolume = Math.mulDiv(totalRawPoints, poolPower, totalPower);
-        uint256 maxRewardablePoints = Math.mulDiv(securityShareVolume, leverageBps, BPS_DENOMINATOR);
-        return rawPoints < maxRewardablePoints ? rawPoints : maxRewardablePoints;
-    }
 
     function _policyPoints(bytes32 channelId, address buyer, address seller, uint256 rawPoints)
         internal

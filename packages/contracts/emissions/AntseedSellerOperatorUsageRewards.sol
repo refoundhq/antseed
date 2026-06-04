@@ -8,6 +8,7 @@ import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import { IAntseedEmissionsAuthority } from "../interfaces/IAntseedEmissionsAuthority.sol";
 import { IAntseedRegistry } from "../interfaces/IAntseedRegistry.sol";
 import { IAntseedUsageAccounting } from "../interfaces/IAntseedUsageAccounting.sol";
+import { IERC8004Registry } from "../interfaces/IERC8004Registry.sol";
 
 /**
  * @title AntseedSellerOperatorUsageRewards
@@ -38,13 +39,15 @@ contract AntseedSellerOperatorUsageRewards is Ownable2Step, Pausable, Reentrancy
     bytes32 public immutable programId;
 
     // ─── Claim State ─────────────────────────────────────────────────
-    mapping(address => mapping(uint256 => bool)) public sellerEpochClaimed;
+    mapping(uint256 => mapping(uint256 => bool)) public agentEpochClaimed;
 
     // ─── Events ──────────────────────────────────────────────────────
     event EmissionsAuthoritySet(address indexed emissionsAuthority);
+    event RegistrySet(address indexed registry);
     event UsageAccountingSet(address indexed usageAccounting);
     event SellerOperatorRewardClaimed(
         address indexed seller,
+        uint256 indexed agentId,
         uint256 indexed epoch,
         uint256 weightedPoints,
         uint256 totalWeightedPoints,
@@ -77,7 +80,11 @@ contract AntseedSellerOperatorUsageRewards is Ownable2Step, Pausable, Reentrancy
     // ═══════════════════════════════════════════════════════════════════
 
     function claimSellerReward(address seller, uint256 epoch) external nonReentrant whenNotPaused {
-        _claimSellerReward(seller, epoch);
+        _claimAgentReward(_agentIdForSellerAtEpoch(seller, epoch), epoch);
+    }
+
+    function claimAgentReward(uint256 agentId, uint256 epoch) external nonReentrant whenNotPaused {
+        _claimAgentReward(agentId, epoch);
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -85,7 +92,19 @@ contract AntseedSellerOperatorUsageRewards is Ownable2Step, Pausable, Reentrancy
     // ═══════════════════════════════════════════════════════════════════
 
     function pendingSellerReward(address seller, uint256 epoch) external view returns (uint256 amount) {
-        (uint256 weightedPoints, uint256 totalWeightedPoints) = _sellerShare(seller, epoch);
+        return _pendingAgentReward(_agentIdForSellerAtEpoch(seller, epoch), epoch);
+    }
+
+    function pendingAgentReward(uint256 agentId, uint256 epoch) external view returns (uint256 amount) {
+        return _pendingAgentReward(agentId, epoch);
+    }
+
+    function rewardRecipient(uint256 agentId) external view returns (address) {
+        return _agentOwner(agentId);
+    }
+
+    function _pendingAgentReward(uint256 agentId, uint256 epoch) internal view returns (uint256 amount) {
+        (uint256 weightedPoints, uint256 totalWeightedPoints) = _agentShare(agentId, epoch);
         if (weightedPoints == 0 || totalWeightedPoints == 0) return 0;
         uint256 epochBudget = emissionsAuthority.programEpochBudget(programId, epoch);
         uint256 grossAmount = (epochBudget * weightedPoints) / totalWeightedPoints;
@@ -106,6 +125,7 @@ contract AntseedSellerOperatorUsageRewards is Ownable2Step, Pausable, Reentrancy
     function setRegistry(address _registry) external onlyOwner {
         if (_registry == address(0)) revert InvalidAddress();
         registry = IAntseedRegistry(_registry);
+        emit RegistrySet(_registry);
     }
 
     function setUsageAccounting(address _usageAccounting) external onlyOwner {
@@ -126,11 +146,11 @@ contract AntseedSellerOperatorUsageRewards is Ownable2Step, Pausable, Reentrancy
     //                        INTERNAL HELPERS
     // ═══════════════════════════════════════════════════════════════════
 
-    function _claimSellerReward(address seller, uint256 epoch) internal {
-        if (seller == address(0)) revert InvalidAddress();
-        if (sellerEpochClaimed[seller][epoch]) revert AlreadyClaimed();
+    function _claimAgentReward(uint256 agentId, uint256 epoch) internal {
+        if (agentId == 0) revert InvalidAddress();
+        if (agentEpochClaimed[agentId][epoch]) revert AlreadyClaimed();
 
-        (uint256 weightedPoints, uint256 totalWeightedPoints) = _sellerShare(seller, epoch);
+        (uint256 weightedPoints, uint256 totalWeightedPoints) = _agentShare(agentId, epoch);
         if (weightedPoints == 0 || totalWeightedPoints == 0) revert NothingToClaim();
 
         uint256 epochBudget = emissionsAuthority.programEpochBudget(programId, epoch);
@@ -142,7 +162,8 @@ contract AntseedSellerOperatorUsageRewards is Ownable2Step, Pausable, Reentrancy
         uint256 reserveAmount = grossAmount - claimableAmount;
         if (claimableAmount == 0 && reserveAmount == 0) revert NothingToClaim();
 
-        sellerEpochClaimed[seller][epoch] = true;
+        agentEpochClaimed[agentId][epoch] = true;
+        address seller = _agentOwner(agentId);
         if (claimableAmount != 0) {
             emissionsAuthority.mintProgramEmission(programId, epoch, seller, claimableAmount);
         }
@@ -153,18 +174,31 @@ contract AntseedSellerOperatorUsageRewards is Ownable2Step, Pausable, Reentrancy
         }
 
         emit SellerOperatorRewardClaimed(
-            seller, epoch, weightedPoints, totalWeightedPoints, grossAmount, claimableAmount, reserveAmount
+            seller, agentId, epoch, weightedPoints, totalWeightedPoints, grossAmount, claimableAmount, reserveAmount
         );
     }
 
-    function _sellerShare(address seller, uint256 epoch)
+    function _agentShare(uint256 agentId, uint256 epoch)
         internal
         view
         returns (uint256 weightedPoints, uint256 totalWeightedPoints)
     {
         IAntseedUsageAccounting accounting = usageAccounting;
         if (address(accounting) == address(0)) revert InvalidAddress();
-        weightedPoints = accounting.weightedSellerPointsByEpoch(epoch, seller);
+        weightedPoints = accounting.weightedAgentSellerPointsByEpoch(epoch, agentId);
         totalWeightedPoints = accounting.totalWeightedSellerPointsByEpoch(epoch);
+    }
+
+    function _agentIdForSellerAtEpoch(address seller, uint256 epoch) internal view returns (uint256 agentId) {
+        if (seller == address(0)) revert InvalidAddress();
+        agentId = usageAccounting.sellerAgentIdByEpoch(epoch, seller);
+        if (agentId == 0) revert NothingToClaim();
+    }
+
+    function _agentOwner(uint256 agentId) internal view returns (address owner) {
+        address identityRegistry = registry.identityRegistry();
+        if (identityRegistry == address(0)) revert InvalidAddress();
+        owner = IERC8004Registry(identityRegistry).ownerOf(agentId);
+        if (owner == address(0)) revert InvalidAddress();
     }
 }

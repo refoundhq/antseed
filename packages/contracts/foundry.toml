@@ -14,6 +14,10 @@ optimizer_runs = 200
 via_ir = true
 ffi = false
 
+[profile.usage-accounting]
+src = "test/emissions"
+test = "test/emissions"
+
 [fmt]
 line_length = 120
 tab_width = 4

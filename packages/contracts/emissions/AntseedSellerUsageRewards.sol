@@ -56,6 +56,14 @@ contract AntseedSellerUsageRewards is Ownable2Step, Pausable, ReentrancyGuard {
     mapping(uint256 => mapping(uint256 => bool)) public positionEpochClaimed;
     mapping(address => mapping(uint256 => bool)) public bootstrapEpochClaimed;
 
+    struct RewardCollection {
+        address rewardRecipient;
+        address staker;
+        bool emitClaimEvents;
+        uint256[] claimableByEpoch;
+        uint256[] burnedByEpoch;
+    }
+
     // ─── Events ──────────────────────────────────────────────────────
     event EmissionsAuthoritySet(address indexed emissionsAuthority);
     event SellerPoolsSet(address indexed sellerPools);
@@ -118,8 +126,9 @@ contract AntseedSellerUsageRewards is Ownable2Step, Pausable, ReentrancyGuard {
         if (recipient == address(0)) revert InvalidAddress();
         uint256[] memory claimableByEpoch = new uint256[](epochs.length);
         uint256[] memory burnedByEpoch = new uint256[](epochs.length);
-        (uint256 totalClaimed, uint256 totalBurned) =
-            _collectStakerRewards(positionId, epochs, recipient, msg.sender, true, claimableByEpoch, burnedByEpoch);
+        (uint256 totalClaimed, uint256 totalBurned) = _collectStakerRewards(
+            positionId, epochs, RewardCollection(recipient, msg.sender, true, claimableByEpoch, burnedByEpoch)
+        );
         if (totalClaimed == 0 && totalBurned == 0) revert NothingToClaim();
         _mintCollected(epochs, recipient, claimableByEpoch);
         _mintCollected(epochs, DEAD_ADDRESS, burnedByEpoch);
@@ -139,7 +148,7 @@ contract AntseedSellerUsageRewards is Ownable2Step, Pausable, ReentrancyGuard {
         uint256 totalBurnedAll;
         for (uint256 p = 0; p < positionIds.length; p++) {
             (uint256 totalClaimed, uint256 totalBurned) = _collectStakerRewards(
-                positionIds[p], epochs, recipient, msg.sender, true, claimableByEpoch, burnedByEpoch
+                positionIds[p], epochs, RewardCollection(recipient, msg.sender, true, claimableByEpoch, burnedByEpoch)
             );
             totalClaimedAll += totalClaimed;
             totalBurnedAll += totalBurned;
@@ -162,7 +171,9 @@ contract AntseedSellerUsageRewards is Ownable2Step, Pausable, ReentrancyGuard {
         uint256[] memory restakedByEpoch = new uint256[](epochs.length);
         uint256[] memory burnedByEpoch = new uint256[](epochs.length);
         (uint256 totalRestaked, uint256 totalBurned) = _collectStakerRewards(
-            positionId, epochs, address(sellerPools), msg.sender, false, restakedByEpoch, burnedByEpoch
+            positionId,
+            epochs,
+            RewardCollection(address(sellerPools), msg.sender, false, restakedByEpoch, burnedByEpoch)
         );
         if (totalRestaked == 0) revert NothingToClaim();
         _mintCollected(epochs, address(sellerPools), restakedByEpoch);
@@ -188,7 +199,9 @@ contract AntseedSellerUsageRewards is Ownable2Step, Pausable, ReentrancyGuard {
         uint256 totalBurnedAll;
         for (uint256 p = 0; p < positionIds.length; p++) {
             (restakedAmounts[p], burnedAmounts[p]) = _collectStakerRewards(
-                positionIds[p], epochs, address(sellerPools), msg.sender, false, restakedByEpoch, burnedByEpoch
+                positionIds[p],
+                epochs,
+                RewardCollection(address(sellerPools), msg.sender, false, restakedByEpoch, burnedByEpoch)
             );
             totalRestakedAll += restakedAmounts[p];
             totalBurnedAll += burnedAmounts[p];
@@ -296,18 +309,13 @@ contract AntseedSellerUsageRewards is Ownable2Step, Pausable, ReentrancyGuard {
     //                        INTERNAL HELPERS
     // ═══════════════════════════════════════════════════════════════════
 
-    function _collectStakerRewards(
-        uint256 positionId,
-        uint256[] calldata epochs,
-        address rewardRecipient,
-        address staker,
-        bool emitClaimEvents,
-        uint256[] memory claimableByEpoch,
-        uint256[] memory burnedByEpoch
-    ) internal returns (uint256 totalClaimed, uint256 totalBurned) {
+    function _collectStakerRewards(uint256 positionId, uint256[] calldata epochs, RewardCollection memory collection)
+        internal
+        returns (uint256 totalClaimed, uint256 totalBurned)
+    {
         (address owner, uint256 agentId,,,,,,) = sellerPools.positions(positionId);
         if (owner == address(0)) revert InvalidValue();
-        if (owner != staker) revert NotPositionOwner();
+        if (owner != collection.staker) revert NotPositionOwner();
 
         for (uint256 i = 0; i < epochs.length; i++) {
             uint256 epoch = epochs[i];
@@ -316,13 +324,19 @@ contract AntseedSellerUsageRewards is Ownable2Step, Pausable, ReentrancyGuard {
             if (grossAmount == 0) continue;
 
             positionEpochClaimed[positionId][epoch] = true;
-            claimableByEpoch[i] += claimableAmount;
-            burnedByEpoch[i] += burnedAmount;
+            collection.claimableByEpoch[i] += claimableAmount;
+            collection.burnedByEpoch[i] += burnedAmount;
             totalClaimed += claimableAmount;
             totalBurned += burnedAmount;
-            if (emitClaimEvents) {
+            if (collection.emitClaimEvents) {
                 emit StakerUsageRewardClaimed(
-                    positionId, staker, rewardRecipient, epoch, grossAmount, claimableAmount, burnedAmount
+                    positionId,
+                    collection.staker,
+                    collection.rewardRecipient,
+                    epoch,
+                    grossAmount,
+                    claimableAmount,
+                    burnedAmount
                 );
             }
         }

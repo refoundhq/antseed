@@ -2,6 +2,48 @@
 pragma solidity ^0.8.24;
 
 interface IAntseedUsageAccounting {
+    struct BuyerUsage {
+        uint256 points;
+        uint256 weightedPoints;
+    }
+
+    struct SellerUsage {
+        uint256 points;
+        uint256 weightedPoints;
+        uint256 poolPoints;
+    }
+
+    struct UsageTotals {
+        BuyerUsage buyers;
+        SellerUsage sellers;
+    }
+
+    event SellerPoolsSet(address indexed sellerPools);
+    event PointsPolicySet(address indexed policy);
+    event MinimumAccountedPoolPowerSet(uint256 minimumPoolPower);
+    event UsageRecorderSet(address indexed recorder, bool allowed);
+    event LegacySellerAccrualPending(address indexed seller, uint256 indexed epoch, uint256 pointsDelta);
+    event UsagePointsAccrued(
+        uint256 indexed epoch,
+        address indexed buyer,
+        address indexed seller,
+        uint256 agentId,
+        uint256 rawPoints,
+        uint256 buyerPoints,
+        uint256 sellerPoints,
+        uint256 poolPower,
+        uint256 weightedBuyerPoints,
+        uint256 weightedSellerPoints
+    );
+    event PendingSellerAccrualCleared(address indexed seller, uint256 pointsDelta);
+
+    error InvalidAddress();
+    error InvalidValue();
+    error NotUsageRecorder();
+    error PendingSellerAccrualExists();
+    error NoPendingSellerAccrual();
+    error AccrualDeltaMismatch();
+
     function currentEpoch() external view returns (uint256);
     function pendingSellerAccrual() external view returns (address seller, uint256 pointsDelta);
 
@@ -10,33 +52,33 @@ interface IAntseedUsageAccounting {
     function accruePoints(bytes32 channelId, address buyer, address seller, uint256 pointsDelta) external;
     function clearPendingSellerAccrual() external;
     function setPointsPolicy(address policy) external;
+    function setMinimumAccountedPoolPower(uint256 minimumPoolPower) external;
+    function minimumAccountedPoolPower() external view returns (uint256);
 
-    function maxRewardableVolumeLeverageBps() external view returns (uint256);
-    function setMaxRewardableVolumeLeverageBps(uint256 leverageBps) external;
-    function totalRawBuyerPointsByEpoch(uint256 epoch) external view returns (uint256);
-    function totalRawSellerPointsByEpoch(uint256 epoch) external view returns (uint256);
-    function totalRawPairPointsByEpoch(uint256 epoch) external view returns (uint256);
-    function totalRawPoolPointsByEpoch(uint256 epoch) external view returns (uint256);
-    function totalBuyerPoolPointsByEpoch(uint256 epoch) external view returns (uint256);
+    function totalUsage() external view returns (UsageTotals memory);
+    function epochUsage(uint256 epoch) external view returns (UsageTotals memory);
+    function buyerUsageTotal(address buyer) external view returns (BuyerUsage memory);
+    function buyerAgentUsageTotal(address buyer, uint256 agentId) external view returns (BuyerUsage memory);
+    function buyerEpochUsage(uint256 epoch, address buyer) external view returns (BuyerUsage memory);
+    function buyerAgentEpochUsage(uint256 epoch, address buyer, uint256 agentId)
+        external
+        view
+        returns (BuyerUsage memory);
+    function agentEpochUsage(uint256 epoch, uint256 agentId) external view returns (SellerUsage memory);
+    function totalBuyerPointsByEpoch(uint256 epoch) external view returns (uint256);
+    function totalSellerPointsByEpoch(uint256 epoch) external view returns (uint256);
+    function totalPoolPointsByEpoch(uint256 epoch) external view returns (uint256);
     function totalWeightedPoolPointsByEpoch(uint256 epoch) external view returns (uint256);
     function totalWeightedBuyerPointsByEpoch(uint256 epoch) external view returns (uint256);
     function totalWeightedSellerPointsByEpoch(uint256 epoch) external view returns (uint256);
     function sellerAgentIdByEpoch(uint256 epoch, address seller) external view returns (uint256);
-    function rawBuyerPointsByEpoch(uint256 epoch, address buyer) external view returns (uint256);
-    function rawSellerPointsByEpoch(uint256 epoch, address seller) external view returns (uint256);
-    function rawBuyerSellerPointsByEpoch(uint256 epoch, address buyer, address seller)
-        external
-        view
-        returns (uint256);
-    function rawAgentPoolPointsByEpoch(uint256 epoch, uint256 agentId) external view returns (uint256);
-    function rawPoolPointsByEpoch(uint256 epoch, address seller) external view returns (uint256);
-    function buyerAgentPoolPointsByEpoch(uint256 epoch, address buyer, uint256 agentId)
-        external
-        view
-        returns (uint256);
-    function buyerPoolPointsByEpoch(uint256 epoch, address buyer, address seller) external view returns (uint256);
+    function buyerPointsByEpoch(uint256 epoch, address buyer) external view returns (uint256);
+    function sellerPointsByEpoch(uint256 epoch, address seller) external view returns (uint256);
+    function agentPoolPointsByEpoch(uint256 epoch, uint256 agentId) external view returns (uint256);
+    function poolPointsByEpoch(uint256 epoch, address seller) external view returns (uint256);
     function weightedPoolPointsByEpoch(uint256 epoch, uint256 agentId) external view returns (uint256);
     function weightedPoolPointsByEpoch(uint256 epoch, address seller) external view returns (uint256);
+    function weightedAgentSellerPointsByEpoch(uint256 epoch, uint256 agentId) external view returns (uint256);
     function weightedSellerPointsByEpoch(uint256 epoch, address seller) external view returns (uint256);
     function weightedBuyerPointsByEpoch(uint256 epoch, address buyer) external view returns (uint256);
 }
