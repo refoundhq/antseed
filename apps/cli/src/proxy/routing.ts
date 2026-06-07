@@ -5,7 +5,7 @@ import {
   type ServiceApiProtocol,
   type TargetProtocolSelection,
 } from './service-api-adapter.js'
-import { log } from './request-utils.js'
+import { log, normalizePeerId } from './request-utils.js'
 
 export type PeerProtocolRoutePlan = {
   provider: string
@@ -30,10 +30,12 @@ export function getExplicitProviderOverride(request: SerializedHttpRequest): str
 export function getExplicitPeerIdOverride(
   request: SerializedHttpRequest,
   sessionPinnedPeerId: string | undefined,
+  requestPinnedPeerId?: string | null,
 ): string | null {
   // Per-request header takes priority over session pin
-  const header = request.headers['x-antseed-pin-peer']?.trim().toLowerCase()
-  if (header && header.length > 0) return header
+  const header = request.headers['x-antseed-pin-peer']?.trim()
+  if (header && header.length > 0) return normalizePeerId(header) ?? header.toLowerCase()
+  if (requestPinnedPeerId) return requestPinnedPeerId.toLowerCase()
   return sessionPinnedPeerId?.toLowerCase() ?? null
 }
 

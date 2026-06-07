@@ -342,9 +342,10 @@ export function registerBuyerStartCommand(buyerCmd: Command): void {
       if (pinnedPeerId) {
         console.log(chalk.yellow(`  pinned peer: ${pinnedPeerId} (router bypassed)`))
       } else {
-        console.log(chalk.yellow('  pinned peer: none — auto-selection is disabled, requests will 409 until a peer is pinned'))
+        console.log(chalk.yellow('  pinned peer: none — auto-selection is disabled, requests will fail until a peer is pinned'))
         console.log(chalk.dim('    Pin a peer with:  antseed network browse → antseed buyer connection set --peer <peerId>'))
         console.log(chalk.dim('    Or per-request:   x-antseed-pin-peer: <peerId> header'))
+        console.log(chalk.dim('    Or in model:      <peerId>/<model>'))
       }
       console.log('')
 

@@ -12,7 +12,6 @@ interface BuyerStateFile {
   state?: string;
   pid?: number;
   port?: number;
-  pinnedService?: string | null;
   pinnedPeerId?: string | null;
 }
 
@@ -66,7 +65,6 @@ export function registerBuyerStatusCommand(buyerCmd: Command): void {
           console.log(JSON.stringify({
             connectionState: nodeStatus.state,
             proxyPort: nodeStatus.proxyPort,
-            pinnedService: buyerState?.pinnedService ?? null,
             pinnedPeerId: buyerState?.pinnedPeerId ?? null,
             depositsAvailable,
             depositsReserved,
@@ -84,7 +82,6 @@ export function registerBuyerStatusCommand(buyerCmd: Command): void {
         table.push(
           ['Connection state', nodeStatus.state === 'connected' ? chalk.green('connected') : chalk.gray('idle')],
           ['Proxy port', nodeStatus.proxyPort ? String(nodeStatus.proxyPort) : chalk.dim('n/a')],
-          ['Pinned service', buyerState?.pinnedService ? chalk.cyan(buyerState.pinnedService) : chalk.dim('none')],
           ['Pinned peer', buyerState?.pinnedPeerId ? chalk.cyan(buyerState.pinnedPeerId) : chalk.dim('none')],
           ['Deposits available', depositsAvailable ? chalk.green(`${depositsAvailable} USDC`) : chalk.dim('unavailable')],
           ['Deposits reserved', depositsReserved ? chalk.yellow(`${depositsReserved} USDC`) : chalk.dim('unavailable')],

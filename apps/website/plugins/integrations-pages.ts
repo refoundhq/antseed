@@ -280,7 +280,11 @@ function renderSkillMarkdown(): string {
   out.push('    `~/.antseed/buyer.state.json` and applies to every request until you change it.');
   out.push('  - **Per-request header**: `x-antseed-pin-peer: <peerId>` on each call. Overrides');
   out.push('    the session pin for that request, and works *without* any session pin at all.');
+  out.push('  - **Model prefix**: set `model` to `<peerId>/<service>`. The proxy uses the');
+  out.push('    prefix as the peer pin and forwards only `<service>` to the seller.');
   out.push('  ');
+  out.push('  If both header and model-prefix pins are present, the header selects the peer;');
+  out.push('  the model prefix is still stripped before routing.');
   out.push('  Until at least one of these is in effect, every request returns `no_peer_pinned`.');
   out.push('');
 
@@ -424,7 +428,7 @@ function renderSkillMarkdown(): string {
   out.push('| `identity.key` | Raw 32-byte EVM private key for the buyer wallet. Fallback when `ANTSEED_IDENTITY_HEX` is not set. | yes | NO — deleting loses access to your USDC deposits. Back this up. |');
   out.push('| `identity.enc` | Encrypted copy of `identity.key` (when the desktop app sets a passphrase). | yes | only if `identity.key` is also intact |');
   out.push('| `config.json` | Static settings: chain id, proxy port, max-pricing caps, bootstrap nodes, payments preferences. Hand-editable. | yes | yes (defaults are sane) |');
-  out.push('| `buyer.state.json` | Live runtime state: `pinnedPeerId`, `pinnedService`, the discovered-peers cache (`discoveredPeers`), on-chain stats, the proxy `pid` and `port`. Re-built from the network on next start. | yes (the pin survives restart) | yes (you lose the pin and the cached peer list — next browse will repopulate) |');
+  out.push('| `buyer.state.json` | Live runtime state: `pinnedPeerId`, the discovered-peers cache (`discoveredPeers`), on-chain stats, the proxy `pid` and `port`. Re-built from the network on next start. | yes (the pin survives restart) | yes (you lose the pin and the cached peer list — next browse will repopulate) |');
   out.push('| `metering.db` | SQLite log of every request the proxy served (model, peer, tokens, USDC). Used by `antseed buyer status` and the payments portal. | yes | yes (you lose request history; settlement is unaffected) |');
   out.push('| `payments/` | Per-channel state used by the seller-side settlement flow (only relevant if you also run `antseed seller`). | yes | only if you do not run a seller |');
   out.push('| `plugins/` | Cache of downloaded provider plugins. | yes | yes (re-downloaded on next use) |');
@@ -458,7 +462,6 @@ function renderSkillMarkdown(): string {
   out.push('Top-level fields that an agent might want to inspect:');
   out.push('');
   out.push('- `pinnedPeerId` — the currently pinned peer (or `null`).');
-  out.push('- `pinnedService` — the service id pinned with `antseed buyer connection set --service <id>` (rare).');
   out.push('- `pid` / `port` — the running proxy. If `pid` is non-null but the process is gone, `antseed buyer start` will detect the stale lockfile and clean up.');
   out.push('- `discoveredPeers` — cached peer list from the last DHT browse. Refreshed on `antseed network browse`.');
   out.push('- `peersUpdatedAt`, `onChainStatsRefreshedAt` — cache timestamps (epoch millis).');

@@ -9,7 +9,6 @@ interface BuyerStateFile {
   state: 'connected' | 'stopped'
   pid: number
   port: number
-  pinnedService: string | null
   pinnedPeerId: string | null
   [key: string]: unknown
 }
@@ -30,6 +29,7 @@ async function readStateFile(dataDir: string): Promise<BuyerStateFile | null> {
 async function writeStateFile(dataDir: string, data: BuyerStateFile): Promise<void> {
   const tmp = join(dataDir, `.buyer.state.${randomUUID()}.json.tmp`)
   try {
+    delete (data as Record<string, unknown>).pinnedService
     await writeFile(tmp, JSON.stringify(data, null, 2))
     await rename(tmp, stateFilePath(dataDir))
   } catch (err) {
@@ -67,7 +67,7 @@ export function registerBuyerConnectionCommand(buyerCmd: Command): void {
 
   connection
     .command('get')
-    .description('Show current session state (pinned service, pinned peer)')
+    .description('Show current session state (pinned peer)')
     .action(async () => {
       const globalOpts = getGlobalOptions(buyerCmd)
       const state = await readStateFile(globalOpts.dataDir)
@@ -79,31 +79,20 @@ export function registerBuyerConnectionCommand(buyerCmd: Command): void {
       console.log(`State:         ${alive ? chalk.green('connected') : chalk.red(state.state ?? 'stopped')}`)
       console.log(`PID:           ${state.pid}`)
       console.log(`Port:          ${state.port}`)
-      console.log(`Pinned service: ${state.pinnedService ? chalk.cyan(state.pinnedService) : chalk.dim('none')}`)
       console.log(`Pinned peer:   ${state.pinnedPeerId ? chalk.cyan(state.pinnedPeerId) : chalk.dim('none')}`)
     })
 
   connection
     .command('set')
-    .description('Update session overrides on the running buyer proxy')
-    .option('--service <service>', 'override service ID for all routed requests')
+    .description('Update the session peer pin on the running buyer proxy')
     .option('--peer <peerId>', 'pin all requests to a specific peer ID (40-char hex EVM address)')
     .action(async (options) => {
       const globalOpts = getGlobalOptions(buyerCmd)
       const state = await requireRunningBuyer(globalOpts.dataDir)
 
-      if (options.service === undefined && options.peer === undefined) {
-        console.error(chalk.red('Error: specify at least --service or --peer.'))
+      if (options.peer === undefined) {
+        console.error(chalk.red('Error: specify --peer.'))
         process.exit(1)
-      }
-
-      if (options.service !== undefined) {
-        const service = String(options.service).trim()
-        if (service.length === 0) {
-          console.error(chalk.red('Error: --service must not be empty.'))
-          process.exit(1)
-        }
-        state.pinnedService = service
       }
 
       if (options.peer !== undefined) {
@@ -117,34 +106,20 @@ export function registerBuyerConnectionCommand(buyerCmd: Command): void {
 
       await writeStateFile(globalOpts.dataDir, state)
 
-      if (options.service !== undefined) console.log(chalk.green(`Pinned service set to: ${state.pinnedService}`))
       if (options.peer !== undefined) console.log(chalk.green(`Pinned peer set to: ${state.pinnedPeerId}`))
     })
 
   connection
     .command('clear')
-    .description('Clear session overrides (defaults to clearing both service and peer)')
-    .option('--service', 'clear only the service override')
-    .option('--peer', 'clear only the peer pin')
-    .action(async (options) => {
+    .description('Clear the session peer pin')
+    .action(async () => {
       const globalOpts = getGlobalOptions(buyerCmd)
       const state = await requireRunningBuyer(globalOpts.dataDir)
 
-      const clearAll = !options.service && !options.peer
-      const clearService = clearAll || Boolean(options.service)
-      const clearPeer = clearAll || Boolean(options.peer)
-
-      if (clearService) state.pinnedService = null
-      if (clearPeer) state.pinnedPeerId = null
+      state.pinnedPeerId = null
 
       await writeStateFile(globalOpts.dataDir, state)
 
-      if (clearService && clearPeer) {
-        console.log(chalk.green('All session overrides cleared.'))
-      } else if (clearService) {
-        console.log(chalk.green('Service override cleared.'))
-      } else {
-        console.log(chalk.green('Peer pin cleared.'))
-      }
+      console.log(chalk.green('Peer pin cleared.'))
     })
 }

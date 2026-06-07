@@ -246,34 +246,24 @@ antseed buyer start --metadata-fetch-timeout-ms 1500
 
 For production sellers, prefer a dedicated Base JSON-RPC endpoint over public defaults. You can set it durably with `payments.crypto.rpcUrl`, at runtime with `ANTSEED_BASE_RPC_URL`, or for one run with `antseed seller start --base-rpc-url <url>`.
 
-### Session overrides (live, while proxy is running)
+### Peer pinning (live, while proxy is running)
 
-After `antseed buyer start` is running, you can override the service or peer for all subsequent requests without restarting:
+After `antseed buyer start` is running, you can pin all subsequent requests to a peer without restarting:
 
 ```bash
-# Pin all requests to a specific service (overrides whatever the tool sends)
-antseed buyer connection set --service claude-opus-4-6
-
 # Pin all requests to a specific peer (bypasses router for peer selection)
 antseed buyer connection set --peer <40-char-hex-peer-id>
-
-# Combine both in one command
-antseed buyer connection set --service claude-sonnet-4-6 --peer <peer-id>
 
 # Check current session state
 antseed buyer connection get
 
-# Clear individual overrides
-antseed buyer connection clear --service
-antseed buyer connection clear --peer
-
-# Clear all overrides at once
+# Clear the session pin
 antseed buyer connection clear
 ```
 
-Session overrides are stored in `~/.antseed/buyer.state.json` and picked up by the running proxy immediately via file-watching. The desktop app reads and writes the same file to expose service/peer selection in its UI.
+Session peer pins are stored in `~/.antseed/buyer.state.json` and picked up by the running proxy immediately via file-watching. The desktop app reads and writes the same file to expose peer selection in its UI.
 
-The service override rewrites the `model` field in the request body **before routing**, so peer selection, pricing, and the forwarded request all reflect the overridden service — regardless of what the tool (e.g. Claude Code) originally requested.
+For tools that can only set a model name, use `<peerId>/<model>` as the model. The proxy strips the peer prefix before provider matching and forwards only `<model>` to the seller. If both this model prefix and `x-antseed-pin-peer` are sent, the header selects the peer and the model prefix is still stripped.
 
 ## Payments
 

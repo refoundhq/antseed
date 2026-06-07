@@ -35,7 +35,7 @@ import {
   summarizeRequestShape,
   summarizeErrorResponse,
   requestWantsStreaming,
-  rewriteServiceInBody,
+  rewritePeerPinnedServiceInBody,
   isConnectionChurnError,
   isConnectionHealthy,
 } from './request-utils.js'
@@ -56,12 +56,12 @@ import { DEFAULT_BUYER_PEER_REFRESH_INTERVAL_MS } from '../config/defaults.js'
 
 // Re-export for backward compatibility (used by tests and other consumers)
 export { selectCandidatePeersForRouting, type CandidatePeerRouteSelection } from './routing.js'
-export { rewriteServiceInBody } from './request-utils.js'
+export { parsePeerPinnedService, rewritePeerPinnedServiceInBody } from './request-utils.js'
 
 export interface BuyerProxyConfig {
   port: number
   node: AntseedNode
-  /** Data directory used to persist buyer.state.json (discovered peers, session overrides). */
+  /** Data directory used to persist buyer.state.json (discovered peers, session peer pin). */
   dataDir: string
   /** How often to refresh the peer list from DHT in the background (ms). Default: 300000 (5 min) */
   backgroundRefreshIntervalMs?: number
@@ -78,12 +78,6 @@ export interface BuyerProxyConfig {
    * and allowed by the buyer's pricing policy. A 502 is returned if the peer cannot be reached.
    */
   pinnedPeerId?: string
-  /**
-   * Pin all requests to a specific service ID for this session.
-   * Overrides the service field in the request body before routing and forwarding.
-   * Can be updated at runtime via `antseed buyer connection set --service`.
-   */
-  pinnedService?: string
 }
 
 const RETRYABLE_STATUS_CODES = new Set([408, 429, 500, 502, 503, 504])
@@ -348,7 +342,6 @@ export class BuyerProxy {
   private readonly _stateFile: string
   private _stateFileWatching = false
   private _pinnedPeer: string | null
-  private _pinnedService: string | null
   private _stateWatchDebounce: ReturnType<typeof setTimeout> | null = null
 
   private _stateWriteChain: Promise<void> = Promise.resolve()
@@ -376,7 +369,6 @@ export class BuyerProxy {
     this._stateDir = config.dataDir
     this._stateFile = join(config.dataDir, 'buyer.state.json')
     this._pinnedPeer = config.pinnedPeerId?.toLowerCase() ?? null
-    this._pinnedService = config.pinnedService?.trim() ?? null
     this._server = createServer((req, res) => {
       this._handleRequest(req, res).catch((err) => {
         log('Unhandled error:', err)
@@ -405,10 +397,10 @@ export class BuyerProxy {
     // startup route from the warm cache without blocking on DHT discovery.
     // The background refresh still runs to pick up fresh peers and IP changes.
     await this._hydratePeersFromStateFile()
-    // If the CLI didn't pass --peer/--service, adopt whatever a previous
-    // `antseed buyer connection set` wrote to buyer.state.json so the pin
-    // survives daemon restart.
-    if (this._pinnedPeer === null && this._pinnedService === null) {
+    // If the CLI didn't pass --peer, adopt whatever a previous
+    // `antseed buyer connection set --peer` wrote to buyer.state.json so the
+    // pin survives daemon restart.
+    if (this._pinnedPeer === null) {
       await this._reloadSessionOverrides()
     }
     await new Promise<void>((resolve, reject) => {
@@ -495,15 +487,11 @@ export class BuyerProxy {
     try {
       const raw = await readFile(this._stateFile, 'utf-8')
       const parsed = JSON.parse(raw) as Record<string, unknown>
-      const pinnedService = typeof parsed.pinnedService === 'string' && parsed.pinnedService.trim().length > 0
-        ? parsed.pinnedService.trim()
-        : null
       const pinnedPeer = typeof parsed.pinnedPeerId === 'string' && parsed.pinnedPeerId.trim().length > 0
         ? parsed.pinnedPeerId.trim().toLowerCase()
         : null
-      this._pinnedService = pinnedService
       this._pinnedPeer = pinnedPeer
-      log(`Session overrides reloaded: service=${pinnedService ?? 'none'} peer=${pinnedPeer ?? 'none'}`)
+      log(`Session overrides reloaded: peer=${pinnedPeer ?? 'none'}`)
     } catch {
       // state file unreadable; keep current values
     }
@@ -533,11 +521,11 @@ export class BuyerProxy {
   }
 
   private async _writeStateFile(state: 'connected' | 'stopped'): Promise<void> {
-    // When stopping, preserve whatever pinnedService/pinnedPeerId is already
+    // When stopping, preserve whatever pinnedPeerId is already
     // in the file — the debounce may have been cancelled before
     // _reloadSessionOverrides could commit the latest CLI-written values.
     const sessionOverrides = state === 'connected'
-      ? { pinnedService: this._pinnedService, pinnedPeerId: this._pinnedPeer }
+      ? { pinnedPeerId: this._pinnedPeer, pinnedService: undefined }
       : {}
     await this._mergeStateFile({
       state,
@@ -988,19 +976,18 @@ export class BuyerProxy {
       body: new Uint8Array(body),
     }
 
-    // Snapshot both session overrides together before any await so a concurrent
-    // _reloadSessionOverrides() cannot produce a service/peer mismatch mid-request.
-    const effectivePinnedService = this._pinnedService
+    // Snapshot the session peer pin before any await so a concurrent
+    // _reloadSessionOverrides() cannot change routing mid-request.
     const effectivePinnedPeer = this._pinnedPeer
-    if (effectivePinnedService) {
-      const { body: rewrittenBody, headers: rewrittenHeaders } = rewriteServiceInBody(
-        serializedReq.body,
-        serializedReq.headers,
-        effectivePinnedService,
-      )
-      if (rewrittenBody !== serializedReq.body) {
-        serializedReq = { ...serializedReq, body: rewrittenBody, headers: rewrittenHeaders }
-        log(`Service override applied: ${effectivePinnedService}`)
+    const {
+      body: servicePinBody,
+      headers: servicePinHeaders,
+      pinnedPeerId: bodyPinnedPeer,
+    } = rewritePeerPinnedServiceInBody(serializedReq.body, serializedReq.headers)
+    if (servicePinBody !== serializedReq.body) {
+      serializedReq = { ...serializedReq, body: servicePinBody, headers: servicePinHeaders }
+      if (bodyPinnedPeer) {
+        log(`Model peer pin applied: peer=${bodyPinnedPeer.slice(0, 12)}...`)
       }
     }
 
@@ -1027,12 +1014,13 @@ export class BuyerProxy {
     const requestedService = extractRequestedService(serializedReq)
     log(`Routing: protocol=${requestProtocol ?? 'null'} service=${requestedService ?? 'null'}`)
     const explicitProvider = getExplicitProviderOverride(serializedReq)
-    const explicitPeerId = getExplicitPeerIdOverride(serializedReq, effectivePinnedPeer ?? undefined)
+    const explicitPeerId = getExplicitPeerIdOverride(serializedReq, effectivePinnedPeer ?? undefined, bodyPinnedPeer)
     log(`Routing hints: provider=${explicitProvider ?? 'auto'} pin-peer=${explicitPeerId ?? 'none'}`)
 
     // Auto peer selection is disabled. Every request MUST target a specific
-    // peer, either via the per-request `x-antseed-pin-peer` header or via a
-    // session-wide pin set by `antseed buyer connection set --peer <peerId>`.
+    // peer, either via the per-request `x-antseed-pin-peer` header, a
+    // `<peerId>/<model>` model prefix, or a session-wide pin set by
+    // `antseed buyer connection set --peer <peerId>`.
     //
     // Surface the error in the structured shape OpenAI/Anthropic SDKs expect
     // (`{ error: { type, code, message, ... } }`) so callers see a proper
@@ -1044,8 +1032,9 @@ export class BuyerProxy {
       log('Request rejected: no peer pinned')
       const errorMessage =
         'No peer pinned. Auto-selection is disabled.\n'
-        + 'Pin a peer one of two ways:\n'
+        + 'Pin a peer one of three ways:\n'
         + '  • Per-request header:   x-antseed-pin-peer: <peerId>    (40-char hex EVM address)\n'
+        + '  • Model name prefix:    <peerId>/<model>\n'
         + '  • Session pin:          antseed buyer connection set --peer <peerId>\n'
         + 'Discover peers with:       antseed network browse'
       res.writeHead(400, { 'content-type': 'application/json' })
@@ -1057,6 +1046,7 @@ export class BuyerProxy {
           param: 'x-antseed-pin-peer',
           help: {
             perRequestHeader: 'x-antseed-pin-peer: <peerId>',
+            modelPrefix: '<peerId>/<model>',
             sessionPin: 'antseed buyer connection set --peer <peerId>',
             discoverPeers: 'antseed network browse',
           },
@@ -1129,7 +1119,11 @@ export class BuyerProxy {
     }
 
     if (!pinnedDiscovered) {
-      const logSource = serializedReq.headers['x-antseed-pin-peer'] ? 'x-antseed-pin-peer header' : '--peer flag or session pin'
+      const logSource = serializedReq.headers['x-antseed-pin-peer']
+        ? 'x-antseed-pin-peer header'
+        : bodyPinnedPeer
+          ? 'model peer prefix'
+          : '--peer flag or session pin'
       const diagnostics = this._formatPeerSelectionDiagnostics(discoveredPeers)
       log(`Pinned peer ${explicitPeerId.slice(0, 12)}... not discoverable in DHT (${logSource})`)
       res.writeHead(502, { 'content-type': 'text/plain' })

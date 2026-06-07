@@ -17,6 +17,26 @@ function getHeader(headers: Record<string, string>, name: string): string {
   return headers[name] ?? headers[name.charAt(0).toUpperCase() + name.slice(1)] ?? ''
 }
 
+export function normalizePeerId(value: string): string | null {
+  const trimmed = value.trim().toLowerCase()
+  const withoutPrefix = trimmed.startsWith('0x') ? trimmed.slice(2) : trimmed
+  return /^[0-9a-f]{40}$/.test(withoutPrefix) ? withoutPrefix : null
+}
+
+export function parsePeerPinnedService(value: string): { peerId: string; service: string } | null {
+  const slashIndex = value.indexOf('/')
+  if (slashIndex <= 0 || slashIndex === value.length - 1) {
+    return null
+  }
+
+  const peerId = normalizePeerId(value.slice(0, slashIndex))
+  const service = value.slice(slashIndex + 1).trim()
+  if (!peerId || service.length === 0) {
+    return null
+  }
+  return { peerId, service }
+}
+
 export function extractRequestedService(request: SerializedHttpRequest): string | null {
   if (!getHeader(request.headers, 'content-type').toLowerCase().includes('application/json')) {
     return null
@@ -248,26 +268,39 @@ export function isLoopbackPeer(peer: PeerInfo): boolean {
   return isLoopbackHost(host)
 }
 
-/**
- * Rewrite the `service` (and `model` for upstream LLM API compat) fields in a JSON request body.
- * Also updates `content-length` if present in headers.
- * Returns the original body/headers unchanged if the body is not JSON,
- * is empty, or cannot be parsed.
- */
-export function rewriteServiceInBody(
+export function rewritePeerPinnedServiceInBody(
   body: Uint8Array,
   headers: Record<string, string>,
-  service: string,
-): { body: Uint8Array; headers: Record<string, string> } {
+): { body: Uint8Array; headers: Record<string, string>; pinnedPeerId: string | null } {
   if (!getHeader(headers, 'content-type').toLowerCase().includes('application/json') || body.length === 0) {
-    return { body, headers }
+    return { body, headers, pinnedPeerId: null }
   }
   const obj = parseJsonObject(body)
   if (!obj) {
-    return { body, headers }
+    return { body, headers, pinnedPeerId: null }
   }
-  obj['service'] = service
-  obj['model'] = service
+
+  const rawModel = typeof obj['model'] === 'string' ? obj['model'].trim() : ''
+  const rawService = typeof obj['service'] === 'string' ? obj['service'].trim() : ''
+  const parsedModel = rawModel ? parsePeerPinnedService(rawModel) : null
+  const parsedService = rawService ? parsePeerPinnedService(rawService) : null
+  const parsed = parsedModel ?? parsedService
+  if (!parsed) {
+    return { body, headers, pinnedPeerId: null }
+  }
+
+  if (parsedModel) {
+    obj['model'] = parsedModel.service
+    if (obj['service'] === undefined || obj['service'] === rawModel) {
+      obj['service'] = parsedModel.service
+    }
+  } else if (parsedService) {
+    obj['service'] = parsedService.service
+    if (obj['model'] === undefined || obj['model'] === rawService) {
+      obj['model'] = parsedService.service
+    }
+  }
+
   const rewritten = new TextEncoder().encode(JSON.stringify(obj))
   const updatedHeaders = { ...headers }
   if ('content-length' in updatedHeaders) {
@@ -275,5 +308,5 @@ export function rewriteServiceInBody(
   } else if ('Content-Length' in updatedHeaders) {
     updatedHeaders['Content-Length'] = String(rewritten.length)
   }
-  return { body: rewritten, headers: updatedHeaders }
+  return { body: rewritten, headers: updatedHeaders, pinnedPeerId: parsed.peerId }
 }
