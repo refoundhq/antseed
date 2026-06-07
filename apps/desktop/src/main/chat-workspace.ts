@@ -78,6 +78,7 @@ const DEFAULT_CHAT_GLOBAL_SETTINGS: ChatGlobalSettings = {
 // ungated because it opens the local/user-facing preview panel rather than
 // granting the agent arbitrary background network egress.
 const RISKY_TOOLS = new Set(['bash', 'edit', 'write', 'start_dev_server', 'web_fetch']);
+const AUTO_ALLOWED_TOOL_PERMISSION_KEYS = new Set(['bash:read', 'bash:git-read']);
 
 type BashPermissionClass = {
   key: string;
@@ -248,6 +249,10 @@ export function normalizePermissionMode(value: unknown): ChatPermissionMode {
 
 export function requiresToolApproval(mode: ChatPermissionMode, toolName: string): boolean {
   return mode === 'manual' && RISKY_TOOLS.has(toolName);
+}
+
+export function isToolPermissionAutoAllowed(permissionKey: string): boolean {
+  return AUTO_ALLOWED_TOOL_PERMISSION_KEYS.has(permissionKey);
 }
 
 export async function getPeerPermissionMode(peerId: string | null | undefined): Promise<ChatPermissionMode> {

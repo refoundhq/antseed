@@ -43,6 +43,7 @@ import {
   getPeerPermissionMode,
   getWorkspaceGitStatus,
   isToolAllowedForPeer,
+  isToolPermissionAutoAllowed,
   loadChatWorkspaceDir,
   normalizePermissionMode,
   persistChatWorkspaceDir,
@@ -2049,6 +2050,9 @@ export function registerPiChatHandlers({
           ? event.input as Record<string, unknown>
           : {};
         const description = describeToolApproval(event.toolName, input, preferredPeerId);
+        if (isToolPermissionAutoAllowed(description.permissionKey)) {
+          return undefined;
+        }
         if (await isToolAllowedForPeer(preferredPeerId, description.permissionKey)) {
           return undefined;
         }

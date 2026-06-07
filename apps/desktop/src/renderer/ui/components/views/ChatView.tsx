@@ -968,18 +968,8 @@ export function ChatView({ active, onSelectView }: ChatViewProps) {
   const activeToolApprovalRequests = useMemo(() => {
     const activeConversationId = snap.chatActiveConversation;
     if (!activeConversationId) return [];
-    const activeConversation = Array.isArray(snap.chatConversations)
-      ? snap.chatConversations.find((conversation) => {
-          const record = conversation as Record<string, unknown>;
-          return String(record.id ?? '') === activeConversationId;
-        }) as Record<string, unknown> | undefined
-      : undefined;
-    const activePeerId = String(activeConversation?.peerId ?? snap.chatSelectedPeerId ?? '').trim();
-    if (!activePeerId) {
-      return snap.chatToolApprovalRequests.filter((request) => request.conversationId === activeConversationId);
-    }
-    return snap.chatToolApprovalRequests.filter((request) => request.peerId === activePeerId);
-  }, [snap.chatActiveConversation, snap.chatConversations, snap.chatSelectedPeerId, snap.chatToolApprovalRequests]);
+    return snap.chatToolApprovalRequests.filter((request) => request.conversationId === activeConversationId);
+  }, [snap.chatActiveConversation, snap.chatToolApprovalRequests]);
   const activeToolApprovalRequest = activeToolApprovalRequests[0] ?? null;
   const showWelcome =
     snap.chatConversationsLoaded &&
