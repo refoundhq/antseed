@@ -13,23 +13,19 @@ import { DashboardView } from './views/DashboardView';
 import { EmissionsView } from './views/EmissionsView';
 import { DiemRewardsView } from './views/DiemRewardsView';
 import { ChannelsView } from './components/ChannelsView';
-import { SettingsView } from './views/SettingsView';
 import { AuthorizedWalletProvider } from './context/AuthorizedWalletContext';
-import { useAuthorizedWallet } from './context/AuthorizedWalletContext';
 import { AuthorizeWalletAlert } from './layout/AuthorizeWalletAlert';
 
 export type OverlayPhase = 'deposit' | 'success' | null;
 
-const VALID_TABS = new Set<TabId>(['overview', 'rewards', 'diem-rewards', 'activity', 'settings']);
+const VALID_TABS = new Set<TabId>(['dashboard', 'channels', 'emissions', 'diem-rewards']);
 
 function parseTabFromUrl(): TabId {
   const raw = new URLSearchParams(window.location.search).get('tab');
-  if (!raw) return 'overview';
+  if (!raw) return 'dashboard';
   // Legacy compat: the old deposits tab no longer exists; fall through to dashboard.
-  if (raw === 'deposit' || raw === 'deposits' || raw === 'dashboard') return 'overview';
-  if (raw === 'channels') return 'activity';
-  if (raw === 'emissions') return 'rewards';
-  return VALID_TABS.has(raw as TabId) ? (raw as TabId) : 'overview';
+  if (raw === 'deposit' || raw === 'deposits') return 'dashboard';
+  return VALID_TABS.has(raw as TabId) ? (raw as TabId) : 'dashboard';
 }
 
 function shouldOpenDepositFromUrl(): boolean {
@@ -191,7 +187,6 @@ function AppShell({
 }: AppShellProps) {
   const [justDeposited, setJustDeposited] = useState(false);
   const [depositPromptDismissed, setDepositPromptDismissed] = useState(false);
-  const authorizedWallet = useAuthorizedWallet();
 
   const isLoading = !balanceLoaded;
   const isEmptyBuyer =
@@ -221,48 +216,34 @@ function AppShell({
         <Sidebar
           activeTab={activeTab}
           onSelect={onSelectTab}
+          isDark={isDark}
+          onToggleTheme={onToggleTheme}
         />
         <div className="dash-main">
           <TopBar
             activeTab={activeTab}
             balance={balance}
-            buyerEvmAddress={buyerEvmAddress}
-            atRisk={authorizedWallet.operatorSet === false && Number(balance?.total ?? 0) > 0}
-            isDark={isDark}
-            onToggleTheme={onToggleTheme}
             onOpenWallet={onOpenWalletDrawer}
+            onOpenDeposit={onOpenDeposit}
           />
           <AuthorizeWalletAlert />
           <main className="dash-content">
-            {activeTab === 'overview' && (
-              <DashboardView
-                config={config}
-                balance={balance}
-                onOpenDeposit={onOpenDeposit}
-                onOpenWithdraw={onOpenWithdraw}
-                onOpenRewards={() => onSelectTab('rewards')}
-                onOpenDiemRewards={() => onSelectTab('diem-rewards')}
-                onOpenActivity={() => onSelectTab('activity')}
-              />
-            )}
-            {activeTab === 'rewards' && <EmissionsView config={config} />}
+            {activeTab === 'dashboard' && <DashboardView config={config} />}
+            {activeTab === 'channels'  && <ChannelsView  config={config} />}
+            {activeTab === 'emissions' && <EmissionsView config={config} />}
             {activeTab === 'diem-rewards' && <DiemRewardsView config={config} />}
-            {activeTab === 'activity' && <ChannelsView config={config} />}
-            {activeTab === 'settings' && (
-              <SettingsView
-                config={config}
-              />
-            )}
           </main>
         </div>
+        <WalletDrawer
+          isOpen={walletDrawerOpen}
+          onClose={onCloseWalletDrawer}
+          balance={balance}
+          config={config}
+          buyerEvmAddress={buyerEvmAddress}
+          onOpenDeposit={onOpenDeposit}
+          onOpenWithdraw={onOpenWithdraw}
+        />
       </div>
-      <WalletDrawer
-        isOpen={walletDrawerOpen}
-        onClose={onCloseWalletDrawer}
-        balance={balance}
-        config={config}
-        buyerEvmAddress={buyerEvmAddress}
-      />
       <LoaderOverlay isVisible={isLoading} />
       <EmptyStateOverlay
         phase={overlayPhase}

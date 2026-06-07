@@ -1,71 +1,29 @@
-import { useEffect, useMemo, useState } from 'react';
-import { useAccount, usePublicClient } from 'wagmi';
-import type { BalanceData, PaymentConfig } from '../types';
+import { useEffect, useState } from 'react';
+import type { PaymentConfig } from '../types';
 import {
   getBuyerUsage,
-  getEmissionsPending,
   getNetworkStats,
-  type ChannelData,
   type BuyerUsageChannelPoint,
   type BuyerUsageTotals,
   type NetworkStatsResponse,
 } from '../api';
-import { useChannels } from '../hooks/useChannels';
 import { UsageChart } from '../components/UsageChart';
-import {
-  formatAntsAmount,
-  formatCompact,
-  formatNumber,
-  formatTimestampDate,
-  formatUsd,
-  bigintFromString,
-  timestampToMs,
-} from '../utils/format';
-import { getDiemPendingTotal, loadDiemRewardSnapshot } from '../utils/diemRewards';
+import { formatCompact, formatNumber, bigintFromString } from '../utils/format';
 import './DashboardView.scss';
 
 interface DashboardViewProps {
   config: PaymentConfig | null;
-  balance: BalanceData | null;
-  onOpenDeposit: () => void;
-  onOpenWithdraw: () => void;
-  onOpenRewards: () => void;
-  onOpenDiemRewards: () => void;
-  onOpenActivity: () => void;
 }
 
 const EMPTY_CHANNELS: BuyerUsageChannelPoint[] = [];
-const MS_PER_DAY = 24 * 60 * 60 * 1000;
-const USAGE_WINDOW_DAYS = 14;
 
-function getChannelStatusLabel(channel: ChannelData): string {
-  if (channel.status === 2) return 'Settled';
-  if (channel.status === 3) return 'Timed out';
-  if (channel.status === 0) return 'Closed';
-  if (channel.closeRequestedAt > 0) return 'Closing';
-  return 'Active';
-}
-
-export function DashboardView({
-  config,
-  balance,
-  onOpenDeposit,
-  onOpenWithdraw,
-  onOpenRewards,
-  onOpenDiemRewards,
-  onOpenActivity,
-}: DashboardViewProps) {
-  const { address, isConnected } = useAccount();
-  const publicClient = usePublicClient();
-  const { channels, history } = useChannels(config);
-  const [buyerUsage, setBuyerUsage] = useState<BuyerUsageTotals | null>(null);
-  const [buyerUsageError, setBuyerUsageError] = useState(false);
-  const [networkStats, setNetworkStats] = useState<NetworkStatsResponse | null>(null);
-  const [networkStatsError, setNetworkStatsError] = useState(false);
-  const [claimableAnts, setClaimableAnts] = useState<bigint>(0n);
-  const [diemClaimableAnts, setDiemClaimableAnts] = useState<bigint>(0n);
-  const [diemRewardsLoaded, setDiemRewardsLoaded] = useState(false);
+export function DashboardView({ config }: DashboardViewProps) {
   const networkStatsUrl = config?.networkStatsUrl ?? null;
+
+  const [buyerUsage, setBuyerUsage] = useState<BuyerUsageTotals | null>(null);
+  const [networkStats, setNetworkStats] = useState<NetworkStatsResponse | null>(null);
+  const [buyerUsageError, setBuyerUsageError] = useState<string | null>(null);
+  const [networkStatsError, setNetworkStatsError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -73,234 +31,129 @@ export function DashboardView({
       .then((totals) => {
         if (cancelled) return;
         setBuyerUsage(totals);
-        setBuyerUsageError(false);
+        setBuyerUsageError(null);
       })
-      .catch(() => {
+      .catch((err) => {
         if (cancelled) return;
-        setBuyerUsageError(true);
+        setBuyerUsageError(err instanceof Error ? err.message : String(err));
       });
     return () => { cancelled = true; };
   }, []);
 
   useEffect(() => {
-    if (!config?.evmAddress) {
-      setClaimableAnts(0n);
-      return;
-    }
-    let cancelled = false;
-    getEmissionsPending(config.evmAddress)
-      .then((pending) => {
-        if (cancelled) return;
-        const total = pending.rows.reduce((sum, row) => {
-          if (row.isCurrent) return sum;
-          return sum + bigintFromString(row.seller.amount) + bigintFromString(row.buyer.amount);
-        }, 0n);
-        setClaimableAnts(total);
-      })
-      .catch(() => {
-        if (!cancelled) setClaimableAnts(0n);
-      });
-    return () => { cancelled = true; };
-  }, [config?.evmAddress]);
-
-  useEffect(() => {
-    if (!networkStatsUrl) {
-      setNetworkStats(null);
-      setNetworkStatsError(false);
-      return;
-    }
+    if (!networkStatsUrl) return;
     let cancelled = false;
     getNetworkStats(networkStatsUrl)
       .then((stats) => {
         if (cancelled) return;
         setNetworkStats(stats);
-        setNetworkStatsError(false);
+        setNetworkStatsError(null);
       })
-      .catch(() => {
+      .catch((err) => {
         if (cancelled) return;
-        setNetworkStats(null);
-        setNetworkStatsError(true);
+        setNetworkStatsError(err instanceof Error ? err.message : String(err));
       });
     return () => { cancelled = true; };
   }, [networkStatsUrl]);
 
-  useEffect(() => {
-    if (!isConnected || !address || !publicClient) {
-      setDiemClaimableAnts(0n);
-      setDiemRewardsLoaded(false);
-      return;
-    }
-    let cancelled = false;
-    loadDiemRewardSnapshot(publicClient, address as `0x${string}`)
-      .then((snapshot) => {
-        if (cancelled) return;
-        setDiemClaimableAnts(getDiemPendingTotal(snapshot));
-        setDiemRewardsLoaded(true);
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setDiemClaimableAnts(0n);
-        setDiemRewardsLoaded(false);
-      });
-    return () => { cancelled = true; };
-  }, [address, isConnected, publicClient]);
+  const personalRequests = buyerUsage?.totalRequests ?? 0;
+  const personalTokens =
+    bigintFromString(buyerUsage?.totalInputTokens) +
+    bigintFromString(buyerUsage?.totalOutputTokens);
+  const personalSettlements = buyerUsage?.totalSettlements ?? 0;
+  const personalUniqueSellers = buyerUsage?.uniqueSellers ?? 0;
 
-  const available = formatUsd(balance?.available);
-  const reserved = formatUsd(balance?.reserved);
-  const totalBalance = formatUsd(balance?.total);
-  const totalClaimableRewards = claimableAnts + diemClaimableAnts;
-  const rewardSourceLabel = diemRewardsLoaded ? 'network emissions + DIEM' : 'network emissions';
-  const networkTokens = bigintFromString(networkStats?.totals.totalInputTokens) + bigintFromString(networkStats?.totals.totalOutputTokens);
-  const personalTokens = bigintFromString(buyerUsage?.totalInputTokens) + bigintFromString(buyerUsage?.totalOutputTokens);
-  const usageCutoff = Date.now() - USAGE_WINDOW_DAYS * MS_PER_DAY;
-  const usageChannels = (buyerUsage?.channels ?? EMPTY_CHANNELS).filter((channel) => {
-    const stamp = channel.updatedAt || channel.reservedAt;
-    return stamp > usageCutoff;
-  });
-  const recentChannels = useMemo(
-    () => [...channels, ...history]
-      .slice()
-      .sort((a, b) => timestampToMs(b.reservedAt) - timestampToMs(a.reservedAt))
-      .slice(0, 3),
-    [channels, history],
-  );
+  const networkRequests = bigintFromString(networkStats?.totals.totalRequests);
+  const networkTokens =
+    bigintFromString(networkStats?.totals.totalInputTokens) +
+    bigintFromString(networkStats?.totals.totalOutputTokens);
+  const networkSettlements = networkStats?.totals.totalSettlements ?? 0;
+  const networkPeers = networkStats?.totals.activePeers ?? 0;
+  const networkSellers = networkStats?.totals.sellerCount;
 
   return (
-    <div className="portal-overview">
-      {buyerUsageError && (
-        <div className="portal-inline-warning">
-          <span aria-hidden="true" />
-          Couldn&apos;t refresh — showing last known data
-        </div>
-      )}
-
-      <section className="overview-balance">
-        <div className="overview-balance-main">
-          <div className="portal-kicker">Available balance</div>
-          <div className="overview-balance-value">
-            ${available}
-            <span>USDC</span>
-          </div>
-          <p>
-            ${totalBalance} total · ${reserved} in {buyerUsage?.activeChannels ?? 0} active channels
+    <div className="dashboard-view">
+      <section className="dashboard-section">
+        <header className="dashboard-section-head">
+          <div className="dashboard-section-eyebrow">Network</div>
+          <h2 className="dashboard-section-title">Global activity</h2>
+          <p className="dashboard-section-sub">
+            Aggregate stats across every seller on the AntSeed network.
           </p>
-          <div className="overview-actions">
-            <button type="button" className="portal-primary-btn" onClick={onOpenDeposit}>Deposit</button>
-            <button type="button" className="portal-secondary-btn" onClick={onOpenWithdraw}>Withdraw</button>
+        </header>
+
+        <div className="stat-grid">
+          <div className="stat-card">
+            <div className="stat-card-label">Active peers</div>
+            <div className="stat-card-value">{formatNumber(networkPeers)}</div>
+            <div className="stat-card-hint">
+              {networkSellers != null
+                ? `${formatNumber(networkSellers)} sellers with lifetime activity`
+                : 'Sellers currently online with on-chain activity'}
+            </div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-card-label">Network requests</div>
+            <div className="stat-card-value">{formatCompact(networkRequests)}</div>
+            <div className="stat-card-hint">Across all sellers</div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-card-label">Network settlements</div>
+            <div className="stat-card-value">{formatNumber(networkSettlements)}</div>
+            <div className="stat-card-hint">Total channels settled</div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-card-label">Network tokens</div>
+            <div className="stat-card-value">{formatCompact(networkTokens)}</div>
+            <div className="stat-card-hint">Input + output across all peers</div>
           </div>
         </div>
 
-        <div className="overview-reward-card">
-          <div className="portal-kicker">Claimable rewards</div>
-          <div className="overview-reward-value">
-            <span className="overview-reward-line" />
-            {formatAntsAmount(totalClaimableRewards)} $ANTS
+        {networkStatsError && (
+          <div className="dashboard-stats-error">
+            Couldn&apos;t load network stats: {networkStatsError}
           </div>
-          <p>{rewardSourceLabel}</p>
-          <div className="overview-reward-actions">
-            <button type="button" className="portal-primary-btn" onClick={onOpenRewards}>
-              View $ANTS
-            </button>
-            <button type="button" className="portal-secondary-btn" onClick={onOpenDiemRewards}>
-              DIEM $ANTS
-            </button>
+        )}
+      </section>
+
+      <section className="dashboard-section">
+        <header className="dashboard-section-head">
+          <div className="dashboard-section-eyebrow">Your activity</div>
+          <h2 className="dashboard-section-title">Your usage</h2>
+          <p className="dashboard-section-sub">
+            Requests and tokens flowing through your signer over time.
+          </p>
+        </header>
+
+        <div className="dashboard-chart-card">
+          <div className="dashboard-kpi-row">
+            <div className="dashboard-kpi">
+              <div className="dashboard-kpi-label">Requests</div>
+              <div className="dashboard-kpi-value">{formatNumber(personalRequests)}</div>
+            </div>
+            <div className="dashboard-kpi">
+              <div className="dashboard-kpi-label">Tokens</div>
+              <div className="dashboard-kpi-value">{formatCompact(personalTokens)}</div>
+            </div>
+            <div className="dashboard-kpi">
+              <div className="dashboard-kpi-label">Settlements</div>
+              <div className="dashboard-kpi-value">{formatNumber(personalSettlements)}</div>
+            </div>
+            <div className="dashboard-kpi">
+              <div className="dashboard-kpi-label">Sellers</div>
+              <div className="dashboard-kpi-value">{formatNumber(personalUniqueSellers)}</div>
+            </div>
           </div>
+
+          <UsageChart channels={buyerUsage?.channels ?? EMPTY_CHANNELS} />
+          {buyerUsageError && (
+            <div className="dashboard-stats-error">
+              Couldn&apos;t load your usage: {buyerUsageError}
+            </div>
+          )}
         </div>
       </section>
 
-      <section className="overview-section" aria-labelledby="overview-usage-title">
-        <div className="overview-section-head">
-          <h2 className="overview-section-title" id="overview-usage-title">Your usage</h2>
-          <p>Account-level requests, tokens, sellers, and channel activity.</p>
-        </div>
-
-        <section className="overview-stat-row" aria-label="Usage totals">
-          <div>
-            <div className="portal-kicker">Requests (all-time)</div>
-            <strong>{formatNumber(buyerUsage?.totalRequests ?? 0)}</strong>
-          </div>
-          <div>
-            <div className="portal-kicker">Tokens (all-time)</div>
-            <strong>{formatCompact(personalTokens)}</strong>
-          </div>
-          <div>
-            <div className="portal-kicker">Sellers used</div>
-            <strong>{formatNumber(buyerUsage?.uniqueSellers ?? 0)}</strong>
-          </div>
-          <div>
-            <div className="portal-kicker">Active channels</div>
-            <strong>{formatNumber(buyerUsage?.activeChannels ?? 0)}</strong>
-          </div>
-        </section>
-
-        <section className="overview-lower-grid">
-          <div>
-            <div className="portal-kicker">Usage · last 14 days</div>
-            <UsageChart channels={usageChannels} days={USAGE_WINDOW_DAYS} />
-          </div>
-          <div className="overview-recent">
-            <div className="overview-recent-head">
-              <div className="portal-kicker">Recent activity</div>
-              <button type="button" onClick={onOpenActivity}>View all →</button>
-            </div>
-            {recentChannels.length === 0 ? (
-              <p>No channel activity yet.</p>
-            ) : (
-              <div className="overview-recent-list">
-                {recentChannels.map((channel) => (
-                  <div className="overview-recent-row" key={channel.channelId}>
-                    <div>
-                      <strong>{getChannelStatusLabel(channel)}</strong>
-                      <span>{formatTimestampDate(channel.reservedAt)}</span>
-                    </div>
-                    <div>
-                      <strong>${formatUsd(channel.settled)}</strong>
-                      <span>of ${formatUsd(channel.deposit)}</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </section>
-      </section>
-
-      {(networkStats || (networkStatsUrl && networkStatsError)) && (
-        <section className="overview-section overview-section--network" aria-labelledby="overview-network-title">
-          <div className="overview-section-head">
-            <h2 className="overview-section-title" id="overview-network-title">Network activity</h2>
-            <p>Aggregate activity across sellers on the AntSeed network.</p>
-          </div>
-
-          {networkStats && (
-            <section className="overview-stat-row overview-stat-row--network" aria-label="Network totals">
-              <div>
-                <div className="portal-kicker">Active peers</div>
-                <strong>{formatNumber(networkStats.totals.activePeers)}</strong>
-              </div>
-              <div>
-                <div className="portal-kicker">Requests</div>
-                <strong>{formatCompact(bigintFromString(networkStats.totals.totalRequests))}</strong>
-              </div>
-              <div>
-                <div className="portal-kicker">Tokens</div>
-                <strong>{formatCompact(networkTokens)}</strong>
-              </div>
-              <div>
-                <div className="portal-kicker">Settlements</div>
-                <strong>{formatNumber(networkStats.totals.totalSettlements)}</strong>
-              </div>
-            </section>
-          )}
-
-          {networkStatsUrl && networkStatsError && (
-            <div className="portal-inline-warning">
-              <span aria-hidden="true" />
-              Network stats unavailable.
-            </div>
-          )}
-        </section>
-      )}
     </div>
   );
 }

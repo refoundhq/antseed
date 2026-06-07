@@ -15,6 +15,7 @@ import {
 import { EMISSIONS_CLAIM_ABI } from '../emissions-abi';
 import { getErrorMessage, usePaymentNetwork } from '../payment-network';
 import { useAuthorizedWallet } from '../context/AuthorizedWalletContext';
+import { Button } from '../components/Button';
 
 interface EmissionsViewProps {
   config: PaymentConfig | null;
@@ -35,7 +36,7 @@ function formatAnts(amountWei: string): string {
     const n = parseFloat(formatUnits(BigInt(amountWei), ANTS_DECIMALS));
     if (n === 0) return '0';
     if (n < 0.0001) return '< 0.0001';
-    return n.toLocaleString('en-US', { maximumFractionDigits: 4 });
+    return n.toLocaleString(undefined, { maximumFractionDigits: 4 });
   } catch {
     return '0';
   }
@@ -103,41 +104,14 @@ function computeEpochShare(
   return Number((reward * 10000n) / emission) / 100;
 }
 
-function getSettledRowReward(
-  row: EmissionsPendingResponse['rows'][number],
-  fallback: SharesType | null | undefined,
-): string {
-  const params = getEffectiveParams(row, fallback);
-  if (!params) return addWei(row.seller.amount, row.buyer.amount);
-  const sellerReward = row.seller.claimed
-    ? estimateSideReward(
-      row.epochEmission,
-      params.sellerSharePct,
-      params.maxSellerSharePct,
-      row.seller.userPoints,
-      row.seller.totalPoints,
-    ).toString()
-    : row.seller.amount;
-  const buyerReward = row.buyer.claimed
-    ? estimateSideReward(
-      row.epochEmission,
-      params.buyerSharePct,
-      params.maxBuyerSharePct,
-      row.buyer.userPoints,
-      row.buyer.totalPoints,
-    ).toString()
-    : row.buyer.amount;
-  return addWei(sellerReward, buyerReward);
-}
-
 function formatTimeRemaining(seconds: number): string {
   if (seconds <= 0) return 'ending now';
-  const days = Math.floor(seconds / 86400);
-  const hours = Math.floor((seconds % 86400) / 3600);
-  const minutes = Math.floor((seconds % 3600) / 60);
-  if (days > 0) return `${days}d ${hours}h`;
-  if (hours > 0) return `${hours}h ${minutes}m`;
-  return `${minutes}m`;
+  const d = Math.floor(seconds / 86400);
+  const h = Math.floor((seconds % 86400) / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  if (d > 0) return `${d}d ${h}h`;
+  if (h > 0) return `${h}h ${m}m`;
+  return `${m}m`;
 }
 
 export function EmissionsView({ config }: EmissionsViewProps) {
@@ -268,15 +242,23 @@ export function EmissionsView({ config }: EmissionsViewProps) {
   }, [buyerClaimConfirmed, resetBuyerClaim, load]);
 
   if (loading && !info) {
-    return <div className="rewards-view"><div className="overview-empty-desc">Loading…</div></div>;
+    return (
+      <div className="emissions-view">
+        <div className="overview-empty">
+          <div className="overview-empty-desc">Loading…</div>
+        </div>
+      </div>
+    );
   }
 
   if (loadError || !info) {
     return (
-      <div className="rewards-view">
+      <div className="emissions-view">
         <div className="overview-empty">
           <div className="overview-empty-title">Emissions not available</div>
-          <div className="overview-empty-desc">{loadError ?? 'The Emissions contract is not configured for this chain.'}</div>
+          <div className="overview-empty-desc">
+            {loadError ?? 'The Emissions contract is not configured for this chain.'}
+          </div>
         </div>
       </div>
     );
@@ -289,7 +271,6 @@ export function EmissionsView({ config }: EmissionsViewProps) {
   const epochsUntilHalving = info.halvingInterval - (info.currentEpoch % info.halvingInterval);
 
   const rows = pending?.rows ?? [];
-  const pastRows = rows.filter((r) => !r.isCurrent);
   const currentRow = rows.find((r) => r.isCurrent);
   const currentParams = getEffectiveParams(currentRow, shares);
   const currentEstimate = currentRow ? estimateRowReward(currentRow, shares) : '0';
@@ -297,8 +278,12 @@ export function EmissionsView({ config }: EmissionsViewProps) {
 
   let totalClaimable = 0n;
   let totalClaimed = 0n;
-  for (const r of pastRows) {
+  for (const r of rows) {
+    if (r.isCurrent) continue;
     const params = getEffectiveParams(r, shares);
+    // Per-side: pendingEmissions returns 0 for claimed sides, so estimate from points.
+    // Use the epoch's snapshotted params so historical rows don't change when
+    // owner-controlled global shares are updated for future epochs.
     if (r.seller.claimed && params) {
       totalClaimed += estimateSideReward(
         r.epochEmission,
@@ -322,63 +307,132 @@ export function EmissionsView({ config }: EmissionsViewProps) {
       totalClaimable += safeBigint(r.buyer.amount);
     }
   }
-  const totalEarned = safeBigint(currentEstimate) + totalClaimable + totalClaimed;
-
-  const chartRows = pastRows
-    .slice()
-    .sort((a, b) => Number(a.epoch) - Number(b.epoch))
-    .slice(-6);
-  const rewardBars = [
-    ...chartRows.map((row) => ({
-      key: String(row.epoch),
-      label: String(row.epoch),
-      amount: getSettledRowReward(row, shares),
-      isCurrent: false,
-    })),
-    ...(currentRow ? [{
-      key: 'current',
-      label: `${currentRow.epoch}·now`,
-      amount: currentEstimate,
-      isCurrent: true,
-    }] : []),
-  ];
-  const maxReward = rewardBars.reduce((max, bar) => {
-    const amount = safeBigint(bar.amount);
-    return amount > max ? amount : max;
-  }, 0n);
 
   return (
-    <div className="rewards-view">
-      <section className="rewards-claim-row">
-        <div>
-          <div className="portal-kicker">Claimable now</div>
-          <div className="rewards-claim-value">
-            {formatAnts(totalClaimable.toString())}
-            <span>$ANTS</span>
+    <div className="emissions-view">
+      <section className="dashboard-section">
+        <header className="dashboard-section-head">
+          <div className="dashboard-section-eyebrow">Current epoch</div>
+          <h2 className="dashboard-section-title">Epoch #{info.currentEpoch}</h2>
+          {currentParams && (
+            <p className="dashboard-section-sub">
+              Split: {currentParams.sellerSharePct}% sellers · {currentParams.buyerSharePct}% buyers ·{' '}
+              {currentParams.reserveSharePct}% reserve · {currentParams.teamSharePct}% team
+            </p>
+          )}
+        </header>
+
+        <div className="stat-grid">
+          <div className="stat-card">
+            <div className="stat-card-label">Ends in</div>
+            <div className="stat-card-value">{formatTimeRemaining(timeRemaining)}</div>
           </div>
-          <p>From closed epochs</p>
+          <div className="stat-card">
+            <div className="stat-card-label">Epoch pool</div>
+            <div className="stat-card-value">{formatAnts(info.epochEmission)}</div>
+            <div className="stat-card-hint">ANTS this epoch</div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-card-label">Epoch duration</div>
+            <div className="stat-card-value">{Math.round(info.epochDuration / 86400)}d</div>
+            <div className="stat-card-hint">{(info.epochDuration / 3600).toFixed(0)} hours</div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-card-label">Next halving</div>
+            <div className="stat-card-value">{epochsUntilHalving}</div>
+            <div className="stat-card-hint">Epochs remaining</div>
+          </div>
         </div>
-        <div className="rewards-claim-actions">
-          <button
-            type="button"
-            className="portal-primary-btn"
-            disabled={!pending || pending.rows.every((r) => r.isCurrent || r.seller.claimed || r.seller.amount === '0')}
-            onClick={handleClaimSeller}
-          >
-            Claim seller
-          </button>
-          <button
-            type="button"
-            className="portal-primary-btn"
-            disabled={!pending || pending.rows.every((r) => r.isCurrent || r.buyer.claimed || r.buyer.amount === '0')}
-            onClick={handleClaimBuyer}
-          >
-            Claim buyer
-          </button>
+      </section>
+
+      <section className="dashboard-section">
+        <header className="dashboard-section-head">
+          <div className="dashboard-section-eyebrow">Your position</div>
+          <h2 className="dashboard-section-title">This epoch</h2>
+          <p className="dashboard-section-sub">
+            Your share of this epoch's rewards. Updates after each on-chain settlement.
+          </p>
+        </header>
+
+        <div className="stat-grid">
+          <div className="stat-card stat-card--accent">
+            <div className="stat-card-label">Estimated reward</div>
+            <div className="stat-card-value">{formatAnts(currentEstimate)}</div>
+            <div className="stat-card-hint">ANTS (not yet final)</div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-card-label">Your epoch share</div>
+            <div className="stat-card-value">{epochSharePct > 0 ? `${epochSharePct.toFixed(2)}%` : '—'}</div>
+            <div className="stat-card-hint">Of total epoch emission</div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-card-label">Claimable</div>
+            <div className="stat-card-value">{formatAnts(totalClaimable.toString())}</div>
+            <div className="stat-card-hint">From past epochs</div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-card-label">Already claimed</div>
+            <div className="stat-card-value">{formatAnts(totalClaimed.toString())}</div>
+            <div className="stat-card-hint">ANTS total</div>
+          </div>
+        </div>
+      </section>
+
+      <section className="dashboard-section">
+        <header className="dashboard-section-head">
+          <div className="dashboard-section-eyebrow">History</div>
+          <h2 className="dashboard-section-title">Your emissions</h2>
+          <p className="dashboard-section-sub">
+            Current epoch is an estimate that updates after each on-chain settlement.
+          </p>
+        </header>
+        <div className="dashboard-chart-card">
+          <EmissionsTable rows={pending?.rows ?? []} shares={shares} />
+          {(sellerClaimError || buyerClaimError) && (
+            <div className="status-msg status-error">{sellerClaimError || buyerClaimError}</div>
+          )}
+          <div className="emissions-claim-actions">
+            <Button
+              fullWidth
+              onClick={handleClaimSeller}
+              disabled={!pending || pending.rows.every((r) => r.isCurrent || r.seller.claimed || r.seller.amount === '0')}
+            >
+              Claim seller
+            </Button>
+            <Button
+              fullWidth
+              onClick={handleClaimBuyer}
+              disabled={!pending || pending.rows.every((r) => r.isCurrent || r.buyer.claimed || r.buyer.amount === '0')}
+            >
+              Claim buyer
+            </Button>
+          </div>
+        </div>
+      </section>
+
+      <section className="dashboard-section">
+        <header className="dashboard-section-head">
+          <div className="dashboard-section-eyebrow">Info</div>
+          <h2 className="dashboard-section-title">About $ANTS</h2>
+        </header>
+        <div className="dashboard-chart-card">
+          <div className="emissions-ants-info">
+            <p>
+              $ANTS is the native token of the AntSeed network. It is minted
+              each epoch to active sellers and buyers in proportion to their
+              on-chain activity. There is no pre-mining — you earn
+              simply by using the network.
+            </p>
+            <p>
+              Claims are non-custodial: seller claims mint to the claiming wallet,
+              and buyer claims mint to the wallet you've authorized for your
+              buyer identity.
+            </p>
+          </div>
           {config?.antsTokenAddress && connector && (
-            <button
-              type="button"
-              className="portal-secondary-btn"
+            <Button
+              fullWidth
+              variant="outline"
               onClick={async () => {
                 try {
                   const provider = await connector.getProvider();
@@ -399,129 +453,75 @@ export function EmissionsView({ config }: EmissionsViewProps) {
               }}
             >
               Add ANTS to wallet
-            </button>
+            </Button>
           )}
         </div>
       </section>
 
-      <section className="portal-content-section" aria-labelledby="emissions-current-title">
-        <div className="portal-content-head">
-          <h2 className="portal-content-title" id="emissions-current-title">Epoch #{info.currentEpoch}</h2>
-          {currentParams && (
-            <p>
-              Split: {currentParams.sellerSharePct}% sellers · {currentParams.buyerSharePct}% buyers ·{' '}
-              {currentParams.reserveSharePct}% reserve · {currentParams.teamSharePct}% team
-            </p>
-          )}
-        </div>
-
-        <div className="portal-metrics-grid" aria-label="Current epoch and position details">
-          <div className="portal-metric">
-            <div className="portal-kicker">Ends in</div>
-            <strong>{formatTimeRemaining(timeRemaining)}</strong>
-          </div>
-          <div className="portal-metric">
-            <div className="portal-kicker">Epoch pool</div>
-            <strong>{formatAnts(info.epochEmission)}</strong>
-          </div>
-          <div className="portal-metric">
-            <div className="portal-kicker">Epoch duration</div>
-            <strong>{Math.round(info.epochDuration / 86400)}d</strong>
-          </div>
-          <div className="portal-metric">
-            <div className="portal-kicker">Next halving</div>
-            <strong>{epochsUntilHalving}</strong>
-          </div>
-          <div className="portal-metric">
-            <div className="portal-kicker">Estimated reward</div>
-            <strong>~{formatAnts(currentEstimate)}</strong>
-          </div>
-          <div className="portal-metric">
-            <div className="portal-kicker">Your epoch share</div>
-            <strong>{epochSharePct > 0 ? `${epochSharePct.toFixed(2)}%` : '—'}</strong>
-          </div>
-          <div className="portal-metric">
-            <div className="portal-kicker">Claimable</div>
-            <strong>{formatAnts(totalClaimable.toString())}</strong>
-          </div>
-          <div className="portal-metric">
-            <div className="portal-kicker">Already claimed</div>
-            <strong>{formatAnts(totalClaimed.toString())}</strong>
-          </div>
-        </div>
-      </section>
-
-      <section className="portal-content-section" aria-labelledby="emissions-about-title">
-        <div className="portal-content-head">
-          <h2 className="portal-content-title" id="emissions-about-title">About $ANTS</h2>
-        </div>
-        <div className="rewards-info">
-          <p>
-            $ANTS is the native token of the AntSeed network. It is minted
-            each epoch to active sellers and buyers in proportion to their
-            on-chain activity. There is no pre-mining — you earn
-            simply by using the network.
-          </p>
-          <p>
-            Claims are non-custodial: seller claims mint to the claiming wallet,
-            and buyer claims mint to the wallet you&apos;ve authorized for your
-            buyer identity.
-          </p>
-        </div>
-      </section>
-
-      <section className="portal-content-section" aria-labelledby="emissions-history-title">
-        <div className="portal-content-head">
-          <h2 className="portal-content-title" id="emissions-history-title">Emission history</h2>
-          <p>Current epoch is an estimate that updates after each on-chain settlement.</p>
-        </div>
-
-        <div className="rewards-growth">
-          <div className="rewards-growth-head">
-            <div className="portal-kicker">Reward growth · per epoch</div>
-            <p>Total earned to date <strong>{formatAnts(totalEarned.toString())} $ANTS</strong></p>
-          </div>
-          <div className="rewards-bars" aria-hidden="true">
-            {rewardBars.map((bar) => {
-              const amount = safeBigint(bar.amount);
-              const heightPct = maxReward > 0n ? Number((amount * 100n) / maxReward) : 0;
-              return (
-                <div className="rewards-bar-col" key={bar.key}>
-                  <span
-                    className={bar.isCurrent ? 'rewards-bars-current' : undefined}
-                    style={{ height: `${Math.max(heightPct, amount > 0n ? 5 : 2)}%` }}
-                  />
-                  <em>{bar.label}</em>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-
-        <div className="rewards-history">
-          <div className="portal-kicker">Epoch history</div>
-          {pastRows.length === 0 ? (
-            <p>No closed epochs yet.</p>
-          ) : (
-            pastRows.slice().reverse().map((row) => (
-              <div className="rewards-history-row" key={row.epoch}>
-                <span>Epoch {row.epoch}</span>
-                <strong>{formatAnts(getSettledRowReward(row, shares))} $ANTS</strong>
-              </div>
-            ))
-          )}
-        </div>
-      </section>
-
-      {(sellerClaimError || buyerClaimError) && (
-        <div className="status-msg status-error">{sellerClaimError || buyerClaimError}</div>
-      )}
       {transfersEnabled === false && (
-        <div className="portal-inline-warning">
-          <span aria-hidden="true" />
-          ANTS transfers are not enabled yet. Claimed tokens remain in your wallet until governance enables transfers.
+        <div className="emissions-banner emissions-banner--warn">
+          <strong>ANTS is not yet transferable.</strong>
+          Claimed tokens remain in your wallet until governance enables transfers.
         </div>
       )}
+    </div>
+  );
+}
+
+function EmissionsTable({ rows, shares }: {
+  rows: EmissionsPendingResponse['rows'];
+  shares?: SharesType | null;
+}) {
+  if (rows.length === 0) {
+    return <div className="overview-empty-desc">No recent epochs to show.</div>;
+  }
+  return (
+    <div className="emissions-table-wrap">
+      <table className="emissions-table">
+        <thead>
+          <tr>
+            <th>Epoch</th>
+            <th>Reward</th>
+            <th>Your share</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.slice().reverse().map((row) => {
+            const total = row.isCurrent || row.seller.claimed || row.buyer.claimed
+              ? estimateRowReward(row, shares)
+              : addWei(row.seller.amount, row.buyer.amount);
+            const share = computeEpochShare(row, shares);
+            // "Fully resolved" = each side is either claimed or has no points
+            const sellerDone = row.seller.claimed || row.seller.userPoints === '0';
+            const buyerDone = row.buyer.claimed || row.buyer.userPoints === '0';
+            const fullyClaimed = !row.isCurrent && sellerDone && buyerDone && (row.seller.claimed || row.buyer.claimed);
+            const nothingToClaim = total === '0';
+            const statusLabel = fullyClaimed
+              ? 'Claimed'
+              : row.isCurrent
+                ? 'Estimate'
+                : nothingToClaim
+                  ? '—'
+                  : 'Claimable';
+            const statusClass = fullyClaimed
+              ? 'emissions-status--claimed'
+              : row.isCurrent
+                ? 'emissions-status--estimate'
+                : nothingToClaim
+                  ? ''
+                  : 'emissions-status--pending';
+            return (
+              <tr key={row.epoch} className={row.isCurrent ? 'emissions-table-current' : ''}>
+                <td>#{row.epoch}</td>
+                <td>{formatAnts(total)} ANTS</td>
+                <td>{share > 0 ? `${share.toFixed(2)}%` : '—'}</td>
+                <td><span className={`emissions-status ${statusClass}`}>{statusLabel}</span></td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
     </div>
   );
 }

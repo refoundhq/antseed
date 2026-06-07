@@ -75,9 +75,8 @@ export function Modal({
         >
           <div
             aria-describedby={subtitle ? subtitleId : undefined}
-            aria-hidden={isTopDialog ? undefined : true}
             aria-labelledby={titleId}
-            aria-modal={isTopDialog ? 'true' : undefined}
+            aria-modal="true"
             className={modalClasses}
             ref={panelRef}
             role="dialog"

@@ -1,12 +1,11 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useAccount, useDisconnect } from 'wagmi';
+import { ConnectButton } from '@rainbow-me/rainbowkit';
 import type { BalanceData, PaymentConfig } from '../types';
 import { useSetOperator, useTransferOperator } from '../hooks/useSetOperator';
 import { useAuthorizedWallet } from '../context/AuthorizedWalletContext';
 import { Button, Drawer, TextField } from '@antseed/ui';
 import { InfoHint } from '../components/InfoHint';
-import { ConnectWalletAction } from '../components/ConnectWalletAction';
-import { formatUsd, truncateAddress } from '../utils/format';
 
 interface WalletDrawerProps {
   isOpen: boolean;
@@ -14,9 +13,19 @@ interface WalletDrawerProps {
   balance: BalanceData | null;
   config: PaymentConfig | null;
   buyerEvmAddress: string | null;
+  onOpenDeposit: () => void;
+  onOpenWithdraw: () => void;
 }
 
 const ZERO_ADDR = '0x0000000000000000000000000000000000000000';
+
+function truncate(addr: string): string {
+  return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
+}
+
+function formatUsd(n: number): string {
+  return n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
 
 function CopyIcon() {
   return (
@@ -55,11 +64,12 @@ export function WalletDrawer({
   balance,
   config,
   buyerEvmAddress,
+  onOpenDeposit,
+  onOpenWithdraw,
 }: WalletDrawerProps) {
   const { address: connectedAddress, isConnected, connector } = useAccount();
   const { disconnect } = useDisconnect();
   const { copied, copy } = useCopyable();
-  const walletConnected = isConnected && Boolean(connectedAddress);
 
   const { operator: onChainOperator, operatorSet, refetch: refetchOperator } = useAuthorizedWallet();
   const operatorLoading = operatorSet === null;
@@ -82,7 +92,6 @@ export function WalletDrawer({
   );
   const operatorMatchesConnected = Boolean(
     hasOperator &&
-      walletConnected &&
       connectedAddress &&
       onChainOperator &&
       onChainOperator.toLowerCase() === connectedAddress.toLowerCase(),
@@ -91,6 +100,14 @@ export function WalletDrawer({
   const available = balance ? parseFloat(balance.available) : 0;
   const reserved = balance ? parseFloat(balance.reserved) : 0;
   const total = balance ? parseFloat(balance.total) : 0;
+
+  function handleDepositMore() {
+    onOpenDeposit();
+  }
+
+  function handleWithdraw() {
+    onOpenWithdraw();
+  }
 
   return (
     <Drawer
@@ -126,7 +143,7 @@ export function WalletDrawer({
                   title={buyerEvmAddress ?? ''}
                 >
                   <span className="wallet-panel-addr-value">
-                    {buyerEvmAddress ? truncateAddress(buyerEvmAddress) : '—'}
+                    {buyerEvmAddress ? truncate(buyerEvmAddress) : '—'}
                   </span>
                   <span className="wallet-panel-addr-icon">
                     {copied === 'buyer' ? <CheckIcon /> : <CopyIcon />}
@@ -150,17 +167,25 @@ export function WalletDrawer({
               </div>
             </div>
 
+            <div className="wallet-panel-actions">
+              <Button variant="primary" fullWidth onClick={handleDepositMore}>
+                Deposit more
+              </Button>
+              <Button variant="outline" fullWidth onClick={handleWithdraw}>
+                Withdraw
+              </Button>
+            </div>
           </section>
 
           {/* ── Your wallet ───────────────────────────────────── */}
           <section className="wallet-panel-section">
             <div className="wallet-panel-section-label">Your wallet</div>
 
-            {!walletConnected ? (
+            {!isConnected ? (
               <div className="wallet-panel-card">
                 <div className="wallet-panel-role">
-                  <span className="wallet-panel-role-dot wallet-panel-role-dot--disconnected" />
-                  Not connected
+                  <span className="wallet-panel-role-dot wallet-panel-role-dot--operator" />
+                  Wallet
                 </div>
                 <p className="wallet-panel-explainer">
                   Connect a wallet to receive withdrawals, claim ANTS rewards, and
@@ -168,23 +193,23 @@ export function WalletDrawer({
                   fund your AntSeed account above.
                 </p>
                 <div className="wallet-panel-connect-wrap">
-                  <ConnectWalletAction>
-                    {({ openConnectModal, ready, connected }) => connected ? null : (
+                  <ConnectButton.Custom>
+                    {({ openConnectModal, mounted }) => (
                       <Button
                         onClick={openConnectModal}
-                        disabled={!ready}
+                        disabled={!mounted}
                       >
                         Connect wallet
                       </Button>
                     )}
-                  </ConnectWalletAction>
+                  </ConnectButton.Custom>
                 </div>
               </div>
             ) : (
               <div className="wallet-panel-card">
                 <div className="wallet-panel-card-row">
                   <div className="wallet-panel-role">
-                    <span className="wallet-panel-role-dot wallet-panel-role-dot--connected" />
+                    <span className="wallet-panel-role-dot wallet-panel-role-dot--operator" />
                     Connected
                   </div>
                   <button
@@ -194,7 +219,7 @@ export function WalletDrawer({
                     title={connectedAddress ?? ''}
                   >
                     <span className="wallet-panel-addr-value">
-                      {connectedAddress ? truncateAddress(connectedAddress) : '—'}
+                      {connectedAddress ? truncate(connectedAddress) : '—'}
                     </span>
                     <span className="wallet-panel-addr-icon">
                       {copied === 'operator' ? <CheckIcon /> : <CopyIcon />}
@@ -222,7 +247,7 @@ export function WalletDrawer({
                     <div className="wallet-panel-warn">
                       <div className="wallet-panel-warn-title">Wrong wallet connected</div>
                       <div className="wallet-panel-warn-desc">
-                        Switch to <strong>{onChainOperator ? truncateAddress(onChainOperator) : ''}</strong> in
+                        Switch to <strong>{onChainOperator ? truncate(onChainOperator) : ''}</strong> in
                         your wallet app to withdraw, claim ANTS, and close channels.
                       </div>
                     </div>
