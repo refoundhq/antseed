@@ -525,7 +525,7 @@ export class BuyerProxy {
     // in the file — the debounce may have been cancelled before
     // _reloadSessionOverrides could commit the latest CLI-written values.
     const sessionOverrides = state === 'connected'
-      ? { pinnedPeerId: this._pinnedPeer, pinnedService: undefined }
+      ? { pinnedPeerId: this._pinnedPeer }
       : {}
     await this._mergeStateFile({
       state,

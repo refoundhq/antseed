@@ -29,7 +29,6 @@ async function readStateFile(dataDir: string): Promise<BuyerStateFile | null> {
 async function writeStateFile(dataDir: string, data: BuyerStateFile): Promise<void> {
   const tmp = join(dataDir, `.buyer.state.${randomUUID()}.json.tmp`)
   try {
-    delete (data as Record<string, unknown>).pinnedService
     await writeFile(tmp, JSON.stringify(data, null, 2))
     await rename(tmp, stateFilePath(dataDir))
   } catch (err) {
