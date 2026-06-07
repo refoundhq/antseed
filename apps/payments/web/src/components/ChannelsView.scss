@@ -1,32 +1,3 @@
-.channels-section-head-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 16px;
-
-  .dashboard-section-head {
-    flex: 1 1 auto;
-    min-width: 0;
-  }
-}
-
-.dashboard-kpi-sub {
-  margin-top: 4px;
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--text-muted);
-  letter-spacing: 0.02em;
-  font-variant-numeric: tabular-nums;
-}
-
-.channels-table-caption {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-}
-
 .channels-table-wrap {
   overflow-x: auto;
   margin: 0 -24px;
@@ -73,10 +44,6 @@
     border-bottom: none;
   }
 
-  tbody tr:hover td {
-    background: var(--card-hover, rgba(148, 163, 184, 0.05));
-  }
-
   .channels-table-num {
     text-align: right;
     color: var(--text-primary);
@@ -86,7 +53,7 @@
   .channels-table-cell-seller {
     color: var(--text-primary);
     font-weight: 600;
-    letter-spacing: -0.01em;
+    letter-spacing: 0;
   }
 
   .channels-table-cell-id {
@@ -192,22 +159,6 @@
     color: var(--text-primary);
     font-weight: 700;
   }
-}
-
-.channels-section-head-row .channels-refresh-btn {
-  width: auto;
-  padding: 6px 14px;
-  font-size: 12px;
-  flex-shrink: 0;
-  margin-top: 14px;
-  align-self: flex-start;
-}
-
-.channels-view-empty {
-  text-align: center;
-  padding: 40px 16px;
-  color: var(--text-muted);
-  font-size: 13px;
 }
 
 .status-pill {

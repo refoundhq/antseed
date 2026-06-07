@@ -1,6 +1,6 @@
 import FocusLock from 'react-focus-lock';
 import { RemoveScroll } from 'react-remove-scroll';
-import { useId, useRef, type ReactNode } from 'react';
+import { useEffect, useId, useRef, type ReactNode } from 'react';
 import { useDialogBehavior } from './useDialogBehavior';
 
 export type DrawerSide = 'left' | 'right';
@@ -44,6 +44,7 @@ export function Drawer({
   const titleId = useId();
   const subtitleId = useId();
   const { closeDialog: closeDrawer, isTopDialog } = useDialogBehavior(isOpen, panelRef, onClose);
+  const isActiveDialog = isOpen && isTopDialog;
 
   const backdropClasses = [
     'as-drawer-backdrop',
@@ -57,6 +58,26 @@ export function Drawer({
     className,
   ].filter(Boolean).join(' ');
   const bodyClasses = ['as-drawer__body', bodyClassName].filter(Boolean).join(' ');
+
+  useEffect(() => {
+    if (!isOpen || !isTopDialog) return;
+
+    function onPointerDown(event: PointerEvent) {
+      const panel = panelRef.current;
+      if (!panel) return;
+      if (event.target instanceof Node && panel.contains(event.target)) return;
+      if (
+        event.target instanceof Element &&
+        event.target.closest('[role="dialog"]') !== null
+      ) {
+        return;
+      }
+      closeDrawer();
+    }
+
+    document.addEventListener('pointerdown', onPointerDown, true);
+    return () => document.removeEventListener('pointerdown', onPointerDown, true);
+  }, [closeDrawer, isOpen, isTopDialog]);
 
   return (
     <>
@@ -79,9 +100,9 @@ export function Drawer({
         >
           <aside
             aria-describedby={subtitle ? subtitleId : undefined}
-            aria-hidden={!isOpen}
+            aria-hidden={isActiveDialog ? undefined : true}
             aria-labelledby={titleId}
-            aria-modal={isOpen ? 'true' : undefined}
+            aria-modal={isActiveDialog ? 'true' : undefined}
             className={drawerClasses}
             ref={panelRef}
             role="dialog"

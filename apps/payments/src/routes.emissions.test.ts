@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import Fastify from 'fastify';
 import { registerRoutes } from './routes.js';
 
@@ -20,6 +20,10 @@ function mockCtx(overrides: Partial<Parameters<typeof registerRoutes>[1]> = {}):
     ...overrides,
   };
 }
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 describe('GET /api/config', () => {
   it('includes emissionsContractAddress', async () => {
@@ -56,6 +60,38 @@ describe('GET /api/config', () => {
     }));
     const res = await app.inject({ method: 'GET', url: '/api/config' });
     expect(res.json().networkStatsUrl).toBeNull();
+    await app.close();
+  });
+});
+
+describe('GET /api/rpc-health', () => {
+  it('returns the latest RPC block number', async () => {
+    const app = Fastify();
+    registerRoutes(app, mockCtx());
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      jsonrpc: '2.0',
+      id: 1,
+      result: '0x2a',
+    }), { status: 200 })));
+
+    const res = await app.inject({ method: 'GET', url: '/api/rpc-health' });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ ok: true, blockNumber: 42 });
+    await app.close();
+  });
+
+  it('returns 502 when the RPC read fails', async () => {
+    const app = Fastify();
+    registerRoutes(app, mockCtx());
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      jsonrpc: '2.0',
+      id: 1,
+      error: { message: 'bad rpc' },
+    }), { status: 200 })));
+
+    const res = await app.inject({ method: 'GET', url: '/api/rpc-health' });
+    expect(res.statusCode).toBe(502);
+    expect(res.json()).toMatchObject({ ok: false, error: 'bad rpc' });
     await app.close();
   });
 });
