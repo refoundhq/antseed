@@ -32,6 +32,7 @@ const WORKSPACE_PACKAGES = {
   '@antseed/api-adapter': path.resolve(appDir, '..', '..', 'packages', 'api-adapter'),
   '@antseed/node': path.resolve(appDir, '..', '..', 'packages', 'node'),
   '@antseed/payments': path.resolve(appDir, '..', 'payments'),
+  '@antseed/ui': path.resolve(appDir, '..', '..', 'packages', 'ui'),
 };
 
 function isWorkspaceSymlink(fullPath) {
