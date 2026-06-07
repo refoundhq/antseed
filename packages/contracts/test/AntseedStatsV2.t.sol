@@ -360,6 +360,187 @@ contract AntseedStatsV2Test is Test {
         assertEq(verifierStats.rejectedCount, 0);
     }
 
+    function test_recordUsageReportVerificationWithServiceUsage_recordsServiceRows() public {
+        bytes32 reportHash = keccak256("report-with-service");
+        bytes32 channelId = keccak256("channel");
+        bytes32 metadataHash = keccak256("metadata");
+        bytes32 catalogRoot = keccak256("catalog");
+        AntseedStatsV2.ServiceUsageLeaf[] memory leaves = new AntseedStatsV2.ServiceUsageLeaf[](1);
+        leaves[0] = AntseedStatsV2.ServiceUsageLeaf({
+            channelId: channelId,
+            serviceIdHash: keccak256("service:gpt"),
+            catalogLeafHash: keccak256("catalog:gpt"),
+            serviceMode: 1,
+            cumulativeFreshInputTokens: 100,
+            cumulativeCachedInputTokens: 20,
+            cumulativeOutputTokens: 50,
+            cumulativeRequestCount: 3,
+            cumulativeAmountPaid: 12345
+        });
+        bytes32 usageByServiceRoot = _serviceUsageLeafHash(leaves[0]);
+
+        vm.prank(verifier);
+        vm.expectEmit(true, true, true, true);
+        emit AntseedStatsV2.UsageReportVerificationRecorded(
+            reportHash,
+            agentId,
+            verifierAgentId,
+            seller,
+            buyer,
+            verifier,
+            channelId,
+            metadataHash,
+            catalogRoot,
+            usageByServiceRoot,
+            12345,
+            true
+        );
+        vm.expectEmit(true, true, true, true);
+        emit AntseedStatsV2.UsageReportServiceUsageRecorded(
+            reportHash,
+            agentId,
+            leaves[0].serviceIdHash,
+            channelId,
+            leaves[0].catalogLeafHash,
+            leaves[0].serviceMode,
+            leaves[0].cumulativeFreshInputTokens,
+            leaves[0].cumulativeCachedInputTokens,
+            leaves[0].cumulativeOutputTokens,
+            leaves[0].cumulativeRequestCount,
+            leaves[0].cumulativeAmountPaid
+        );
+        statsV2.recordUsageReportVerificationWithServiceUsage(
+            reportHash,
+            channelId,
+            seller,
+            buyer,
+            agentId,
+            verifierAgentId,
+            12345,
+            metadataHash,
+            catalogRoot,
+            usageByServiceRoot,
+            true,
+            leaves
+        );
+
+        assertTrue(statsV2.reportServiceUsageRecorded(reportHash));
+    }
+
+    function test_recordUsageReportVerificationWithServiceUsage_countsMultipleVerifiersWithoutDuplicatingServiceRows() public {
+        address verifierTwo = address(0x8);
+        uint256 verifierTwoAgentId = 88;
+        staking.setSeller(verifierTwo, verifierTwoAgentId, true);
+
+        bytes32 reportHash = keccak256("report-multi-verifier-service");
+        bytes32 channelId = keccak256("channel");
+        bytes32 metadataHash = keccak256("metadata");
+        bytes32 catalogRoot = keccak256("catalog");
+        AntseedStatsV2.ServiceUsageLeaf[] memory leaves = new AntseedStatsV2.ServiceUsageLeaf[](1);
+        leaves[0] = AntseedStatsV2.ServiceUsageLeaf({
+            channelId: channelId,
+            serviceIdHash: keccak256("service:gpt"),
+            catalogLeafHash: keccak256("catalog:gpt"),
+            serviceMode: 1,
+            cumulativeFreshInputTokens: 100,
+            cumulativeCachedInputTokens: 20,
+            cumulativeOutputTokens: 50,
+            cumulativeRequestCount: 3,
+            cumulativeAmountPaid: 12345
+        });
+        bytes32 usageByServiceRoot = _serviceUsageLeafHash(leaves[0]);
+
+        vm.prank(verifier);
+        statsV2.recordUsageReportVerificationWithServiceUsage(
+            reportHash,
+            channelId,
+            seller,
+            buyer,
+            agentId,
+            verifierAgentId,
+            12345,
+            metadataHash,
+            catalogRoot,
+            usageByServiceRoot,
+            true,
+            leaves
+        );
+
+        vm.recordLogs();
+        vm.prank(verifierTwo);
+        statsV2.recordUsageReportVerificationWithServiceUsage(
+            reportHash,
+            channelId,
+            seller,
+            buyer,
+            agentId,
+            verifierTwoAgentId,
+            12345,
+            metadataHash,
+            catalogRoot,
+            usageByServiceRoot,
+            true,
+            leaves
+        );
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+
+        bytes32 serviceUsageTopic = keccak256(
+            "UsageReportServiceUsageRecorded(bytes32,uint256,bytes32,bytes32,bytes32,uint256,uint256,uint256,uint256,uint256,uint256)"
+        );
+        uint256 serviceUsageEvents = 0;
+        for (uint256 i = 0; i < logs.length; i++) {
+            if (logs[i].topics[0] == serviceUsageTopic) {
+                serviceUsageEvents++;
+            }
+        }
+        assertEq(serviceUsageEvents, 0);
+
+        AntseedStatsV2.ReportVerificationStats memory reportStats =
+            statsV2.getReportVerificationStats(reportHash);
+        assertEq(reportStats.acceptedCount, 2);
+        assertEq(reportStats.rejectedCount, 0);
+
+        AntseedStatsV2.VerifierStats memory verifierOneStats = statsV2.getVerifierStats(verifierAgentId);
+        assertEq(verifierOneStats.submittedCount, 1);
+        assertEq(verifierOneStats.acceptedCount, 1);
+
+        AntseedStatsV2.VerifierStats memory verifierTwoStats = statsV2.getVerifierStats(verifierTwoAgentId);
+        assertEq(verifierTwoStats.submittedCount, 1);
+        assertEq(verifierTwoStats.acceptedCount, 1);
+    }
+
+    function test_recordUsageReportVerificationWithServiceUsage_revert_invalidUsageRoot() public {
+        AntseedStatsV2.ServiceUsageLeaf[] memory leaves = new AntseedStatsV2.ServiceUsageLeaf[](1);
+        leaves[0] = AntseedStatsV2.ServiceUsageLeaf({
+            channelId: keccak256("channel"),
+            serviceIdHash: keccak256("service:gpt"),
+            catalogLeafHash: keccak256("catalog:gpt"),
+            serviceMode: 1,
+            cumulativeFreshInputTokens: 100,
+            cumulativeCachedInputTokens: 20,
+            cumulativeOutputTokens: 50,
+            cumulativeRequestCount: 3,
+            cumulativeAmountPaid: 12345
+        });
+
+        vm.prank(verifier);
+        vm.expectRevert(AntseedStatsV2.InvalidUsageByServiceRoot.selector);
+        statsV2.recordUsageReportVerificationWithServiceUsage(
+            keccak256("bad-service-root-report"),
+            leaves[0].channelId,
+            seller,
+            buyer,
+            agentId,
+            verifierAgentId,
+            12345,
+            keccak256("metadata"),
+            keccak256("catalog"),
+            keccak256("wrong-root"),
+            true,
+            leaves
+        );
+    }
+
     function test_recordUsageReportVerification_recordsRejectedVerification() public {
         bytes32 reportHash = keccak256("report-rejected");
 
@@ -480,5 +661,19 @@ contract AntseedStatsV2Test is Test {
             keccak256("usage"),
             true
         );
+    }
+
+    function _serviceUsageLeafHash(AntseedStatsV2.ServiceUsageLeaf memory leaf) internal pure returns (bytes32) {
+        return keccak256(abi.encode(
+            leaf.channelId,
+            leaf.serviceIdHash,
+            leaf.catalogLeafHash,
+            leaf.serviceMode,
+            leaf.cumulativeFreshInputTokens,
+            leaf.cumulativeCachedInputTokens,
+            leaf.cumulativeOutputTokens,
+            leaf.cumulativeRequestCount,
+            leaf.cumulativeAmountPaid
+        ));
     }
 }

@@ -95,4 +95,33 @@ describe('payment codec round-trips', () => {
     const decoded = decodeNeedAuth(encoded);
     expect(decoded).toEqual(payload);
   });
+
+  it('NeedAuth with usage report metadata', () => {
+    const payload = {
+      channelId: '0x' + '11'.repeat(32),
+      requiredCumulativeAmount: '25',
+      currentAcceptedCumulative: '10',
+      deposit: '100',
+      requestId: 'req-1',
+      lastRequestCost: '15',
+      inputTokens: '7',
+      outputTokens: '5',
+      cachedInputTokens: '2',
+      freshInputTokens: '5',
+      service: 'model-a',
+      usageReportMetadata: {
+        catalogRoot: '0x' + '22'.repeat(32),
+        usageByServiceRoot: '0x' + '33'.repeat(32),
+        receiptRoot: '0x' + '44'.repeat(32),
+        cumulativeFreshInputTokens: '5',
+        cumulativeCachedInputTokens: '2',
+        cumulativeOutputTokens: '5',
+        cumulativeRequestCount: '1',
+        cumulativeAmountPaid: '25',
+      },
+    };
+    const encoded = encodeNeedAuth(payload);
+    const decoded = decodeNeedAuth(encoded);
+    expect(decoded).toEqual(payload);
+  });
 });

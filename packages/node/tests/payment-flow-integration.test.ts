@@ -7,11 +7,14 @@ import { BuyerPaymentManager, type BuyerPaymentConfig } from '../src/payments/bu
 import { SellerPaymentManager, type SellerPaymentConfig } from '../src/payments/seller-payment-manager.js';
 import { ChannelStore } from '../src/payments/channel-store.js';
 import type { PaymentMux } from '../src/p2p/payment-mux.js';
-import type { SpendingAuthPayload, AuthAckPayload } from '../src/types/protocol.js';
+import type { SpendingAuthPayload, AuthAckPayload, ChannelUsageReportPayload } from '../src/types/protocol.js';
 import type { Identity } from '../src/p2p/identity.js';
 import { bytesToHex } from '../src/utils/hex.js';
 import { toPeerId } from '../src/types/peer.js';
 import { AbiCoder, Wallet } from 'ethers';
+import { createUsageReportAck, verifyChannelReportAttestation, verifyChannelUsageReport } from '../src/payments/usage-report-verifier.js';
+import { computeCostUsdc } from '../src/payments/pricing.js';
+import { makeChannelsDomain } from '../src/payments/evm/signatures.js';
 
 const enc = new TextEncoder();
 
@@ -408,6 +411,125 @@ describe('Full Payment Flow Integration', () => {
       { inputBytes: SAMPLE_INPUT, outputBytes: SAMPLE_OUTPUT, sellerClaimedCost: 200_000n },
     );
     expect(BigInt(auth.cumulativeAmount)).toBeLessThanOrEqual(100_000n);
+  });
+
+  it('peer-verifiable usage report flow counts each accepted verifier and carries service usage', async () => {
+    const sellerPeerId = sellerIdentity.peerId;
+    const buyerPeerId = buyerIdentity.peerId;
+    const reports: ChannelUsageReportPayload[] = [];
+
+    seller = new SellerPaymentManager(
+      sellerIdentity,
+      {
+        ...makeSellerConfig(sellerDir),
+        sellerAgentId: '42',
+        usageReportVerifierCount: 2,
+        onUsageReportReady: (report) => {
+          reports.push(report);
+        },
+      },
+      sellerStore,
+    );
+    vi.spyOn(seller.channelsClient, 'reserve').mockResolvedValue('0xreservehash');
+    vi.spyOn(seller.channelsClient, 'close').mockResolvedValue('0xclosehash');
+    vi.spyOn(seller.channelsClient, 'requestClose').mockResolvedValue('0xrequestclosehash');
+    vi.spyOn(seller.channelsClient, 'withdraw').mockResolvedValue('0xwithdrawhash');
+
+    const { sessionId } = await doInitialHandshake(0n);
+    const requestBody = enc.encode('usage report paid request body');
+    const responseBody = enc.encode('usage report paid response body');
+    const pricing = {
+      inputUsdPerMillion: 3,
+      cachedInputUsdPerMillion: 1,
+      outputUsdPerMillion: 15,
+    };
+    const freshInputTokens = 120n;
+    const cachedInputTokens = 10n;
+    const outputTokens = 30n;
+    const costUsdc = computeCostUsdc(
+      Number(freshInputTokens),
+      Number(outputTokens),
+      pricing,
+      Number(cachedInputTokens),
+    );
+
+    seller.recordSpend(sessionId, costUsdc);
+    const usageReportMetadata = await seller.recordUsageReportEvidence({
+      channelId: sessionId,
+      requestId: 'req-peer-report-1',
+      requestBody,
+      responseBody,
+      service: 'claude-sonnet-4-5-20250929',
+      pricing,
+      freshInputTokens,
+      cachedInputTokens,
+      outputTokens,
+      costUsdc,
+      cumulativeAmountAfterRequest: costUsdc,
+    });
+    expect(usageReportMetadata).not.toBeNull();
+
+    await buyer.handleNeedAuth(
+      sellerPeerId,
+      {
+        channelId: sessionId,
+        requiredCumulativeAmount: costUsdc.toString(),
+        lastRequestCost: costUsdc.toString(),
+        inputTokens: (freshInputTokens + cachedInputTokens).toString(),
+        freshInputTokens: freshInputTokens.toString(),
+        cachedInputTokens: cachedInputTokens.toString(),
+        outputTokens: outputTokens.toString(),
+        requestId: 'req-peer-report-1',
+        service: 'claude-sonnet-4-5-20250929',
+        usageReportMetadata: usageReportMetadata!,
+      },
+      buyerMux,
+    );
+    expect(buyerMux.sentSpendingAuths).toHaveLength(2);
+
+    const buyerAcceptedReportAuth = buyerMux.sentSpendingAuths[1]!;
+    expect(await seller.handleSpendingAuth(buyerPeerId, buyerAcceptedReportAuth, sellerMux)).toBe('accepted');
+    expect(reports).toHaveLength(1);
+
+    const report = reports[0]!;
+    expect(report.verifierCount).toBe(2);
+    expect(report.cumulativeAmount).toBe(costUsdc.toString());
+    expect(report.metadataHash).toBe(buyerAcceptedReportAuth.metadataHash);
+    expect(report.serviceUsageLeaves).toHaveLength(1);
+    expect(report.serviceUsageLeaves[0]!.cumulativeRequestCount).toBe('1');
+    expect(report.serviceUsageLeaves[0]!.cumulativeAmountPaid).toBe(costUsdc.toString());
+
+    const verification = verifyChannelUsageReport(report, {
+      spendingAuthDomain: makeChannelsDomain(CHAIN_ID, SESSIONS_CONTRACT),
+      settledCumulativeAmount: costUsdc,
+    });
+    expect(verification.ok).toBe(true);
+
+    const recordUsageReportVerification = vi.fn(async (
+      _signer: Wallet,
+      _attestation: NonNullable<ReturnType<typeof createUsageReportAck>['attestation']>,
+      _accepted: boolean,
+      _serviceUsageLeaves: ChannelUsageReportPayload['serviceUsageLeaves'],
+    ) => '0xstatshash');
+    const verifierWallets = [Wallet.createRandom(), Wallet.createRandom()];
+    const acks = verifierWallets.map((wallet, index) => createUsageReportAck(report, verification, {
+      verifier: wallet.address,
+      verifierAgentId: String(77 + index),
+      wallet,
+    }));
+
+    for (let i = 0; i < acks.length; i++) {
+      const ack = acks[i]!;
+      expect(ack.accepted).toBe(true);
+      expect(ack.attestation ? verifyChannelReportAttestation(ack.attestation) : false).toBe(true);
+      await recordUsageReportVerification(verifierWallets[i]!, ack.attestation!, ack.accepted, report.serviceUsageLeaves);
+    }
+
+    expect(recordUsageReportVerification).toHaveBeenCalledTimes(2);
+    expect(recordUsageReportVerification.mock.calls.map((call) => call[2])).toEqual([true, true]);
+    expect(recordUsageReportVerification.mock.calls.map((call) => call[1].verifierAgentId)).toEqual(['77', '78']);
+    expect(new Set(recordUsageReportVerification.mock.calls.map((call) => call[1].reportHash))).toEqual(new Set([verification.reportHash]));
+    expect(recordUsageReportVerification.mock.calls.every((call) => call[3].length === 1)).toBe(true);
   });
 });
 
