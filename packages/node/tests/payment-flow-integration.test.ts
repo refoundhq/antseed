@@ -418,6 +418,7 @@ describe('Full Payment Flow Integration', () => {
   it('peer-verifiable usage report flow counts each accepted verifier and carries service usage', async () => {
     const sellerPeerId = sellerIdentity.peerId;
     const buyerPeerId = buyerIdentity.peerId;
+    const sellerContractAddress = '0x' + 'ab'.repeat(20);
     const reports: ChannelUsageReportPayload[] = [];
 
     seller = new SellerPaymentManager(
@@ -432,6 +433,8 @@ describe('Full Payment Flow Integration', () => {
       },
       sellerStore,
     );
+    (seller as unknown as { _resolvedAddresses: Promise<{ channels: string; seller: string }> })._resolvedAddresses =
+      Promise.resolve({ channels: SESSIONS_CONTRACT, seller: sellerContractAddress });
     vi.spyOn(seller.channelsClient, 'reserve').mockResolvedValue('0xreservehash');
     vi.spyOn(seller.channelsClient, 'close').mockResolvedValue('0xclosehash');
     vi.spyOn(seller.channelsClient, 'requestClose').mockResolvedValue('0xrequestclosehash');
@@ -456,6 +459,7 @@ describe('Full Payment Flow Integration', () => {
         currentLoad: 0,
       }],
       region: 'test',
+      sellerContract: sellerContractAddress.slice(2).toLowerCase(),
       timestamp: Date.now(),
       signature: '',
     };
@@ -512,6 +516,7 @@ describe('Full Payment Flow Integration', () => {
     expect(reports).toHaveLength(1);
 
     const report = reports[0]!;
+    expect(report.seller.toLowerCase()).toBe(sellerContractAddress.toLowerCase());
     expect(report.verifierCount).toBe(2);
     expect(report.cumulativeAmount).toBe(costUsdc.toString());
     expect(report.metadataHash).toBe(buyerAcceptedReportAuth.metadataHash);

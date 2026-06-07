@@ -107,7 +107,6 @@ interface UsageReportDraft {
  */
 export class SellerPaymentManager {
   private readonly _signer: AbstractSigner;
-  private readonly _sellerAddress: string;
   private readonly _sellerAgentId: string | null;
   private readonly _usageReportVerifierCount: number;
   private readonly _onUsageReportReady?: (report: ChannelUsageReportPayload) => void | Promise<void>;
@@ -190,7 +189,6 @@ export class SellerPaymentManager {
   constructor(identity: Identity, config: SellerPaymentConfig, channelStore: ChannelStore) {
     this._config = config;
     this._signer = identity.wallet;
-    this._sellerAddress = identity.wallet.address;
     this._sellerAgentId = config.sellerAgentId ?? null;
     this._usageReportVerifierCount = config.usageReportVerifierCount ?? 3;
     this._onUsageReportReady = config.onUsageReportReady;
@@ -712,7 +710,7 @@ export class SellerPaymentManager {
         }
 
         debugLog(`[SellerPayment] Budget updated: channel=${channelId.slice(0, 18)}... cumulative=${cumulativeAmount}`);
-        this._emitUsageReportIfReady(buyerPeerId, payload);
+        await this._emitUsageReportIfReady(buyerPeerId, payload);
 
         // Retry any deferred topUp now that we have a higher settle amount.
         const pendingTopUp = this._pendingTopUp.get(channelId);
@@ -1078,17 +1076,18 @@ export class SellerPaymentManager {
     return accepted >= spent;
   }
 
-  private _emitUsageReportIfReady(buyerPeerId: string, auth: SpendingAuthPayload): void {
+  private async _emitUsageReportIfReady(buyerPeerId: string, auth: SpendingAuthPayload): Promise<void> {
     if (!this._sellerAgentId || !this._onUsageReportReady) return;
     const draft = this._usageReportDrafts.get(auth.channelId);
     if (!draft) return;
     if (draft.metadataHash.toLowerCase() !== auth.metadataHash.toLowerCase()) return;
     if (BigInt(draft.metadata.cumulativeAmountPaid) !== BigInt(auth.cumulativeAmount)) return;
+    const { seller } = await this._resolvedAddresses!;
 
     const report: ChannelUsageReportPayload = {
       channelId: auth.channelId,
       buyer: peerIdToAddress(buyerPeerId),
-      seller: this._sellerAddress,
+      seller,
       sellerAgentId: this._sellerAgentId,
       cumulativeAmount: auth.cumulativeAmount,
       metadata: auth.metadata,
