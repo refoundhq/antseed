@@ -319,16 +319,18 @@
     }
 
     .chat-sensitive-artifact {
+      appearance: none;
       display: inline-flex;
       align-items: center;
       gap: 6px;
       max-width: 100%;
       margin: 0 2px;
       padding: 2px 6px;
-      border: 1px solid color-mix(in srgb, var(--danger) 26%, var(--border));
+      border: 1px solid var(--border);
       border-radius: 999px;
-      background: color-mix(in srgb, var(--danger) 7%, var(--bg-card-alt));
+      background: color-mix(in srgb, var(--bg-card-alt) 88%, var(--text-muted) 12%);
       color: var(--text-secondary);
+      font: inherit;
       font-size: 0.92em;
       line-height: 1.4;
       vertical-align: baseline;
@@ -345,8 +347,8 @@
       appearance: none;
       border: 0;
       border-radius: 999px;
-      background: color-mix(in srgb, var(--danger) 12%, transparent);
-      color: var(--danger);
+      background: color-mix(in srgb, var(--text-muted) 12%, transparent);
+      color: var(--text-secondary);
       cursor: pointer;
       flex: 0 0 auto;
       font: inherit;
@@ -357,11 +359,12 @@
     }
 
     .chat-sensitive-action:hover {
-      background: color-mix(in srgb, var(--danger) 18%, transparent);
+      background: color-mix(in srgb, var(--text-muted) 18%, transparent);
+      color: var(--text-primary);
     }
 
     .chat-sensitive-action:focus-visible {
-      outline: 2px solid var(--danger);
+      outline: 2px solid var(--accent-blue);
       outline-offset: 2px;
     }
 
@@ -376,45 +379,38 @@
       color: inherit;
     }
 
-    .chat-external-link-gated {
-      border-color: color-mix(in srgb, var(--accent-blue) 28%, var(--border));
-      background: color-mix(in srgb, var(--accent-blue) 7%, var(--bg-card-alt));
-    }
-
     .chat-external-link-gated .chat-sensitive-action {
-      background: color-mix(in srgb, var(--accent-blue) 12%, transparent);
       color: var(--accent-blue);
     }
 
     .chat-external-link-gated .chat-sensitive-action:hover {
-      background: color-mix(in srgb, var(--accent-blue) 18%, transparent);
+      background: color-mix(in srgb, var(--accent-blue) 12%, transparent);
     }
 
-    .chat-payment-link-hidden,
-    .chat-wallet-hidden {
+    .chat-payment-link-hidden {
       font-weight: 600;
     }
 
-    .chat-unsafe-payment-block {
-      margin: 8px 0;
-      padding: 12px 14px;
-      border: 1px solid color-mix(in srgb, var(--danger) 45%, var(--border));
-      border-radius: var(--radius-sm);
-      background: color-mix(in srgb, var(--danger) 10%, var(--bg-card));
-      color: var(--text-primary);
+    .chat-wallet-redaction {
+      color: var(--text-muted);
+      cursor: pointer;
+      font-style: italic;
     }
 
-    .chat-unsafe-payment-title {
-      color: var(--danger);
-      font-size: 13px;
-      font-weight: 800;
-      margin-bottom: 4px;
-    }
-
-    .chat-unsafe-payment-body {
+    .chat-wallet-redaction:hover,
+    .chat-wallet-redaction:focus-visible {
       color: var(--text-secondary);
-      font-size: 13px;
-      line-height: 1.5;
+    }
+
+    .chat-wallet-redaction:focus-visible {
+      outline: 1px solid var(--accent-blue);
+      outline-offset: 2px;
+    }
+
+    .chat-wallet-revealed-text {
+      color: inherit;
+      font: inherit;
+      user-select: text;
     }
 
     .chat-inline-image {

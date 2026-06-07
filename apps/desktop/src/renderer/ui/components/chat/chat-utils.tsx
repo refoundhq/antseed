@@ -1,12 +1,10 @@
 import { Fragment, useMemo, useState } from 'react';
-import type { ReactNode } from 'react';
+import type { KeyboardEvent, ReactNode } from 'react';
 import { Lexer } from 'marked';
 import type { ChatMessage } from './chat-shared';
 import { isToolResultOnlyMessage as isToolResultOnlyMessageShared } from './chat-shared';
 import {
-  findSensitiveChatArtifacts,
   formatArtifactLabel,
-  isLikelyUnsafePaymentInstruction,
   segmentSensitiveChatText,
 } from './chat-safety';
 import type { SensitiveChatArtifact } from './chat-safety';
@@ -106,17 +104,7 @@ function splitHighlightedText(text: string, query: string | undefined, keyPrefix
   return <>{parts}</>;
 }
 
-function securityWarning(): string {
-  return 'This came from untrusted chat content. AntSeed will never ask you to send funds, deposit, top up, connect a wallet, or approve transactions from chat. Use only the official AntSeed wallet screen.';
-}
-
-function confirmUnsafeAction(action: string, target?: string): boolean {
-  const targetLine = target ? `\n\nDestination:\n${target}` : '';
-  return window.confirm(`${securityWarning()}\n\n${action}${targetLine}`);
-}
-
 function safeOpenExternalUrl(url: string): void {
-  if (!confirmUnsafeAction('Open this external destination anyway?', url)) return;
   window.open(url, '_blank', 'noopener,noreferrer');
 }
 
@@ -127,42 +115,35 @@ function firstArtifactFromText(value: string): SensitiveChatArtifact | null {
 
 function HiddenWalletAddress({ artifact }: { artifact: SensitiveChatArtifact }) {
   const [revealed, setRevealed] = useState(false);
-  const [copied, setCopied] = useState(false);
   const value = artifact.value;
   const label = formatArtifactLabel(artifact);
 
   const handleReveal = (): void => {
-    if (!revealed && !confirmUnsafeAction('Reveal this wallet address anyway?')) return;
     setRevealed(true);
   };
 
-  const handleCopy = (): void => {
-    if (!confirmUnsafeAction('Copy this wallet address anyway?')) return;
-    void navigator.clipboard.writeText(value).then(() => {
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1500);
-    }).catch(() => undefined);
+  const handleKeyDown = (event: KeyboardEvent<HTMLSpanElement>): void => {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    event.preventDefault();
+    handleReveal();
   };
 
   if (!revealed) {
     return (
-      <span className="chat-sensitive-artifact chat-wallet-hidden">
-        <span className="chat-sensitive-label">{label}</span>
-        <button type="button" className="chat-sensitive-action" onClick={handleReveal}>
-          Reveal
-        </button>
+      <span
+        className="chat-wallet-redaction"
+        title="Address hidden to keep your funds secure. Click to reveal."
+        role="button"
+        tabIndex={0}
+        onClick={handleReveal}
+        onKeyDown={handleKeyDown}
+      >
+        [address hidden]
       </span>
     );
   }
 
-  return (
-    <span className="chat-sensitive-artifact chat-wallet-revealed">
-      <code className="chat-sensitive-value">{value}</code>
-      <button type="button" className="chat-sensitive-action" onClick={handleCopy}>
-        {copied ? 'Copied' : 'Copy'}
-      </button>
-    </span>
-  );
+  return <code className="chat-wallet-revealed-text">{value}</code>;
 }
 
 function SafeExternalLink({ artifact }: { artifact: SensitiveChatArtifact }) {
@@ -173,7 +154,7 @@ function SafeExternalLink({ artifact }: { artifact: SensitiveChatArtifact }) {
     <span className={`chat-sensitive-artifact${isPaymentLink ? ' chat-payment-link-hidden' : ' chat-external-link-gated'}`}>
       <span className="chat-sensitive-label">{label}</span>
       <button type="button" className="chat-sensitive-action" onClick={() => safeOpenExternalUrl(artifact.value)}>
-        {isPaymentLink ? 'Open anyway' : 'Open with warning'}
+        {isPaymentLink ? 'Open' : 'Open'}
       </button>
     </span>
   );
@@ -203,29 +184,8 @@ function splitSafeHighlightedText(text: string, query: string | undefined, keyPr
   );
 }
 
-function BlockedUnsafePaymentInstruction() {
-  return (
-    <div className="chat-unsafe-payment-block" role="alert">
-      <div className="chat-unsafe-payment-title">Unsafe payment instruction blocked</div>
-      <div className="chat-unsafe-payment-body">
-        A peer response tried to direct you to a payment, deposit, wallet, or external destination.
-        AntSeed will never ask you to send funds, top up, connect a wallet, or approve transactions inside chat.
-        Use only the official AntSeed wallet screen.
-      </div>
-    </div>
-  );
-}
-
-function confirmCopyIfSensitive(text: string): boolean {
-  const artifacts = findSensitiveChatArtifacts(text);
-  if (artifacts.length === 0) return true;
-  const addressCount = artifacts.filter((artifact) => artifact.type === 'wallet-address').length;
-  const linkCount = artifacts.filter((artifact) => artifact.type === 'url').length;
-  const parts = [
-    addressCount > 0 ? `${addressCount} hidden address${addressCount === 1 ? '' : 'es'}` : '',
-    linkCount > 0 ? `${linkCount} gated link${linkCount === 1 ? '' : 's'}` : '',
-  ].filter(Boolean).join(' and ');
-  return confirmUnsafeAction(`This text contains ${parts}. Copy the original text anyway?`);
+function confirmCopyIfSensitive(_text: string): boolean {
+  return true;
 }
 
 function flattenPlainText(tokens: MarkdownToken[] | undefined): string {
@@ -306,7 +266,7 @@ function renderInlineToken(token: MarkdownToken, key: string, highlightQuery?: s
         <span key={key} className="chat-sensitive-artifact chat-external-image-hidden">
           <span className="chat-sensitive-label">External image hidden: {artifact.display}</span>
           <button type="button" className="chat-sensitive-action" onClick={() => safeOpenExternalUrl(artifact.value)}>
-            Open with warning
+            Open
           </button>
         </span>
       );
@@ -466,11 +426,7 @@ function renderBlockToken(token: MarkdownToken, key: string, highlightQuery?: st
   }
 }
 
-export function MarkdownContent({ text, className = 'chat-bubble-content', highlightQuery, activeHighlight, blockUnsafePaymentInstructions = false }: MarkdownContentProps) {
-  const shouldBlock = blockUnsafePaymentInstructions && isLikelyUnsafePaymentInstruction(text);
+export function MarkdownContent({ text, className = 'chat-bubble-content', highlightQuery, activeHighlight }: MarkdownContentProps) {
   const tokens = useMemo(() => Lexer.lex(text, { gfm: true, breaks: true }) as MarkdownToken[], [text]);
-  if (shouldBlock) {
-    return <div className={className}><BlockedUnsafePaymentInstruction /></div>;
-  }
   return <div className={className}>{renderBlockTokens(tokens, 'md', highlightQuery, activeHighlight)}</div>;
 }
