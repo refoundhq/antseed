@@ -24,13 +24,13 @@ export function normalizePeerId(value: string): string | null {
 }
 
 export function parsePeerPinnedService(value: string): { peerId: string; service: string } | null {
-  const slashIndex = value.indexOf('/')
-  if (slashIndex <= 0 || slashIndex === value.length - 1) {
+  const separatorIndex = value.indexOf('@')
+  if (separatorIndex <= 0 || separatorIndex === value.length - 1) {
     return null
   }
 
-  const peerId = normalizePeerId(value.slice(0, slashIndex))
-  const service = value.slice(slashIndex + 1).trim()
+  const peerId = normalizePeerId(value.slice(0, separatorIndex))
+  const service = value.slice(separatorIndex + 1).trim()
   if (!peerId || service.length === 0) {
     return null
   }

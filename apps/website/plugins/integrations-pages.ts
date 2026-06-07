@@ -275,12 +275,12 @@ function renderSkillMarkdown(): string {
   out.push('- **Pin** — telling the buyer proxy "route requests to *this* peer." In the');
   out.push('  default manual flow, there is no peer auto-selection; you must choose a peer,');
   out.push('  send a per-request pin header, or start the proxy with a router plugin that');
-  out.push('  performs selection. Two common explicit routes:');
+  out.push('  performs selection. Common explicit routes:');
   out.push('  - **Session pin**: `antseed buyer connection set --peer <peerId>`. Persists in');
   out.push('    `~/.antseed/buyer.state.json` and applies to every request until you change it.');
   out.push('  - **Per-request header**: `x-antseed-pin-peer: <peerId>` on each call. Overrides');
   out.push('    the session pin for that request, and works *without* any session pin at all.');
-  out.push('  - **Model prefix**: set `model` to `<peerId>/<service>`. The proxy uses the');
+  out.push('  - **Model prefix**: set `model` to `<peerId>@<service>`. The proxy uses the');
   out.push('    prefix as the peer pin and forwards only `<service>` to the seller.');
   out.push('  ');
   out.push('  If both header and model-prefix pins are present, the header selects the peer;');

@@ -1019,7 +1019,7 @@ export class BuyerProxy {
 
     // Auto peer selection is disabled. Every request MUST target a specific
     // peer, either via the per-request `x-antseed-pin-peer` header, a
-    // `<peerId>/<model>` model prefix, or a session-wide pin set by
+    // `<peerId>@<model>` model prefix, or a session-wide pin set by
     // `antseed buyer connection set --peer <peerId>`.
     //
     // Surface the error in the structured shape OpenAI/Anthropic SDKs expect
@@ -1034,7 +1034,7 @@ export class BuyerProxy {
         'No peer pinned. Auto-selection is disabled.\n'
         + 'Pin a peer one of three ways:\n'
         + '  • Per-request header:   x-antseed-pin-peer: <peerId>    (40-char hex EVM address)\n'
-        + '  • Model name prefix:    <peerId>/<model>\n'
+        + '  • Model name prefix:    <peerId>@<model>\n'
         + '  • Session pin:          antseed buyer connection set --peer <peerId>\n'
         + 'Discover peers with:       antseed network browse'
       res.writeHead(400, { 'content-type': 'application/json' })
@@ -1046,7 +1046,7 @@ export class BuyerProxy {
           param: 'x-antseed-pin-peer',
           help: {
             perRequestHeader: 'x-antseed-pin-peer: <peerId>',
-            modelPrefix: '<peerId>/<model>',
+            modelPrefix: '<peerId>@<model>',
             sessionPin: 'antseed buyer connection set --peer <peerId>',
             discoverPeers: 'antseed network browse',
           },
