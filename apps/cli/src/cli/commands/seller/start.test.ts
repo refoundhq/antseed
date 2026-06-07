@@ -7,6 +7,7 @@ import {
   assertSellerPrerequisites,
   buildSellerRuntimeOverridesFromFlags,
   buildSellerPluginRuntimeEnv,
+  isPublicRpcUrl,
   mergeSellerRuntimeEnv,
   parseOptionalPositiveIntegerEnv,
   selectSellerProviderNames,
@@ -243,6 +244,22 @@ test('parseOptionalPositiveIntegerEnv accepts positive integer env values', () =
   assert.equal(parseOptionalPositiveIntegerEnv('0'), undefined);
   assert.equal(parseOptionalPositiveIntegerEnv('123abc'), undefined);
   assert.equal(parseOptionalPositiveIntegerEnv('not-a-number'), undefined);
+});
+
+test('isPublicRpcUrl detects built-in public Base RPC endpoints', () => {
+  assert.equal(isPublicRpcUrl('https://base.publicnode.com'), true);
+  assert.equal(isPublicRpcUrl('https://base.drpc.org'), true);
+  assert.equal(isPublicRpcUrl('https://base.llamarpc.com'), true);
+  assert.equal(isPublicRpcUrl('https://mainnet.base.org'), true);
+  assert.equal(isPublicRpcUrl('https://sepolia.base.org'), true);
+});
+
+test('isPublicRpcUrl matches host only and ignores invalid or dedicated RPC URLs', () => {
+  assert.equal(isPublicRpcUrl('https://BASE.PUBLICNODE.COM/path'), true);
+  assert.equal(isPublicRpcUrl('https://base.publicnode.com:443'), true);
+  assert.equal(isPublicRpcUrl('https://rpc.example.com/base.publicnode.com'), false);
+  assert.equal(isPublicRpcUrl('https://dedicated-base-rpc.example'), false);
+  assert.equal(isPublicRpcUrl('not a url'), false);
 });
 
 test('resolveBaseRpcUrlOverride uses flag before ANTSEED_BASE_RPC_URL', () => {

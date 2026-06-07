@@ -49,6 +49,23 @@ function parseOptionalBoolEnv(value: string | undefined): boolean | null {
   return null
 }
 
+const PUBLIC_BASE_RPC_HOSTS = new Set([
+  'base.publicnode.com',
+  'base.drpc.org',
+  'base.llamarpc.com',
+  'mainnet.base.org',
+  'sepolia.base.org',
+])
+
+export function isPublicRpcUrl(rpcUrl: string): boolean {
+  try {
+    const host = new URL(rpcUrl).hostname.toLowerCase()
+    return PUBLIC_BASE_RPC_HOSTS.has(host)
+  } catch {
+    return false
+  }
+}
+
 /**
  * Gate `antseed seller start` on required prerequisites:
  *   1. At least one service is configured for the selected provider.
@@ -518,6 +535,9 @@ export function registerSellerStartCommand(sellerCmd: Command): void {
       if (paymentConfig?.crypto?.rpcUrl) {
         const rpcSource = baseRpcUrlOverride ? 'runtime override' : 'config/default'
         console.log(chalk.dim(`  Base RPC URL: ${paymentConfig.crypto.rpcUrl} (${rpcSource})`))
+        if (isPublicRpcUrl(paymentConfig.crypto.rpcUrl)) {
+          console.log(chalk.yellow('  Warning: using a public Base RPC. Public RPCs can be rate-limited or lag on event/log polling; sellers should use a dedicated RPC for reliable payment channel settlement. Learn how to configure one: https://antseed.com/docs/config#base-rpc-url'))
+        }
       }
       // CLI flag (decimal USDC) overrides config JSON (base-unit string).
       const minSettleDeltaFlag = options.minSettleDelta as string | undefined
