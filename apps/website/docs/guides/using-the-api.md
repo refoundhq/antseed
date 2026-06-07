@@ -143,14 +143,13 @@ antseed network peer <40-char-hex-peer-id>
 # Pin a peer for the session (survives daemon restart)
 antseed buyer connection set --peer <40-char-hex-peer-id>
 
-# Pin a service too — overrides the `model` field in all requests
-antseed buyer connection set --service claude-opus-4-6
-
 # Clear pins
 antseed buyer connection clear
 ```
 
-You can also pin per-request by sending the `x-antseed-pin-peer: <peerId>` header — useful when different calls should go to different peers.
+You can also pin per-request by sending the `x-antseed-pin-peer: <peerId>` header, or by encoding the peer in the model field as `<peerId>@<model>`. The proxy strips the peer prefix before provider matching and forwarding, so `4668854ba3e8b094e6f48fbeb59cec1cfde162f2@gpt-5.5` routes to that peer as model `gpt-5.5`.
+
+Precedence: `x-antseed-pin-peer` selects the peer when both a header pin and model prefix are present. The model prefix is still stripped before the request is routed.
 
 ## How Routing Works
 

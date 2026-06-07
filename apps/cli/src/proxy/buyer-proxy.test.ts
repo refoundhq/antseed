@@ -6,7 +6,13 @@ import { Readable } from 'node:stream'
 import test from 'node:test'
 import type { PeerInfo } from '@antseed/node'
 import { DEFAULT_BUYER_PEER_REFRESH_INTERVAL_MS } from '../config/defaults.js'
-import { BuyerProxy, parsePersistedPeers, selectCandidatePeersForRouting, rewriteServiceInBody } from './buyer-proxy.js'
+import {
+  BuyerProxy,
+  parsePeerPinnedService,
+  parsePersistedPeers,
+  rewritePeerPinnedServiceInBody,
+  selectCandidatePeersForRouting,
+} from './buyer-proxy.js'
 
 function makePeer(seed: string, providers: string[]): PeerInfo {
   const repeated = (seed.repeat(40) + 'a'.repeat(40)).slice(0, 40)
@@ -371,6 +377,58 @@ test('pinned proxy request enforces buyer routing policy', async () => {
   assert.match(res.body, /pricing\/reputation limits/)
 })
 
+test('model peer prefix pins the request peer and strips the routed model', async () => {
+  const pinnedPeer = makePeer('a', ['openai'])
+  let capturedRequestBody: Record<string, unknown> | null = null
+  let capturedPeerId: string | null = null
+  const router = {
+    allowsPeerForPolicy: (req: { body: Uint8Array }, peer: PeerInfo) => {
+      capturedRequestBody = parseJsonBody(req.body)
+      capturedPeerId = peer.peerId
+      return false
+    },
+  }
+  const proxy = makeBuyerProxyWithPeers([pinnedPeer], [pinnedPeer], router)
+  const req = makeProxyRequest({
+    body: { model: `${pinnedPeer.peerId}@gpt-4o`, messages: [] },
+  })
+
+  const res = await invokeProxy(proxy, req)
+
+  assert.equal(res.statusCode, 502)
+  assert.equal(capturedPeerId, pinnedPeer.peerId)
+  assert.equal(capturedRequestBody?.['model'], 'gpt-4o')
+  assert.equal(capturedRequestBody?.['service'], 'gpt-4o')
+})
+
+test('x-antseed-pin-peer header takes precedence over model peer prefix', async () => {
+  const modelPinnedPeer = makePeer('a', ['openai'])
+  const headerPinnedPeer = makePeer('b', ['openai'])
+  let capturedRequestBody: Record<string, unknown> | null = null
+  let capturedPeerId: string | null = null
+  const router = {
+    allowsPeerForPolicy: (req: { body: Uint8Array }, peer: PeerInfo) => {
+      capturedRequestBody = parseJsonBody(req.body)
+      capturedPeerId = peer.peerId
+      return false
+    },
+  }
+  const proxy = makeBuyerProxyWithPeers([modelPinnedPeer, headerPinnedPeer], [modelPinnedPeer, headerPinnedPeer], router)
+  const req = makeProxyRequest({
+    headers: {
+      'x-antseed-pin-peer': headerPinnedPeer.peerId,
+    },
+    body: { model: `${modelPinnedPeer.peerId}@gpt-4o`, messages: [] },
+  })
+
+  const res = await invokeProxy(proxy, req)
+
+  assert.equal(res.statusCode, 502)
+  assert.equal(capturedPeerId, headerPinnedPeer.peerId)
+  assert.equal(capturedRequestBody?.['model'], 'gpt-4o')
+  assert.equal(capturedRequestBody?.['service'], 'gpt-4o')
+})
+
 // parsePersistedPeers — hydrates _cachedPeers from buyer.state.json at startup
 // so the first request after launch can route from the warm cache without
 // blocking on DHT discovery.
@@ -594,7 +652,7 @@ test('parsePersistedPeers filters non-string entries out of providers', () => {
   assert.deepEqual(result[0]?.providers, ['openai', 'claude-oauth'])
 })
 
-// rewriteServiceInBody tests
+// peer-pinned model syntax tests
 
 function makeJsonBody(obj: Record<string, unknown>): Uint8Array {
   return new TextEncoder().encode(JSON.stringify(obj))
@@ -606,55 +664,87 @@ function parseJsonBody(body: Uint8Array): Record<string, unknown> {
 
 const jsonHeaders: Record<string, string> = { 'content-type': 'application/json' }
 
-test('rewriteServiceInBody replaces existing model field and sets service', () => {
-  const body = makeJsonBody({ model: 'claude-sonnet-4-5', messages: [] })
-  const result = rewriteServiceInBody(body, jsonHeaders, 'claude-opus-4-6')
-  const parsed = parseJsonBody(result.body)
-  assert.equal(parsed['service'], 'claude-opus-4-6')
-  assert.equal(parsed['model'], 'claude-opus-4-6')
+test('parsePeerPinnedService parses 40-char hex peer prefixes', () => {
+  assert.deepEqual(parsePeerPinnedService(`${validPeerId}@claude-sonnet-4-5`), {
+    peerId: validPeerId,
+    service: 'claude-sonnet-4-5',
+  })
+  assert.deepEqual(parsePeerPinnedService(`0x${validPeerId.toUpperCase()}@gpt-4o`), {
+    peerId: validPeerId,
+    service: 'gpt-4o',
+  })
 })
 
-test('rewriteServiceInBody adds service and model fields when absent', () => {
-  const body = makeJsonBody({ messages: [] })
-  const result = rewriteServiceInBody(body, jsonHeaders, 'claude-opus-4-6')
-  const parsed = parseJsonBody(result.body)
-  assert.equal(parsed['service'], 'claude-opus-4-6')
-  assert.equal(parsed['model'], 'claude-opus-4-6')
+test('parsePeerPinnedService ignores non-peer model paths', () => {
+  assert.equal(parsePeerPinnedService('openai/gpt-4o'), null)
+  assert.equal(parsePeerPinnedService('openai@gpt-4o'), null)
+  assert.equal(parsePeerPinnedService(`${validPeerId}@`), null)
+  assert.equal(parsePeerPinnedService(`@${validPeerId}`), null)
 })
 
-test('rewriteServiceInBody preserves all other fields', () => {
-  const body = makeJsonBody({ model: 'old', messages: [{ role: 'user', content: 'hi' }], max_tokens: 1024 })
-  const result = rewriteServiceInBody(body, jsonHeaders, 'new-model')
+test('rewritePeerPinnedServiceInBody strips model peer prefix and sets service', () => {
+  const body = makeJsonBody({ model: `${validPeerId}@gpt-4o`, messages: [] })
+  const result = rewritePeerPinnedServiceInBody(body, jsonHeaders)
   const parsed = parseJsonBody(result.body)
-  assert.equal(parsed['service'], 'new-model')
-  assert.equal(parsed['model'], 'new-model')
+  assert.equal(result.pinnedPeerId, validPeerId)
+  assert.equal(parsed['service'], 'gpt-4o')
+  assert.equal(parsed['model'], 'gpt-4o')
+})
+
+test('rewritePeerPinnedServiceInBody strips service peer prefix when model is absent', () => {
+  const body = makeJsonBody({ service: `${validPeerId}@gpt-4o`, messages: [] })
+  const result = rewritePeerPinnedServiceInBody(body, jsonHeaders)
+  const parsed = parseJsonBody(result.body)
+  assert.equal(result.pinnedPeerId, validPeerId)
+  assert.equal(parsed['service'], 'gpt-4o')
+  assert.equal(parsed['model'], 'gpt-4o')
+})
+
+test('rewritePeerPinnedServiceInBody preserves explicit unprefixed service when model is prefixed', () => {
+  const body = makeJsonBody({ model: `${validPeerId}@gpt-4o`, service: 'custom-service', messages: [] })
+  const result = rewritePeerPinnedServiceInBody(body, jsonHeaders)
+  const parsed = parseJsonBody(result.body)
+  assert.equal(result.pinnedPeerId, validPeerId)
+  assert.equal(parsed['model'], 'gpt-4o')
+  assert.equal(parsed['service'], 'custom-service')
+})
+
+test('rewritePeerPinnedServiceInBody preserves all other fields', () => {
+  const body = makeJsonBody({ model: `${validPeerId}@gpt-4o`, messages: [{ role: 'user', content: 'hi' }], max_tokens: 1024 })
+  const result = rewritePeerPinnedServiceInBody(body, jsonHeaders)
+  const parsed = parseJsonBody(result.body)
+  assert.equal(parsed['service'], 'gpt-4o')
+  assert.equal(parsed['model'], 'gpt-4o')
   assert.deepEqual(parsed['messages'], [{ role: 'user', content: 'hi' }])
   assert.equal(parsed['max_tokens'], 1024)
 })
 
-test('rewriteServiceInBody updates content-length header when present', () => {
-  const original = makeJsonBody({ model: 'a', messages: [] })
+test('rewritePeerPinnedServiceInBody updates content-length header when present', () => {
+  const original = makeJsonBody({ model: `${validPeerId}@gpt-4o`, messages: [] })
   const headers = { 'content-type': 'application/json', 'content-length': String(original.length) }
-  const result = rewriteServiceInBody(original, headers, 'claude-opus-4-6-20251201')
+  const result = rewritePeerPinnedServiceInBody(original, headers)
   assert.equal(result.headers['content-length'], String(result.body.length))
 })
 
-test('rewriteServiceInBody returns original when body is not JSON content-type', () => {
-  const body = makeJsonBody({ model: 'old' })
+test('rewritePeerPinnedServiceInBody returns original when body is not JSON content-type', () => {
+  const body = makeJsonBody({ model: `${validPeerId}@gpt-4o` })
   const headers = { 'content-type': 'text/plain' }
-  const result = rewriteServiceInBody(body, headers, 'new-model')
+  const result = rewritePeerPinnedServiceInBody(body, headers)
   assert.equal(result.body, body)
   assert.equal(result.headers, headers)
+  assert.equal(result.pinnedPeerId, null)
 })
 
-test('rewriteServiceInBody returns original when body is empty', () => {
+test('rewritePeerPinnedServiceInBody returns original when body is empty', () => {
   const body = new Uint8Array(0)
-  const result = rewriteServiceInBody(body, jsonHeaders, 'new-model')
+  const result = rewritePeerPinnedServiceInBody(body, jsonHeaders)
   assert.equal(result.body, body)
+  assert.equal(result.pinnedPeerId, null)
 })
 
-test('rewriteServiceInBody returns original when body is not a JSON object', () => {
+test('rewritePeerPinnedServiceInBody returns original when body is not a JSON object', () => {
   const body = new TextEncoder().encode('"just a string"')
-  const result = rewriteServiceInBody(body, jsonHeaders, 'new-model')
+  const result = rewritePeerPinnedServiceInBody(body, jsonHeaders)
   assert.equal(result.body, body)
+  assert.equal(result.pinnedPeerId, null)
 })
