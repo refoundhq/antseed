@@ -1,7 +1,13 @@
-import { type AbstractSigner, verifyTypedData } from 'ethers';
+import { type AbstractSigner, hexlify, keccak256, verifyTypedData } from 'ethers';
 import type { Identity } from '../p2p/identity.js';
+import { signUtf8 } from '../p2p/identity.js';
 import type { PaymentMux } from '../p2p/payment-mux.js';
 import type {
+  ChannelUsageReportCatalogLeafPayload,
+  ChannelUsageReportPayload,
+  ChannelUsageReportReceiptLeafPayload,
+  ChannelUsageReportServiceUsageLeafPayload,
+  NeedAuthUsageReportMetadataPayload,
   SpendingAuthPayload,
   PaymentRequiredPayload,
 } from '../types/protocol.js';
@@ -11,8 +17,18 @@ import {
   RESERVE_AUTH_TYPES,
   makeChannelsDomain,
   encodeMetadata,
+  encodeMetadataV2,
+  computeEncodedMetadataHash,
+  computeMerkleProof,
+  computeMerkleRoot,
+  hashReceiptLeaf,
+  hashServiceCatalogLeaf,
+  hashServiceUsageLeaf,
+  hashUtf8,
+  SERVICE_MODE_PAID,
   ZERO_METADATA,
 } from './evm/signatures.js';
+import { encodeSellerCatalogForSigning } from './usage-report-verifier.js';
 import { debugLog, debugWarn } from '../utils/debug.js';
 import { peerIdToAddress } from '../types/peer.js';
 import { ChannelStore, type StoredChannel } from './channel-store.js';
@@ -35,6 +51,12 @@ export interface SellerPaymentConfig {
    * the full amount so no dust is left behind. Default: "2000" (~$0.002).
    */
   minSettleDelta?: string;
+  /** Seller ERC-8004 / Antseed staking agent id. Usage reports are skipped when absent. */
+  sellerAgentId?: string;
+  /** Number of verifier sellers to select per report. Default: 3. */
+  usageReportVerifierCount?: number;
+  /** Called after a buyer accepts V2 usage-report metadata. */
+  onUsageReportReady?: (report: ChannelUsageReportPayload) => void | Promise<void>;
 }
 
 /** Default minimum budget per request: $0.50 USDC (base units). */
@@ -57,6 +79,35 @@ interface LatestAuth {
   metadata: string;
 }
 
+interface RecordUsageReportEvidenceParams {
+  channelId: string;
+  requestId: string;
+  requestBody: Uint8Array;
+  responseBody: Uint8Array;
+  service: string;
+  pricing: {
+    inputUsdPerMillion: number;
+    cachedInputUsdPerMillion?: number;
+    outputUsdPerMillion: number;
+  };
+  freshInputTokens: bigint;
+  cachedInputTokens: bigint;
+  outputTokens: bigint;
+  costUsdc: bigint;
+  cumulativeAmountAfterRequest: bigint;
+}
+
+interface UsageReportDraft {
+  metadata: NeedAuthUsageReportMetadataPayload;
+  metadataHash: string;
+  catalogRoot: string;
+  sellerCatalogSig: string;
+  serviceUsageLeaves: ChannelUsageReportServiceUsageLeafPayload[];
+  serviceCatalogLeaves: ChannelUsageReportCatalogLeafPayload[];
+  catalogMerkleProofs: Record<string, string[]>;
+  receiptLeavesOrProofs: ChannelUsageReportReceiptLeafPayload[];
+}
+
 /**
  * Manages seller-side payment sessions.
  * The buyer sends a single SpendingAuth signature with a monotonically
@@ -65,6 +116,11 @@ interface LatestAuth {
  */
 export class SellerPaymentManager {
   private readonly _signer: AbstractSigner;
+  private readonly _wallet: Identity['wallet'];
+  private readonly _sellerAddress: string;
+  private readonly _sellerAgentId: string | null;
+  private readonly _usageReportVerifierCount: number;
+  private readonly _onUsageReportReady?: (report: ChannelUsageReportPayload) => void | Promise<void>;
   private readonly _channelsClient: ChannelsClient;
   private readonly _config: SellerPaymentConfig;
   private readonly _channelStore: ChannelStore;
@@ -102,6 +158,8 @@ export class SellerPaymentManager {
 
   /** channelId -> latest buyer-signed auth (both sigs + cumulative values + metadata) for settle/close */
   private readonly _latestAuth = new Map<string, LatestAuth>();
+  /** channelId -> latest cumulative peer-verifiable usage evidence. In-memory only. */
+  private readonly _usageReportDrafts = new Map<string, UsageReportDraft>();
 
   /**
    * channelId -> waiters blocked on acceptedCumulative reaching a target.
@@ -142,6 +200,11 @@ export class SellerPaymentManager {
   constructor(identity: Identity, config: SellerPaymentConfig, channelStore: ChannelStore) {
     this._config = config;
     this._signer = identity.wallet;
+    this._wallet = identity.wallet;
+    this._sellerAddress = identity.wallet.address;
+    this._sellerAgentId = config.sellerAgentId ?? null;
+    this._usageReportVerifierCount = config.usageReportVerifierCount ?? 3;
+    this._onUsageReportReady = config.onUsageReportReady;
     const channelsClient = new ChannelsClient({
       rpcUrl: config.rpcUrl,
       ...(config.fallbackRpcUrls ? { fallbackRpcUrls: config.fallbackRpcUrls } : {}),
@@ -660,6 +723,7 @@ export class SellerPaymentManager {
         }
 
         debugLog(`[SellerPayment] Budget updated: channel=${channelId.slice(0, 18)}... cumulative=${cumulativeAmount}`);
+        this._emitUsageReportIfReady(buyerPeerId, payload);
 
         // Retry any deferred topUp now that we have a higher settle amount.
         const pendingTopUp = this._pendingTopUp.get(channelId);
@@ -1023,6 +1087,160 @@ export class SellerPaymentManager {
     const accepted = this._acceptedCumulative.get(channelId)!;
     const spent = this._spent.get(channelId) ?? 0n;
     return accepted >= spent;
+  }
+
+  private _emitUsageReportIfReady(buyerPeerId: string, auth: SpendingAuthPayload): void {
+    if (!this._sellerAgentId || !this._onUsageReportReady) return;
+    const draft = this._usageReportDrafts.get(auth.channelId);
+    if (!draft) return;
+    if (draft.metadataHash.toLowerCase() !== auth.metadataHash.toLowerCase()) return;
+    if (BigInt(draft.metadata.cumulativeAmountPaid) !== BigInt(auth.cumulativeAmount)) return;
+
+    const report: ChannelUsageReportPayload = {
+      channelId: auth.channelId,
+      buyer: peerIdToAddress(buyerPeerId),
+      seller: this._sellerAddress,
+      sellerAgentId: this._sellerAgentId,
+      cumulativeAmount: auth.cumulativeAmount,
+      metadata: auth.metadata,
+      metadataHash: auth.metadataHash,
+      selectionBeacon: keccak256(auth.spendingAuthSig),
+      verifierCount: this._usageReportVerifierCount,
+      buyerSpendingAuthSig: auth.spendingAuthSig,
+      catalogRoot: draft.catalogRoot,
+      sellerCatalogSig: draft.sellerCatalogSig,
+      serviceUsageLeaves: draft.serviceUsageLeaves,
+      serviceCatalogLeaves: draft.serviceCatalogLeaves,
+      catalogMerkleProofs: draft.catalogMerkleProofs,
+      receiptLeavesOrProofs: draft.receiptLeavesOrProofs,
+      reportedAt: Math.floor(Date.now() / 1000),
+    };
+    void Promise.resolve(this._onUsageReportReady(report)).catch((err) => {
+      debugWarn(`[SellerPayment] Usage report callback failed: ${err instanceof Error ? err.message : err}`);
+    });
+  }
+
+  async recordUsageReportEvidence(params: RecordUsageReportEvidenceParams): Promise<NeedAuthUsageReportMetadataPayload | null> {
+    if (!this._sellerAgentId) return null;
+    if (!this._spent.has(params.channelId)) return null;
+
+    const serviceIdHash = hashUtf8(params.service);
+    const catalogLeaf: ChannelUsageReportCatalogLeafPayload = {
+      sellerAgentId: this._sellerAgentId,
+      sellerAddress: this._sellerAddress,
+      serviceIdHash,
+      tokenizerIdHash: hashUtf8('unknown'),
+      inputUsdPerMillion: String(params.pricing.inputUsdPerMillion),
+      cachedInputUsdPerMillion: String(params.pricing.cachedInputUsdPerMillion ?? 0),
+      outputUsdPerMillion: String(params.pricing.outputUsdPerMillion),
+      serviceMode: SERVICE_MODE_PAID.toString(),
+      termsHash: hashUtf8('antseed-payment-v1'),
+      validFrom: '0',
+      validUntil: '340282366920938463463374607431768211455',
+    };
+    const catalogLeafHash = hashServiceCatalogLeaf(catalogLeaf);
+
+    const previous = this._usageReportDrafts.get(params.channelId);
+    const catalogLeavesByHash = new Map<string, ChannelUsageReportCatalogLeafPayload>();
+    for (const leaf of previous?.serviceCatalogLeaves ?? []) {
+      catalogLeavesByHash.set(hashServiceCatalogLeaf(leaf).toLowerCase(), leaf);
+    }
+    catalogLeavesByHash.set(catalogLeafHash.toLowerCase(), catalogLeaf);
+
+    const usageLeavesByKey = new Map<string, ChannelUsageReportServiceUsageLeafPayload>();
+    for (const leaf of previous?.serviceUsageLeaves ?? []) {
+      usageLeavesByKey.set(`${leaf.catalogLeafHash.toLowerCase()}:${leaf.serviceIdHash.toLowerCase()}`, leaf);
+    }
+    const usageKey = `${catalogLeafHash.toLowerCase()}:${serviceIdHash.toLowerCase()}`;
+    const prevUsage = usageLeavesByKey.get(usageKey);
+    usageLeavesByKey.set(usageKey, {
+      channelId: params.channelId,
+      serviceIdHash,
+      catalogLeafHash,
+      serviceMode: SERVICE_MODE_PAID.toString(),
+      cumulativeFreshInputTokens: (BigInt(prevUsage?.cumulativeFreshInputTokens ?? '0') + params.freshInputTokens).toString(),
+      cumulativeCachedInputTokens: (BigInt(prevUsage?.cumulativeCachedInputTokens ?? '0') + params.cachedInputTokens).toString(),
+      cumulativeOutputTokens: (BigInt(prevUsage?.cumulativeOutputTokens ?? '0') + params.outputTokens).toString(),
+      cumulativeRequestCount: (BigInt(prevUsage?.cumulativeRequestCount ?? '0') + 1n).toString(),
+      cumulativeAmountPaid: (BigInt(prevUsage?.cumulativeAmountPaid ?? '0') + params.costUsdc).toString(),
+    });
+
+    const receiptLeaves = [...(previous?.receiptLeavesOrProofs ?? [])];
+    receiptLeaves.push({
+      channelId: params.channelId,
+      requestIndex: String(receiptLeaves.length),
+      requestIdHash: hashUtf8(params.requestId),
+      requestHash: keccak256(hexlify(params.requestBody)),
+      responseHash: keccak256(hexlify(params.responseBody)),
+      serviceIdHash,
+      catalogLeafHash,
+      freshInputTokens: params.freshInputTokens.toString(),
+      cachedInputTokens: params.cachedInputTokens.toString(),
+      outputTokens: params.outputTokens.toString(),
+      costUsdc: params.costUsdc.toString(),
+      cumulativeAmountAfterRequest: params.cumulativeAmountAfterRequest.toString(),
+    });
+
+    const serviceCatalogLeaves = [...catalogLeavesByHash.values()];
+    const serviceUsageLeaves = [...usageLeavesByKey.values()];
+    const catalogLeafHashes = serviceCatalogLeaves.map((leaf) => hashServiceCatalogLeaf(leaf));
+    const catalogRoot = computeMerkleRoot(catalogLeafHashes);
+    const usageByServiceRoot = computeMerkleRoot(serviceUsageLeaves.map((leaf) => hashServiceUsageLeaf(leaf)));
+    const receiptRoot = computeMerkleRoot(receiptLeaves.map((leaf) => hashReceiptLeaf(leaf)));
+    const totals = serviceUsageLeaves.reduce(
+      (acc, leaf) => ({
+        fresh: acc.fresh + BigInt(leaf.cumulativeFreshInputTokens),
+        cached: acc.cached + BigInt(leaf.cumulativeCachedInputTokens),
+        output: acc.output + BigInt(leaf.cumulativeOutputTokens),
+        requests: acc.requests + BigInt(leaf.cumulativeRequestCount),
+        paid: acc.paid + BigInt(leaf.cumulativeAmountPaid),
+      }),
+      { fresh: 0n, cached: 0n, output: 0n, requests: 0n, paid: 0n },
+    );
+    const metadata: NeedAuthUsageReportMetadataPayload = {
+      catalogRoot,
+      usageByServiceRoot,
+      receiptRoot,
+      cumulativeFreshInputTokens: totals.fresh.toString(),
+      cumulativeCachedInputTokens: totals.cached.toString(),
+      cumulativeOutputTokens: totals.output.toString(),
+      cumulativeRequestCount: totals.requests.toString(),
+      cumulativeAmountPaid: totals.paid.toString(),
+    };
+    const encodedMetadata = encodeMetadataV2({
+      catalogRoot: metadata.catalogRoot,
+      usageByServiceRoot: metadata.usageByServiceRoot,
+      receiptRoot: metadata.receiptRoot,
+      cumulativeFreshInputTokens: BigInt(metadata.cumulativeFreshInputTokens),
+      cumulativeCachedInputTokens: BigInt(metadata.cumulativeCachedInputTokens),
+      cumulativeOutputTokens: BigInt(metadata.cumulativeOutputTokens),
+      cumulativeRequestCount: BigInt(metadata.cumulativeRequestCount),
+      cumulativeAmountPaid: BigInt(metadata.cumulativeAmountPaid),
+    });
+    const sellerCatalogSig = signUtf8(
+      this._wallet,
+      encodeSellerCatalogForSigning({
+        seller: this._sellerAddress,
+        sellerAgentId: this._sellerAgentId,
+        catalogRoot,
+      }),
+    );
+    const catalogMerkleProofs: Record<string, string[]> = {};
+    for (const leafHash of catalogLeafHashes) {
+      catalogMerkleProofs[leafHash] = computeMerkleProof(catalogLeafHashes, leafHash);
+    }
+    this._usageReportDrafts.set(params.channelId, {
+      metadata,
+      metadataHash: computeEncodedMetadataHash(encodedMetadata),
+      catalogRoot,
+      sellerCatalogSig,
+      serviceUsageLeaves,
+      serviceCatalogLeaves,
+      catalogMerkleProofs,
+      receiptLeavesOrProofs: receiptLeaves,
+    });
+    debugLog(`[SellerPayment] Usage report draft updated: channel=${params.channelId.slice(0, 18)}... paid=${metadata.cumulativeAmountPaid}`);
+    return metadata;
   }
 
   // ── Spend tracking ──────────────────────────────────────────

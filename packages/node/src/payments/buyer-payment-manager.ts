@@ -14,11 +14,12 @@ import {
   makeChannelsDomain,
   computeMetadataHash,
   encodeMetadata,
+  encodeMetadataV2,
   ZERO_METADATA,
   ZERO_METADATA_HASH,
   computeChannelId,
 } from './evm/signatures.js';
-import type { SpendingAuthMessage, ReserveAuthMessage, SpendingAuthMetadata } from './evm/signatures.js';
+import type { SpendingAuthMessage, ReserveAuthMessage, SpendingAuthMetadata, SpendingAuthMetadataV2 } from './evm/signatures.js';
 import { debugLog, debugWarn } from '../utils/debug.js';
 import { peerIdToAddress, type PeerId } from '../types/peer.js';
 import type { SellerAddressResolver } from '../discovery/seller-address-resolver.js';
@@ -374,11 +375,11 @@ export class BuyerPaymentManager {
     session: StoredChannel,
     sellerPeerId: string,
     cumulativeAmount: bigint,
-    metadata: SpendingAuthMetadata,
+    metadata: SpendingAuthMetadata | SpendingAuthMetadataV2,
     paymentMux: PaymentMux,
   ): Promise<void> {
     const metadataHashHex = computeMetadataHash(metadata);
-    const encodedMetadata = encodeMetadata(metadata);
+    const encodedMetadata = 'catalogRoot' in metadata ? encodeMetadataV2(metadata) : encodeMetadata(metadata);
     const metadataMsg: SpendingAuthMessage = {
       channelId: session.sessionId,
       cumulativeAmount,
@@ -926,6 +927,28 @@ export class BuyerPaymentManager {
 
     debugLog(`[BuyerPayment] NeedAuth: channel=${session.sessionId.slice(0, 18)}... required=${requiredCumulativeAmount} effective=${effectiveAmount}`);
 
+    const usageReportMetadata = payload.usageReportMetadata;
+    let v2Metadata: SpendingAuthMetadataV2 | null = null;
+    if (usageReportMetadata) {
+      try {
+        const parsed: SpendingAuthMetadataV2 = {
+          catalogRoot: usageReportMetadata.catalogRoot,
+          usageByServiceRoot: usageReportMetadata.usageByServiceRoot,
+          receiptRoot: usageReportMetadata.receiptRoot,
+          cumulativeFreshInputTokens: BigInt(usageReportMetadata.cumulativeFreshInputTokens),
+          cumulativeCachedInputTokens: BigInt(usageReportMetadata.cumulativeCachedInputTokens),
+          cumulativeOutputTokens: BigInt(usageReportMetadata.cumulativeOutputTokens),
+          cumulativeRequestCount: BigInt(usageReportMetadata.cumulativeRequestCount),
+          cumulativeAmountPaid: BigInt(usageReportMetadata.cumulativeAmountPaid),
+        };
+        if (parsed.cumulativeAmountPaid === effectiveAmount) {
+          v2Metadata = parsed;
+        }
+      } catch (err) {
+        debugWarn(`[BuyerPayment] NeedAuth: invalid usage report metadata; falling back to V1 metadata (${err instanceof Error ? err.message : err})`);
+      }
+    }
+
     // Advance cumulative metadata. requestCount always increments so the
     // on-chain metadata stays consistent even when older sellers omit token
     // fields; absent token fields contribute 0 to the running totals.
@@ -939,7 +962,7 @@ export class BuyerPaymentManager {
 
     // Send via PaymentMux
     try {
-      await this._sendUpdatedSpendingAuth(session, sellerPeerId, effectiveAmount, newMeta, paymentMux);
+      await this._sendUpdatedSpendingAuth(session, sellerPeerId, effectiveAmount, v2Metadata ?? newMeta, paymentMux);
       debugLog(`[BuyerPayment] NeedAuth responded: new cumulativeAmount=${effectiveAmount}`);
     } catch {
       debugLog(`[BuyerPayment] NeedAuth: connection closed before SpendingAuth could be sent`);

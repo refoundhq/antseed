@@ -16,7 +16,7 @@ import type {
 import { parseResponseUsage } from './utils/response-usage.js';
 import { computeCostUsdc, estimateTokensFromBytes, type ServicePricing } from './payments/pricing.js';
 import { debugLog, debugWarn } from './utils/debug.js';
-import { PAYMENT_CODE_CHANNEL_EXHAUSTED } from './types/protocol.js';
+import { PAYMENT_CODE_CHANNEL_EXHAUSTED, type NeedAuthUsageReportMetadataPayload } from './types/protocol.js';
 
 export interface SellerRequestHandlerDeps {
   providers: Provider[];
@@ -403,6 +403,25 @@ export class SellerRequestHandler {
 
             const accepted = spm.getAcceptedCumulative(session.sessionId);
             const requiredAmount = cumulativeSpend;
+            const service = this._extractRequestedService(request) ?? 'unknown';
+            let usageReportMetadata: NeedAuthUsageReportMetadataPayload | null | undefined;
+            try {
+              usageReportMetadata = await spm.recordUsageReportEvidence({
+                channelId: session.sessionId,
+                requestId: request.requestId,
+                requestBody: request.body,
+                responseBody,
+                service,
+                pricing: requestPricing,
+                freshInputTokens: BigInt(usage.freshInputTokens),
+                cachedInputTokens: BigInt(usage.cachedInputTokens),
+                outputTokens: BigInt(usage.outputTokens),
+                costUsdc,
+                cumulativeAmountAfterRequest: cumulativeSpend,
+              });
+            } catch (err) {
+              debugWarn(`[SellerHandler] Usage report evidence skipped: ${err instanceof Error ? err.message : err}`);
+            }
             debugLog(`[SellerHandler] Sending NeedAuth: cost=${costUsdc} cumulative=${cumulativeSpend} required=${requiredAmount}`);
             this._sendNeedAuthBestEffort(paymentMux, {
               channelId: session.sessionId,
@@ -415,7 +434,8 @@ export class SellerRequestHandler {
               outputTokens: String(usage.outputTokens),
               cachedInputTokens: String(usage.cachedInputTokens),
               freshInputTokens: String(usage.freshInputTokens),
-              service: this._extractRequestedService(request) ?? undefined,
+              service,
+              ...(usageReportMetadata ? { usageReportMetadata } : {}),
             }, buyerPeerId, 'post-response');
           }
         }

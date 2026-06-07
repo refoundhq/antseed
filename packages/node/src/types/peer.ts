@@ -108,6 +108,8 @@ export interface PeerInfo {
   onChainLastSettledAtSec?: number;
   /** Unix seconds when the seller first staked. */
   onChainStakedAtSec?: number;
+  /** Whether AntseedStaking says the seller is above the protocol minimum stake. */
+  onChainStakedAboveMin?: boolean;
   /**
    * Unix ms when the buyer last refreshed on-chain stats for this peer.
    * Used to throttle repeat `getAgentStats` calls across discovery cycles.

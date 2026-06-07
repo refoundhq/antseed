@@ -47,6 +47,7 @@ import { PaymentMux } from "./p2p/payment-mux.js";
 import { FrameDecoder, encodeFrame } from "./p2p/message-protocol.js";
 import { KeepaliveManager, buildPongPayload } from "./p2p/keepalive.js";
 import { MessageType } from "./types/protocol.js";
+import type { ChannelUsageReportPayload, UsageReportAckPayload } from "./types/protocol.js";
 import type {
   Provider,
   ProviderStreamCallbacks,
@@ -61,8 +62,15 @@ import {
   DepositsClient,
   ChannelsClient,
   StakingClient,
+  StatsClient,
   ChannelStore,
   CHANNEL_STATUS,
+  createUsageReportAck,
+  makeChannelsDomain,
+  selectUsageReportVerifiers,
+  shouldVerifyUsageReport,
+  verifyChannelUsageReport,
+  type UsageReportVerifierCandidate,
 } from "./payments/index.js";
 import { debugLog, debugWarn } from "./utils/debug.js";
 import { parsePublicAddress } from "./discovery/public-address.js";
@@ -124,6 +132,8 @@ export interface NodePaymentsConfig {
   identityRegistryAddress?: string;
   /** AntseedStaking contract address */
   stakingAddress?: string;
+  /** AntseedStats contract address for verifier attestation recording */
+  statsAddress?: string;
   /** Chain ID for EIP-712 domain. Default: 8453 (Base) */
   chainId?: number;
   /** Default maximum USDC per spending auth. Default: 500000 ($0.50) */
@@ -227,9 +237,12 @@ export class AntseedNode extends EventEmitter {
   private _depositsClient: DepositsClient | null = null;
   private _channelsClient: ChannelsClient | null = null;
   private _stakingClient: StakingClient | null = null;
+  private _statsClient: StatsClient | null = null;
   private _sellerAddressResolver: SellerAddressResolver | null = null;
   private _identityClient: IdentityClient | null = null;
   private _paymentMuxes = new Map<PeerId, PaymentMux>();
+  /** Recently discovered seller peers, used for usage-report verifier selection. */
+  private _knownPeers = new Map<PeerId, PeerInfo>();
   /** Seller-side request handler (provider matching, execution, load tracking). */
   private _sellerHandler: SellerRequestHandler | null = null;
   /** Buyer-side payment manager (initialized when buyer has payment config). */
@@ -401,6 +414,7 @@ export class AntseedNode extends EventEmitter {
     // Close all proxy muxes
     this._muxes.clear();
     this._paymentMuxes.clear();
+    this._knownPeers.clear();
     this._decoders.clear();
 
     // Close all connections
@@ -453,6 +467,7 @@ export class AntseedNode extends EventEmitter {
     this._depositsClient = null;
     this._channelsClient = null;
     this._stakingClient = null;
+    this._statsClient = null;
     this._identityClient = null;
     this._sellerAddressResolver = null;
     this._buyerPaymentManager = null;
@@ -503,6 +518,7 @@ export class AntseedNode extends EventEmitter {
     // On-chain enrichment runs after the metadata filter so we don't waste
     // RPC calls on peers we'll discard.
     await this._enrichPeersWithOnChainStats(filtered);
+    this._rememberPeers(filtered);
 
     for (const p of filtered) {
       debugLog(`[Node]   peer ${p.peerId.slice(0, 12)}... providers=[${p.providers.join(",")}] addr=${p.publicAddress ?? "?"}`);
@@ -571,6 +587,7 @@ export class AntseedNode extends EventEmitter {
       }
       debugLog(`[Node] Background DHT partial on-chain enrichment emitted ${enriched.length} peer(s)`);
       this.emit("peers:discovered", enriched);
+      this._rememberPeers(enriched);
     }).catch((err) => {
       debugWarn(`[Node] Background DHT partial on-chain enrichment failed: ${err instanceof Error ? err.message : err}`);
     });
@@ -619,7 +636,16 @@ export class AntseedNode extends EventEmitter {
     );
     const peer = this._lookupResultToPeerInfo(best);
     await this._enrichPeersWithOnChainStats([peer]);
+    this._rememberPeers([peer]);
     return peer;
+  }
+
+  private _rememberPeers(peers: readonly PeerInfo[]): void {
+    for (const peer of peers) {
+      if (peer.peerId !== this._identity?.peerId) {
+        this._knownPeers.set(peer.peerId, peer);
+      }
+    }
   }
 
   /**
@@ -659,10 +685,11 @@ export class AntseedNode extends EventEmitter {
         const evmAddress = resolver
           ? await resolver.resolveSellerAddress(p.peerId, p.metadata)
           : peerIdToAddress(p.peerId);
-        const [agentId, stake, stakedAt] = await Promise.all([
+        const [agentId, stake, stakedAt, stakedAboveMin] = await Promise.all([
           stakingClient.getAgentId(evmAddress),
           stakingClient.getStake(evmAddress).catch(() => 0n),
           stakingClient.getStakedAt(evmAddress).catch(() => 0),
+          stakingClient.isStakedAboveMin(evmAddress).catch(() => false),
         ]);
         const stats = await channelsClient.getAgentStats(agentId);
         p.onChainAgentId = agentId;
@@ -679,6 +706,7 @@ export class AntseedNode extends EventEmitter {
           : Number.MAX_SAFE_INTEGER;
         p.onChainLastSettledAtSec = stats.lastSettledAt;
         p.onChainStakedAtSec = stakedAt;
+        p.onChainStakedAboveMin = stakedAboveMin;
         p.onChainStatsFetchedAt = Date.now();
       } catch {
         // Per-peer verification failure — keep whatever seller metadata claimed
@@ -727,7 +755,9 @@ export class AntseedNode extends EventEmitter {
     this._getOrCreateMux(peer.peerId, conn);
     const negotiator = this._buyerNegotiator;
     if (negotiator) {
-      this._paymentMuxes.set(peer.peerId, negotiator.getOrCreatePaymentMux(peer.peerId, conn));
+      const paymentMux = negotiator.getOrCreatePaymentMux(peer.peerId, conn);
+      this._wireUsageReportHandlers(peer.peerId, paymentMux);
+      this._paymentMuxes.set(peer.peerId, paymentMux);
     }
   }
 
@@ -1106,6 +1136,22 @@ export class AntseedNode extends EventEmitter {
     this._dht = new DHTNode(this._createDHTConfig(dhtPort, bootstrapNodes));
     await this._dht.start();
 
+    // Sellers also need lookup so they can select and contact peer-verifier sellers.
+    const metadataResolver = new HttpMetadataResolver({
+      timeoutMs: this._config.metadataFetchTimeoutMs ?? 1500,
+      maxConcurrent: 24,
+    });
+    this._peerLookup = new PeerLookup({
+      dht: this._dht,
+      metadataResolver,
+      requireValidSignature: DEFAULT_LOOKUP_CONFIG.requireValidSignature,
+      allowStaleMetadata: DEFAULT_LOOKUP_CONFIG.allowStaleMetadata,
+      maxAnnouncementAgeMs: DEFAULT_LOOKUP_CONFIG.maxAnnouncementAgeMs,
+      maxClientServerClockSkewMs: DEFAULT_LOOKUP_CONFIG.maxClientServerClockSkewMs,
+      maxResults: DEFAULT_LOOKUP_CONFIG.maxResults,
+      maxFindAllDhtDurationMs: DEFAULT_LOOKUP_CONFIG.maxFindAllDhtDurationMs,
+    });
+
     // Create ConnectionManager and start listening
     this._connectionManager = new ConnectionManager();
     this._connectionManager.setLocalIdentity(identity);
@@ -1297,11 +1343,153 @@ export class AntseedNode extends EventEmitter {
         negotiator: this._buyerNegotiator,
         getConnection: (peer) => this._getOrCreateConnection(peer),
         getMux: (peerId, conn) => this._getOrCreateMux(peerId, conn),
-        registerPaymentMux: (peerId, pmux) => this._paymentMuxes.set(peerId, pmux),
+        registerPaymentMux: (peerId, pmux) => {
+          this._wireUsageReportHandlers(peerId, pmux);
+          this._paymentMuxes.set(peerId, pmux);
+        },
       },
     );
 
     debugLog(`[Node] Buyer ready — DHT running on port ${this._dht!.getPort()}`);
+  }
+
+  private _wireUsageReportHandlers(peerId: PeerId, paymentMux: PaymentMux): void {
+    paymentMux.onPeerReport((report) => {
+      void this._handleIncomingUsageReport(peerId, report, paymentMux);
+    });
+    paymentMux.onReportAck((ack) => {
+      this.emit("usage-report:ack", { peerId, ack });
+      if (ack.accepted && ack.attestation) {
+        this.emit("usage-report:attested", { peerId, attestation: ack.attestation });
+      }
+    });
+  }
+
+  private async _handleUsageReportReady(report: ChannelUsageReportPayload): Promise<void> {
+    this.emit("usage-report:ready", report);
+    if (!this._peerLookup) {
+      return;
+    }
+    if (this._knownPeers.size < report.verifierCount) {
+      this._startBackgroundPeerDiscoverySweep();
+      const discovered = await this.discoverPeers().catch(() => []);
+      this._rememberPeers(discovered);
+    }
+
+    const candidates = this._usageReportVerifierCandidates();
+    const selected = selectUsageReportVerifiers(report, candidates, {
+      verifierCount: report.verifierCount,
+      selectionBeacon: report.selectionBeacon,
+    });
+    for (const verifier of selected) {
+      const peer = this._knownPeers.get(verifier.peerId as PeerId);
+      if (!peer) continue;
+      try {
+        const conn = await this._getOrCreateConnection(peer);
+        let paymentMux = this._paymentMuxes.get(peer.peerId);
+        if (!paymentMux) {
+          paymentMux = new PaymentMux(conn);
+          this._wireUsageReportHandlers(peer.peerId, paymentMux);
+          this._paymentMuxes.set(peer.peerId, paymentMux);
+        }
+        paymentMux.sendPeerReport(report);
+        debugLog(`[Node] Usage report sent to verifier ${peer.peerId.slice(0, 12)}...`);
+      } catch (err) {
+        debugWarn(`[Node] Failed to send usage report to verifier ${verifier.peerId.slice(0, 12)}...: ${err instanceof Error ? err.message : err}`);
+      }
+    }
+  }
+
+  private async _handleIncomingUsageReport(
+    reporterPeerId: PeerId,
+    report: ChannelUsageReportPayload,
+    paymentMux: PaymentMux,
+  ): Promise<void> {
+    const verifier = await this._localUsageReportVerifier();
+    if (!verifier) return;
+
+    const { channels: channelsAddress } = await this._usageReportChannelsContext();
+    const verification = verifyChannelUsageReport(report, {
+      spendingAuthDomain: makeChannelsDomain(this._config.payments?.chainId ?? 8453, channelsAddress),
+    });
+    const candidates = [
+      ...this._usageReportVerifierCandidates(),
+      {
+        peerId: verifier.peerId,
+        agentId: verifier.agentId,
+        staked: true,
+        stakeWeight: 1,
+      },
+    ];
+    const selected = shouldVerifyUsageReport(report, candidates, verifier, {});
+    const ack: UsageReportAckPayload = selected
+      ? createUsageReportAck(report, verification, {
+          wallet: this._identity!.wallet,
+          verifier: this._identity!.wallet.address,
+          verifierAgentId: verifier.agentId,
+        })
+      : {
+          channelId: report.channelId,
+          reportHash: verification.reportHash,
+          verifierAgentId: verifier.agentId,
+          accepted: false,
+          reason: 'not-selected',
+        };
+    paymentMux.sendReportAck(ack);
+    if (ack.accepted && ack.attestation) {
+      void this._recordUsageReportVerification(ack, report).catch((err) => {
+        debugWarn(`[Node] Failed to record usage report verification: ${err instanceof Error ? err.message : err}`);
+      });
+    }
+    this.emit("usage-report:verified", { reporterPeerId, report, ack, verification });
+  }
+
+  private async _recordUsageReportVerification(ack: UsageReportAckPayload, report: ChannelUsageReportPayload): Promise<void> {
+    if (!this._statsClient || !this._identity || !ack.attestation) return;
+    const txHash = await this._statsClient.recordUsageReportVerification(
+      this._identity.wallet,
+      ack.attestation,
+      ack.accepted,
+      report.serviceUsageLeaves,
+    );
+    this.emit("usage-report:recorded", { ack, txHash });
+    debugLog(`[Node] Usage report verification recorded on-chain: tx=${txHash}`);
+  }
+
+  private async _localUsageReportVerifier(): Promise<{ peerId: PeerId; agentId: string } | null> {
+    if (!this._identity || !this._stakingClient) return null;
+    try {
+      const [agentId, stakedAboveMin] = await Promise.all([
+        this._stakingClient.getAgentId(this._identity.wallet.address),
+        this._stakingClient.isStakedAboveMin(this._identity.wallet.address),
+      ]);
+      if (!stakedAboveMin) return null;
+      return { peerId: this._identity.peerId, agentId: String(agentId) };
+    } catch {
+      return null;
+    }
+  }
+
+  private async _usageReportChannelsContext(): Promise<{ channels: string }> {
+    if (!this._channelsClient) {
+      throw new Error("Channels client is not configured");
+    }
+    return { channels: await this._channelsClient.readAddress };
+  }
+
+  private _usageReportVerifierCandidates(): UsageReportVerifierCandidate[] {
+    const candidates: UsageReportVerifierCandidate[] = [];
+    for (const peer of this._knownPeers.values()) {
+      if (peer.onChainAgentId === undefined) continue;
+      if (peer.onChainStakedAboveMin !== true) continue;
+      candidates.push({
+        peerId: peer.peerId,
+        agentId: String(peer.onChainAgentId),
+        staked: true,
+        stakeWeight: 1,
+      });
+    }
+    return candidates;
   }
 
   private _handleIncomingConnection(conn: PeerConnection): void {
@@ -1310,6 +1498,7 @@ export class AntseedNode extends EventEmitter {
 
     // Create PaymentMux alongside ProxyMux (seller-side)
     const paymentMux = new PaymentMux(conn);
+    this._wireUsageReportHandlers(buyerPeerId, paymentMux);
     if (this._sellerPaymentManager) {
       const spm = this._sellerPaymentManager;
       paymentMux.onSpendingAuth((payload) => {
@@ -1404,6 +1593,17 @@ export class AntseedNode extends EventEmitter {
       debugLog(`[Node] StakingClient initialized (contract=${payments.stakingAddress.slice(0, 10)}...)`);
     }
 
+    // Initialize StatsClient for verifier usage-report attestation recording.
+    if (payments.rpcUrl && payments.statsAddress) {
+      this._statsClient = new StatsClient({
+        rpcUrl: payments.rpcUrl,
+        ...(fallbackRpcUrls ? { fallbackRpcUrls } : {}),
+        contractAddress: payments.statsAddress,
+        ...(payments.chainId ? { evmChainId: payments.chainId } : {}),
+      });
+      debugLog(`[Node] StatsClient initialized (contract=${payments.statsAddress.slice(0, 10)}...)`);
+    }
+
     // Initialize IdentityClient (ERC-8004 IdentityRegistry)
     if (payments.rpcUrl && payments.identityRegistryAddress) {
       this._identityClient = new IdentityClient({
@@ -1429,6 +1629,14 @@ export class AntseedNode extends EventEmitter {
     // Initialize SellerPaymentManager for seller role
     if (this._config.role === 'seller' && this._identity && this._channelStore &&
         payments.rpcUrl && payments.channelsAddress) {
+      let sellerAgentId: string | undefined;
+      if (this._stakingClient) {
+        try {
+          sellerAgentId = String(await this._stakingClient.getAgentId(this._identity.wallet.address));
+        } catch (err) {
+          debugWarn(`[Node] Unable to load seller agent id for usage reports: ${err instanceof Error ? err.message : err}`);
+        }
+      }
       const sellerConfig: SellerPaymentConfig = {
         rpcUrl: payments.rpcUrl,
         ...(fallbackRpcUrls ? { fallbackRpcUrls } : {}),
@@ -1437,6 +1645,10 @@ export class AntseedNode extends EventEmitter {
         dataDir: paymentsDir,
         ...(payments.minBudgetPerRequest ? { minBudgetPerRequest: payments.minBudgetPerRequest } : {}),
         ...(payments.minSettleDelta ? { minSettleDelta: payments.minSettleDelta } : {}),
+        ...(sellerAgentId ? { sellerAgentId } : {}),
+        onUsageReportReady: (report) => {
+          void this._handleUsageReportReady(report);
+        },
       };
       this._sellerPaymentManager = new SellerPaymentManager(this._identity, sellerConfig, this._channelStore);
       debugLog(`[Node] SellerPaymentManager initialized`);

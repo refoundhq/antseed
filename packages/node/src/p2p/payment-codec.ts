@@ -122,6 +122,23 @@ export function decodeNeedAuth(data: Uint8Array): NeedAuthPayload {
   if (typeof obj.cachedInputTokens === 'string') result.cachedInputTokens = obj.cachedInputTokens;
   if (typeof obj.freshInputTokens === 'string') result.freshInputTokens = obj.freshInputTokens;
   if (typeof obj.service === 'string') result.service = obj.service;
+  if (
+    typeof obj.usageReportMetadata === 'object'
+    && obj.usageReportMetadata !== null
+    && !Array.isArray(obj.usageReportMetadata)
+  ) {
+    const metadata = obj.usageReportMetadata as Record<string, unknown>;
+    result.usageReportMetadata = {
+      catalogRoot: requireString(metadata, 'catalogRoot'),
+      usageByServiceRoot: requireString(metadata, 'usageByServiceRoot'),
+      receiptRoot: requireString(metadata, 'receiptRoot'),
+      cumulativeFreshInputTokens: requireString(metadata, 'cumulativeFreshInputTokens'),
+      cumulativeCachedInputTokens: requireString(metadata, 'cumulativeCachedInputTokens'),
+      cumulativeOutputTokens: requireString(metadata, 'cumulativeOutputTokens'),
+      cumulativeRequestCount: requireString(metadata, 'cumulativeRequestCount'),
+      cumulativeAmountPaid: requireString(metadata, 'cumulativeAmountPaid'),
+    };
+  }
   return result;
 }
 
