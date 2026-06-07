@@ -9,14 +9,13 @@ import { bytesToHex } from '../utils/hex.js';
 import { computeCostUsdc } from './pricing.js';
 import {
   computeEncodedMetadataHash,
-  computeMerkleRoot,
+  computeServiceUsageHash,
   encodeMetadataV2,
-  hashServiceUsageLeaf,
   makeChannelsDomain,
   SERVICE_MODE_PAID,
   signSpendingAuth,
   ZERO_BYTES32,
-  type ServiceUsageLeaf,
+  type ServiceUsageRow,
 } from './evm/signatures.js';
 import {
   computeUsageReportVerifierSelectionSeed,
@@ -83,14 +82,14 @@ describe('usage-report-verifier', () => {
 
     const result = verifyChannelUsageReport({
       ...report,
-      serviceUsageLeaves: [{
-        ...report.serviceUsageLeaves[0]!,
+      serviceUsageRows: [{
+        ...report.serviceUsageRows[0]!,
         cumulativeAmountPaid: (costUsdc + 1n).toString(),
       }],
     }, { spendingAuthDomain: domain, settledCumulativeAmount: costUsdc + 1n, sellerMetadata });
 
     expect(result.ok).toBe(false);
-    expect(result.issues.map((issue) => issue.code)).toContain('usage-root-or-total-mismatch');
+    expect(result.issues.map((issue) => issue.code)).toContain('service-usage-hash-or-total-mismatch');
     expect(result.issues.map((issue) => issue.code)).toContain('announced-pricing-cost-mismatch');
   });
 
@@ -99,14 +98,14 @@ describe('usage-report-verifier', () => {
 
     const result = verifyChannelUsageReport({
       ...report,
-      serviceUsageLeaves: [{
-        ...report.serviceUsageLeaves[0]!,
+      serviceUsageRows: [{
+        ...report.serviceUsageRows[0]!,
         inputUsdPerMillion: '999999',
       }],
     }, { spendingAuthDomain: domain, settledCumulativeAmount: costUsdc, sellerMetadata });
 
     expect(result.ok).toBe(false);
-    expect(result.issues.map((issue) => issue.code)).toContain('usage-root-or-total-mismatch');
+    expect(result.issues.map((issue) => issue.code)).toContain('service-usage-hash-or-total-mismatch');
     expect(result.issues.map((issue) => issue.code)).toContain('usage-pricing-mismatch');
   });
 
@@ -243,7 +242,7 @@ async function createValidPaidReport(): Promise<{
     cachedInputUsdPerMillion: 500_000,
     outputUsdPerMillion: 2_000_000,
   }, 20);
-  const usageLeaf: ServiceUsageLeaf = {
+  const usageRow: ServiceUsageRow = {
     channelId,
     provider: 'openai',
     service: 'gpt-4.1',
@@ -260,7 +259,7 @@ async function createValidPaidReport(): Promise<{
   };
   const metadata = {
     pricingSnapshotHash,
-    usageByServiceRoot: computeMerkleRoot([hashServiceUsageLeaf(usageLeaf)]),
+    serviceUsageHash: computeServiceUsageHash([usageRow]),
     receiptRoot: ZERO_BYTES32,
     cumulativeFreshInputTokens: 100n,
     cumulativeCachedInputTokens: 20n,
@@ -292,7 +291,7 @@ async function createValidPaidReport(): Promise<{
       verifierCount,
       buyerSpendingAuthSig: spendingAuthSig,
       pricingSnapshotHash,
-      serviceUsageLeaves: [toUsagePayload(usageLeaf)],
+      serviceUsageRows: [toUsagePayload(usageRow)],
       reportedAt,
     },
   };
@@ -321,21 +320,21 @@ function createSellerMetadata(): PeerMetadata {
   return metadata;
 }
 
-function toUsagePayload(leaf: ServiceUsageLeaf) {
+function toUsagePayload(row: ServiceUsageRow) {
   return {
-    channelId: leaf.channelId,
-    provider: leaf.provider,
-    service: leaf.service,
-    serviceIdHash: leaf.serviceIdHash,
-    inputUsdPerMillion: leaf.inputUsdPerMillion.toString(),
-    cachedInputUsdPerMillion: leaf.cachedInputUsdPerMillion.toString(),
-    outputUsdPerMillion: leaf.outputUsdPerMillion.toString(),
-    serviceMode: leaf.serviceMode.toString(),
-    cumulativeFreshInputTokens: leaf.cumulativeFreshInputTokens.toString(),
-    cumulativeCachedInputTokens: leaf.cumulativeCachedInputTokens.toString(),
-    cumulativeOutputTokens: leaf.cumulativeOutputTokens.toString(),
-    cumulativeRequestCount: leaf.cumulativeRequestCount.toString(),
-    cumulativeAmountPaid: leaf.cumulativeAmountPaid.toString(),
+    channelId: row.channelId,
+    provider: row.provider,
+    service: row.service,
+    serviceIdHash: row.serviceIdHash,
+    inputUsdPerMillion: row.inputUsdPerMillion.toString(),
+    cachedInputUsdPerMillion: row.cachedInputUsdPerMillion.toString(),
+    outputUsdPerMillion: row.outputUsdPerMillion.toString(),
+    serviceMode: row.serviceMode.toString(),
+    cumulativeFreshInputTokens: row.cumulativeFreshInputTokens.toString(),
+    cumulativeCachedInputTokens: row.cumulativeCachedInputTokens.toString(),
+    cumulativeOutputTokens: row.cumulativeOutputTokens.toString(),
+    cumulativeRequestCount: row.cumulativeRequestCount.toString(),
+    cumulativeAmountPaid: row.cumulativeAmountPaid.toString(),
   };
 }
 

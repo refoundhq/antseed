@@ -10,7 +10,7 @@ import {IAntseedStaking} from "./interfaces/IAntseedStaking.sol";
 /**
  * @title AntseedStatsV2
  * @notice Optional stats sink for V1 and V2 channel metadata.
- *         V2 keeps top-level roots/totals on-chain while preserving the V1
+ *         V2 keeps top-level commitments/totals on-chain while preserving the V1
  *         recordMetadata interface used by AntseedChannels.
  *
  *         If legacyStats is configured, this contract also forwards a
@@ -33,7 +33,7 @@ contract AntseedStatsV2 is IAntseedStats, Ownable {
     struct DecodedMetadata {
         uint256 version;
         bytes32 pricingSnapshotHash;
-        bytes32 usageByServiceRoot;
+        bytes32 serviceUsageHash;
         bytes32 receiptRoot;
         uint256 freshInputTokens;
         uint256 cachedInputTokens;
@@ -51,12 +51,12 @@ contract AntseedStatsV2 is IAntseedStats, Ownable {
         bytes32 channelId;
         bytes32 metadataHash;
         bytes32 pricingSnapshotHash;
-        bytes32 usageByServiceRoot;
+        bytes32 serviceUsageHash;
         bool accepted;
         uint64 verifiedAt;
     }
 
-    struct ServiceUsageLeaf {
+    struct ServiceUsageRow {
         bytes32 channelId;
         bytes32 serviceIdHash;
         uint256 inputUsdPerMillion;
@@ -96,7 +96,7 @@ contract AntseedStatsV2 is IAntseedStats, Ownable {
     IAntseedRegistry public registry;
     address public legacyStats;
 
-    uint256 public constant MAX_SERVICE_USAGE_LEAVES = 64;
+    uint256 public constant MAX_SERVICE_USAGE_ROWS = 64;
 
     // ─── Events ─────────────────────────────────────────────────────
     event MetadataRecorded(
@@ -114,7 +114,7 @@ contract AntseedStatsV2 is IAntseedStats, Ownable {
         address indexed buyer,
         bytes32 indexed channelId,
         bytes32 pricingSnapshotHash,
-        bytes32 usageByServiceRoot,
+        bytes32 serviceUsageHash,
         bytes32 receiptRoot,
         uint256 freshInputTokens,
         uint256 cachedInputTokens,
@@ -142,7 +142,7 @@ contract AntseedStatsV2 is IAntseedStats, Ownable {
         bytes32 channelId,
         bytes32 metadataHash,
         bytes32 pricingSnapshotHash,
-        bytes32 usageByServiceRoot,
+        bytes32 serviceUsageHash,
         uint256 cumulativeAmount,
         bool accepted
     );
@@ -170,8 +170,8 @@ contract AntseedStatsV2 is IAntseedStats, Ownable {
     error SellerNotStaked();
     error VerifierNotStaked();
     error DuplicateVerification();
-    error TooManyServiceUsageLeaves();
-    error InvalidUsageByServiceRoot();
+    error TooManyServiceUsageRows();
+    error InvalidServiceUsageHash();
     error UnsupportedMetadataVersion(uint256 version);
 
     // ─── Constructor ────────────────────────────────────────────────
@@ -260,7 +260,7 @@ contract AntseedStatsV2 is IAntseedStats, Ownable {
                 buyer,
                 channelId,
                 decoded.pricingSnapshotHash,
-                decoded.usageByServiceRoot,
+                decoded.serviceUsageHash,
                 decoded.receiptRoot,
                 decoded.freshInputTokens,
                 decoded.cachedInputTokens,
@@ -283,7 +283,7 @@ contract AntseedStatsV2 is IAntseedStats, Ownable {
         uint256 cumulativeAmount,
         bytes32 metadataHash,
         bytes32 pricingSnapshotHash,
-        bytes32 usageByServiceRoot,
+        bytes32 serviceUsageHash,
         bool accepted
     ) external {
         _recordUsageReportVerification(
@@ -296,7 +296,7 @@ contract AntseedStatsV2 is IAntseedStats, Ownable {
             cumulativeAmount,
             metadataHash,
             pricingSnapshotHash,
-            usageByServiceRoot,
+            serviceUsageHash,
             accepted
         );
     }
@@ -311,9 +311,9 @@ contract AntseedStatsV2 is IAntseedStats, Ownable {
         uint256 cumulativeAmount,
         bytes32 metadataHash,
         bytes32 pricingSnapshotHash,
-        bytes32 usageByServiceRoot,
+        bytes32 serviceUsageHash,
         bool accepted,
-        ServiceUsageLeaf[] calldata serviceUsageLeaves
+        ServiceUsageRow[] calldata serviceUsageRows
     ) external {
         _recordUsageReportVerification(
             reportHash,
@@ -325,12 +325,12 @@ contract AntseedStatsV2 is IAntseedStats, Ownable {
             cumulativeAmount,
             metadataHash,
             pricingSnapshotHash,
-            usageByServiceRoot,
+            serviceUsageHash,
             accepted
         );
 
         if (accepted && !reportServiceUsageRecorded[reportHash]) {
-            _recordReportServiceUsage(reportHash, sellerAgentId, usageByServiceRoot, serviceUsageLeaves);
+            _recordReportServiceUsage(reportHash, sellerAgentId, serviceUsageHash, serviceUsageRows);
         }
     }
 
@@ -344,7 +344,7 @@ contract AntseedStatsV2 is IAntseedStats, Ownable {
         uint256 cumulativeAmount,
         bytes32 metadataHash,
         bytes32 pricingSnapshotHash,
-        bytes32 usageByServiceRoot,
+        bytes32 serviceUsageHash,
         bool accepted
     ) internal {
         if (reportHash == bytes32(0) || channelId == bytes32(0) || seller == address(0) || buyer == address(0)) {
@@ -378,7 +378,7 @@ contract AntseedStatsV2 is IAntseedStats, Ownable {
         existing.channelId = channelId;
         existing.metadataHash = metadataHash;
         existing.pricingSnapshotHash = pricingSnapshotHash;
-        existing.usageByServiceRoot = usageByServiceRoot;
+        existing.serviceUsageHash = serviceUsageHash;
         existing.accepted = accepted;
         existing.verifiedAt = uint64(block.timestamp);
 
@@ -405,7 +405,7 @@ contract AntseedStatsV2 is IAntseedStats, Ownable {
             channelId,
             metadataHash,
             pricingSnapshotHash,
-            usageByServiceRoot,
+            serviceUsageHash,
             cumulativeAmount,
             accepted
         );
@@ -414,69 +414,58 @@ contract AntseedStatsV2 is IAntseedStats, Ownable {
     function _recordReportServiceUsage(
         bytes32 reportHash,
         uint256 sellerAgentId,
-        bytes32 usageByServiceRoot,
-        ServiceUsageLeaf[] calldata serviceUsageLeaves
+        bytes32 serviceUsageHash,
+        ServiceUsageRow[] calldata serviceUsageRows
     ) internal {
-        if (serviceUsageLeaves.length > MAX_SERVICE_USAGE_LEAVES) revert TooManyServiceUsageLeaves();
-        if (_computeServiceUsageRoot(serviceUsageLeaves) != usageByServiceRoot) {
-            revert InvalidUsageByServiceRoot();
+        if (serviceUsageRows.length > MAX_SERVICE_USAGE_ROWS) revert TooManyServiceUsageRows();
+        if (_computeServiceUsageHash(serviceUsageRows) != serviceUsageHash) {
+            revert InvalidServiceUsageHash();
         }
 
         reportServiceUsageRecorded[reportHash] = true;
-        for (uint256 i = 0; i < serviceUsageLeaves.length; i++) {
-            ServiceUsageLeaf calldata leaf = serviceUsageLeaves[i];
+        for (uint256 i = 0; i < serviceUsageRows.length; i++) {
+            ServiceUsageRow calldata row = serviceUsageRows[i];
             emit UsageReportServiceUsageRecorded(
                 reportHash,
                 sellerAgentId,
-                leaf.serviceIdHash,
-                leaf.channelId,
-                leaf.inputUsdPerMillion,
-                leaf.cachedInputUsdPerMillion,
-                leaf.outputUsdPerMillion,
-                leaf.serviceMode,
-                leaf.cumulativeFreshInputTokens,
-                leaf.cumulativeCachedInputTokens,
-                leaf.cumulativeOutputTokens,
-                leaf.cumulativeRequestCount,
-                leaf.cumulativeAmountPaid
+                row.serviceIdHash,
+                row.channelId,
+                row.inputUsdPerMillion,
+                row.cachedInputUsdPerMillion,
+                row.outputUsdPerMillion,
+                row.serviceMode,
+                row.cumulativeFreshInputTokens,
+                row.cumulativeCachedInputTokens,
+                row.cumulativeOutputTokens,
+                row.cumulativeRequestCount,
+                row.cumulativeAmountPaid
             );
         }
     }
 
-    function _computeServiceUsageRoot(ServiceUsageLeaf[] calldata leaves) internal pure returns (bytes32) {
-        if (leaves.length == 0) return bytes32(0);
+    function _computeServiceUsageHash(ServiceUsageRow[] calldata rows) internal pure returns (bytes32) {
+        if (rows.length == 0) return bytes32(0);
 
-        bytes32[] memory level = new bytes32[](leaves.length);
-        for (uint256 i = 0; i < leaves.length; i++) {
-            ServiceUsageLeaf calldata leaf = leaves[i];
-            level[i] = keccak256(abi.encode(
-                leaf.channelId,
-                leaf.serviceIdHash,
-                leaf.inputUsdPerMillion,
-                leaf.cachedInputUsdPerMillion,
-                leaf.outputUsdPerMillion,
-                leaf.serviceMode,
-                leaf.cumulativeFreshInputTokens,
-                leaf.cumulativeCachedInputTokens,
-                leaf.cumulativeOutputTokens,
-                leaf.cumulativeRequestCount,
-                leaf.cumulativeAmountPaid
+        bytes32[] memory rowHashes = new bytes32[](rows.length);
+        for (uint256 i = 0; i < rows.length; i++) {
+            ServiceUsageRow calldata row = rows[i];
+            rowHashes[i] = keccak256(abi.encode(
+                row.channelId,
+                row.serviceIdHash,
+                row.inputUsdPerMillion,
+                row.cachedInputUsdPerMillion,
+                row.outputUsdPerMillion,
+                row.serviceMode,
+                row.cumulativeFreshInputTokens,
+                row.cumulativeCachedInputTokens,
+                row.cumulativeOutputTokens,
+                row.cumulativeRequestCount,
+                row.cumulativeAmountPaid
             ));
         }
-        _sortHashes(level);
+        _sortHashes(rowHashes);
 
-        uint256 levelLength = level.length;
-        while (levelLength > 1) {
-            uint256 nextLength = (levelLength + 1) / 2;
-            for (uint256 i = 0; i < nextLength; i++) {
-                bytes32 left = level[i * 2];
-                bytes32 rightIndexValue = (i * 2 + 1 < levelLength) ? level[i * 2 + 1] : left;
-                level[i] = _hashMerklePair(left, rightIndexValue);
-            }
-            levelLength = nextLength;
-        }
-
-        return level[0];
+        return keccak256(abi.encode(rowHashes));
     }
 
     function _sortHashes(bytes32[] memory hashes) internal pure {
@@ -489,10 +478,6 @@ contract AntseedStatsV2 is IAntseedStats, Ownable {
             }
             hashes[j] = key;
         }
-    }
-
-    function _hashMerklePair(bytes32 a, bytes32 b) internal pure returns (bytes32) {
-        return a <= b ? keccak256(abi.encode(a, b)) : keccak256(abi.encode(b, a));
     }
 
     // ─── Admin Functions ────────────────────────────────────────────
@@ -531,7 +516,7 @@ contract AntseedStatsV2 is IAntseedStats, Ownable {
             (
                 ,
                 decoded.pricingSnapshotHash,
-                decoded.usageByServiceRoot,
+                decoded.serviceUsageHash,
                 decoded.receiptRoot,
                 decoded.freshInputTokens,
                 decoded.cachedInputTokens,

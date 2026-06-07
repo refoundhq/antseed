@@ -4,7 +4,7 @@ import { StatsClient } from './stats-client.js';
 
 const STATS_ABI = [
   'event MetadataRecorded(uint256 indexed agentId, address indexed buyer, bytes32 indexed channelId, bytes32 metadataHash, uint256 inputTokens, uint256 outputTokens, uint256 requestCount)',
-  'event UsageReportVerificationRecorded(bytes32 indexed reportHash, uint256 indexed sellerAgentId, uint256 indexed verifierAgentId, address seller, address buyer, address verifier, bytes32 channelId, bytes32 metadataHash, bytes32 pricingSnapshotHash, bytes32 usageByServiceRoot, uint256 cumulativeAmount, bool accepted)',
+  'event UsageReportVerificationRecorded(bytes32 indexed reportHash, uint256 indexed sellerAgentId, uint256 indexed verifierAgentId, address seller, address buyer, address verifier, bytes32 channelId, bytes32 metadataHash, bytes32 pricingSnapshotHash, bytes32 serviceUsageHash, uint256 cumulativeAmount, bool accepted)',
   'event UsageReportServiceUsageRecorded(bytes32 indexed reportHash, uint256 indexed sellerAgentId, bytes32 indexed serviceIdHash, bytes32 channelId, uint256 inputUsdPerMillion, uint256 cachedInputUsdPerMillion, uint256 outputUsdPerMillion, uint256 serviceMode, uint256 cumulativeFreshInputTokens, uint256 cumulativeCachedInputTokens, uint256 cumulativeOutputTokens, uint256 cumulativeRequestCount, uint256 cumulativeAmountPaid)',
 ] as const;
 
@@ -56,7 +56,7 @@ function buildVerificationLog(params: {
   channelId: string;
   metadataHash: string;
   pricingSnapshotHash: string;
-  usageByServiceRoot: string;
+  serviceUsageHash: string;
   cumulativeAmount: bigint;
   accepted: boolean;
   blockNumber: number;
@@ -74,7 +74,7 @@ function buildVerificationLog(params: {
     params.channelId,
     params.metadataHash,
     params.pricingSnapshotHash,
-    params.usageByServiceRoot,
+    params.serviceUsageHash,
     params.cumulativeAmount,
     params.accepted,
   ]);
@@ -249,7 +249,7 @@ describe('StatsClient', () => {
     const channelId = '0x' + 'ab'.repeat(32);
     const metadataHash = '0x' + 'cd'.repeat(32);
     const pricingSnapshotHash = '0x' + 'ef'.repeat(32);
-    const usageByServiceRoot = '0x' + '01'.repeat(32);
+    const serviceUsageHash = '0x' + '01'.repeat(32);
     const transactionHash = '0x' + 'ff'.repeat(32);
 
     const client = makeClient();
@@ -263,7 +263,7 @@ describe('StatsClient', () => {
       channelId,
       metadataHash,
       pricingSnapshotHash,
-      usageByServiceRoot,
+      serviceUsageHash,
       cumulativeAmount: 50_000_000n,
       accepted: true,
       blockNumber: 100,
@@ -287,7 +287,7 @@ describe('StatsClient', () => {
       channelId,
       metadataHash,
       pricingSnapshotHash,
-      usageByServiceRoot,
+      serviceUsageHash,
       cumulativeAmount: 50_000_000n,
       accepted: true,
     });

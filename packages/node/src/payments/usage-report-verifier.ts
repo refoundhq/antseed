@@ -2,7 +2,7 @@ import { AbiCoder, isAddress, keccak256, toUtf8Bytes, type TypedDataDomain, veri
 import type {
   ChannelReportAttestationPayload,
   ChannelUsageReportPayload,
-  ChannelUsageReportServiceUsageLeafPayload,
+  ChannelUsageReportServiceUsageRowPayload,
   UsageReportAckPayload,
 } from '../types/protocol.js';
 import type { PeerMetadata, TokenPricingUsdPerMillion } from '../discovery/peer-metadata.js';
@@ -12,16 +12,15 @@ import { signUtf8, verifySignature, verifyUtf8 } from '../p2p/identity.js';
 import { hexToBytes } from '../utils/hex.js';
 import {
   computeEncodedMetadataHash,
-  computeMerkleRoot,
+  computeServiceUsageHash,
   decodeMetadata,
-  hashServiceUsageLeaf,
   hashUtf8,
   metadataV2MatchesServiceUsage,
   SERVICE_MODE_FREE,
   SERVICE_MODE_PAID,
   SPENDING_AUTH_TYPES,
   ZERO_BYTES32,
-  type ServiceUsageLeaf,
+  type ServiceUsageRow,
   type SpendingAuthMetadataV2,
 } from './evm/signatures.js';
 
@@ -198,7 +197,7 @@ export function computeChannelUsageReportHash(report: ChannelUsageReportPayload)
       BigInt(report.cumulativeAmount),
       report.metadataHash,
       report.pricingSnapshotHash,
-      computeMerkleRoot(report.serviceUsageLeaves.map((leaf) => hashServiceUsageLeaf(fromServiceUsagePayload(leaf)))),
+      computeServiceUsageHash(report.serviceUsageRows.map(fromServiceUsageRowPayload)),
       BigInt(report.reportedAt),
       report.selectionBeacon,
       BigInt(report.verifierCount),
@@ -252,22 +251,22 @@ export function verifyChannelUsageReport(
     addIssue('metadata-decode-failed', err instanceof Error ? err.message : String(err));
   }
 
-  const usageLeaves = report.serviceUsageLeaves.map(fromServiceUsagePayload);
+  const usageRows = report.serviceUsageRows.map(fromServiceUsageRowPayload);
 
   if (metadata) {
     if (metadata.pricingSnapshotHash.toLowerCase() !== report.pricingSnapshotHash.toLowerCase()) {
       addIssue('pricing-snapshot-mismatch', 'report pricingSnapshotHash does not match metadata pricing commitment');
     }
-    if (!metadataV2MatchesServiceUsage(metadata, usageLeaves)) {
-      addIssue('usage-root-or-total-mismatch', 'usageByServiceRoot or usage totals do not match service usage leaves');
+    if (!metadataV2MatchesServiceUsage(metadata, usageRows)) {
+      addIssue('service-usage-hash-or-total-mismatch', 'serviceUsageHash or usage totals do not match service usage rows');
     }
     if (metadata.receiptRoot.toLowerCase() !== ZERO_BYTES32) {
       addIssue('unsupported-receipt-root', 'simplified usage reports require zero receiptRoot');
     }
   }
 
-  verifyUsageLeaves(report, usageLeaves, addIssue);
-  verifyAnnouncedPricing(report, usageLeaves, options.sellerMetadata ?? null, addIssue);
+  verifyUsageRows(report, usageRows, addIssue);
+  verifyAnnouncedPricing(report, usageRows, options.sellerMetadata ?? null, addIssue);
   verifyPaidAuthorization(report, metadata, options, addIssue);
 
   return {
@@ -297,7 +296,7 @@ export function createChannelReportAttestation(
     cumulativeAmount: report.cumulativeAmount,
     metadataHash: report.metadataHash,
     pricingSnapshotHash: report.pricingSnapshotHash,
-    usageByServiceRoot: verification.metadata.usageByServiceRoot,
+    serviceUsageHash: verification.metadata.serviceUsageHash,
     verifier: normalizeAddress(verifierIdentity.verifier),
     verifierAgentId: verifierIdentity.verifierAgentId,
     timestamp,
@@ -351,35 +350,35 @@ export function encodeAttestationForSigning(attestation: Omit<ChannelReportAttes
     cumulativeAmount: attestation.cumulativeAmount,
     metadataHash: attestation.metadataHash,
     pricingSnapshotHash: attestation.pricingSnapshotHash,
-    usageByServiceRoot: attestation.usageByServiceRoot,
+    serviceUsageHash: attestation.serviceUsageHash,
     verifier: normalizeAddress(attestation.verifier),
     verifierAgentId: attestation.verifierAgentId,
     timestamp: attestation.timestamp,
   });
 }
 
-function verifyUsageLeaves(
+function verifyUsageRows(
   report: ChannelUsageReportPayload,
-  usageLeaves: ServiceUsageLeaf[],
+  usageRows: ServiceUsageRow[],
   addIssue: (code: string, message: string) => void,
 ): void {
-  for (const leaf of usageLeaves) {
-    if (leaf.channelId.toLowerCase() !== report.channelId.toLowerCase()) {
-      addIssue('usage-channel-mismatch', 'service usage leaf channelId does not match report channelId');
+  for (const row of usageRows) {
+    if (row.channelId.toLowerCase() !== report.channelId.toLowerCase()) {
+      addIssue('usage-channel-mismatch', 'service usage row channelId does not match report channelId');
     }
-    const expectedServiceIdHash = serviceIdHash(leaf.provider, leaf.service);
-    if (leaf.serviceIdHash.toLowerCase() !== expectedServiceIdHash.toLowerCase()) {
-      addIssue('usage-service-hash-mismatch', 'service usage leaf serviceIdHash does not match provider/service');
+    const expectedServiceIdHash = serviceIdHash(row.provider, row.service);
+    if (row.serviceIdHash.toLowerCase() !== expectedServiceIdHash.toLowerCase()) {
+      addIssue('usage-service-hash-mismatch', 'service usage row serviceIdHash does not match provider/service');
     }
-    if (toBigInt(leaf.serviceMode) === SERVICE_MODE_FREE && toBigInt(leaf.cumulativeAmountPaid) !== 0n) {
-      addIssue('free-usage-paid-amount', 'free service usage leaf has nonzero paid amount');
+    if (toBigInt(row.serviceMode) === SERVICE_MODE_FREE && toBigInt(row.cumulativeAmountPaid) !== 0n) {
+      addIssue('free-usage-paid-amount', 'free service usage row has nonzero paid amount');
     }
   }
 }
 
 function verifyAnnouncedPricing(
   report: ChannelUsageReportPayload,
-  usageLeaves: ServiceUsageLeaf[],
+  usageRows: ServiceUsageRow[],
   metadata: PeerMetadata | null,
   addIssue: (code: string, message: string) => void,
 ): void {
@@ -403,36 +402,36 @@ function verifyAnnouncedPricing(
     addIssue('invalid-seller-metadata-signature', 'seller metadata signature does not recover metadata peerId');
   }
 
-  for (const leaf of usageLeaves) {
-    const pricing = getAnnouncedServicePricing(metadata, leaf.provider, leaf.service);
+  for (const row of usageRows) {
+    const pricing = getAnnouncedServicePricing(metadata, row.provider, row.service);
     if (!pricing) {
-      addIssue('missing-announced-service-pricing', `seller metadata does not announce pricing for ${leaf.provider}:${leaf.service}`);
+      addIssue('missing-announced-service-pricing', `seller metadata does not announce pricing for ${row.provider}:${row.service}`);
       continue;
     }
     const expectedMode = isFreePricing(pricing) ? SERVICE_MODE_FREE : SERVICE_MODE_PAID;
-    if (toBigInt(leaf.serviceMode) !== expectedMode) {
+    if (toBigInt(row.serviceMode) !== expectedMode) {
       addIssue('usage-mode-pricing-mismatch', 'service usage mode does not match announced pricing');
     }
     const expectedCachedPrice = pricing.cachedInputUsdPerMillion ?? pricing.inputUsdPerMillion;
     if (
-      toBigInt(leaf.inputUsdPerMillion) !== BigInt(pricing.inputUsdPerMillion)
-      || toBigInt(leaf.cachedInputUsdPerMillion) !== BigInt(expectedCachedPrice)
-      || toBigInt(leaf.outputUsdPerMillion) !== BigInt(pricing.outputUsdPerMillion)
+      toBigInt(row.inputUsdPerMillion) !== BigInt(pricing.inputUsdPerMillion)
+      || toBigInt(row.cachedInputUsdPerMillion) !== BigInt(expectedCachedPrice)
+      || toBigInt(row.outputUsdPerMillion) !== BigInt(pricing.outputUsdPerMillion)
     ) {
-      addIssue('usage-pricing-mismatch', 'service usage leaf pricing does not match announced metadata pricing');
+      addIssue('usage-pricing-mismatch', 'service usage row pricing does not match announced metadata pricing');
     }
     const expectedCost = computeCostUsdc(
-      Number(toBigInt(leaf.cumulativeFreshInputTokens)),
-      Number(toBigInt(leaf.cumulativeOutputTokens)),
+      Number(toBigInt(row.cumulativeFreshInputTokens)),
+      Number(toBigInt(row.cumulativeOutputTokens)),
       {
-        inputUsdPerMillion: Number(toBigInt(leaf.inputUsdPerMillion)),
-        cachedInputUsdPerMillion: Number(toBigInt(leaf.cachedInputUsdPerMillion)),
-        outputUsdPerMillion: Number(toBigInt(leaf.outputUsdPerMillion)),
+        inputUsdPerMillion: Number(toBigInt(row.inputUsdPerMillion)),
+        cachedInputUsdPerMillion: Number(toBigInt(row.cachedInputUsdPerMillion)),
+        outputUsdPerMillion: Number(toBigInt(row.outputUsdPerMillion)),
       },
-      Number(toBigInt(leaf.cumulativeCachedInputTokens)),
+      Number(toBigInt(row.cumulativeCachedInputTokens)),
     );
-    if (expectedCost !== toBigInt(leaf.cumulativeAmountPaid)) {
-      addIssue('announced-pricing-cost-mismatch', `service usage paid amount ${leaf.cumulativeAmountPaid} does not match announced pricing ${expectedCost}`);
+    if (expectedCost !== toBigInt(row.cumulativeAmountPaid)) {
+      addIssue('announced-pricing-cost-mismatch', `service usage paid amount ${row.cumulativeAmountPaid} does not match announced pricing ${expectedCost}`);
     }
   }
 }
@@ -480,7 +479,7 @@ function verifyPaidAuthorization(
   }
 }
 
-function fromServiceUsagePayload(payload: ChannelUsageReportServiceUsageLeafPayload): ServiceUsageLeaf {
+function fromServiceUsageRowPayload(payload: ChannelUsageReportServiceUsageRowPayload): ServiceUsageRow {
   return {
     channelId: payload.channelId,
     provider: payload.provider,
@@ -517,21 +516,21 @@ function validateReportFields(
   }
   validateUintNumber('reportedAt', report.reportedAt, addIssue);
 
-  report.serviceUsageLeaves.forEach((leaf, index) => {
-    const prefix = `serviceUsageLeaves[${index}]`;
-    validateBytes32(`${prefix}.channelId`, leaf.channelId, addIssue);
-    validateNonEmptyString(`${prefix}.provider`, leaf.provider, addIssue);
-    validateNonEmptyString(`${prefix}.service`, leaf.service, addIssue);
-    validateBytes32(`${prefix}.serviceIdHash`, leaf.serviceIdHash, addIssue);
-    validateUintString(`${prefix}.inputUsdPerMillion`, leaf.inputUsdPerMillion, addIssue);
-    validateUintString(`${prefix}.cachedInputUsdPerMillion`, leaf.cachedInputUsdPerMillion, addIssue);
-    validateUintString(`${prefix}.outputUsdPerMillion`, leaf.outputUsdPerMillion, addIssue);
-    validateUintString(`${prefix}.serviceMode`, leaf.serviceMode, addIssue);
-    validateUintString(`${prefix}.cumulativeFreshInputTokens`, leaf.cumulativeFreshInputTokens, addIssue);
-    validateUintString(`${prefix}.cumulativeCachedInputTokens`, leaf.cumulativeCachedInputTokens, addIssue);
-    validateUintString(`${prefix}.cumulativeOutputTokens`, leaf.cumulativeOutputTokens, addIssue);
-    validateUintString(`${prefix}.cumulativeRequestCount`, leaf.cumulativeRequestCount, addIssue);
-    validateUintString(`${prefix}.cumulativeAmountPaid`, leaf.cumulativeAmountPaid, addIssue);
+  report.serviceUsageRows.forEach((row, index) => {
+    const prefix = `serviceUsageRows[${index}]`;
+    validateBytes32(`${prefix}.channelId`, row.channelId, addIssue);
+    validateNonEmptyString(`${prefix}.provider`, row.provider, addIssue);
+    validateNonEmptyString(`${prefix}.service`, row.service, addIssue);
+    validateBytes32(`${prefix}.serviceIdHash`, row.serviceIdHash, addIssue);
+    validateUintString(`${prefix}.inputUsdPerMillion`, row.inputUsdPerMillion, addIssue);
+    validateUintString(`${prefix}.cachedInputUsdPerMillion`, row.cachedInputUsdPerMillion, addIssue);
+    validateUintString(`${prefix}.outputUsdPerMillion`, row.outputUsdPerMillion, addIssue);
+    validateUintString(`${prefix}.serviceMode`, row.serviceMode, addIssue);
+    validateUintString(`${prefix}.cumulativeFreshInputTokens`, row.cumulativeFreshInputTokens, addIssue);
+    validateUintString(`${prefix}.cumulativeCachedInputTokens`, row.cumulativeCachedInputTokens, addIssue);
+    validateUintString(`${prefix}.cumulativeOutputTokens`, row.cumulativeOutputTokens, addIssue);
+    validateUintString(`${prefix}.cumulativeRequestCount`, row.cumulativeRequestCount, addIssue);
+    validateUintString(`${prefix}.cumulativeAmountPaid`, row.cumulativeAmountPaid, addIssue);
   });
 }
 

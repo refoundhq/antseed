@@ -1452,7 +1452,7 @@ export class AntseedNode extends EventEmitter {
       this._identity.wallet,
       ack.attestation,
       ack.accepted,
-      report.serviceUsageLeaves,
+      report.serviceUsageRows,
     );
     this.emit("usage-report:recorded", { ack, txHash });
     debugLog(`[Node] Usage report verification recorded on-chain: tx=${txHash}`);

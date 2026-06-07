@@ -3,7 +3,7 @@ import type { Identity } from '../p2p/identity.js';
 import type { PaymentMux } from '../p2p/payment-mux.js';
 import type {
   ChannelUsageReportPayload,
-  ChannelUsageReportServiceUsageLeafPayload,
+  ChannelUsageReportServiceUsageRowPayload,
   NeedAuthUsageReportMetadataPayload,
   SpendingAuthPayload,
   PaymentRequiredPayload,
@@ -16,8 +16,7 @@ import {
   encodeMetadata,
   encodeMetadataV2,
   computeEncodedMetadataHash,
-  computeMerkleRoot,
-  hashServiceUsageLeaf,
+  computeServiceUsageHash,
   SERVICE_MODE_PAID,
   ZERO_BYTES32,
   ZERO_METADATA,
@@ -97,7 +96,7 @@ interface UsageReportDraft {
   metadata: NeedAuthUsageReportMetadataPayload;
   metadataHash: string;
   pricingSnapshotHash: string;
-  serviceUsageLeaves: ChannelUsageReportServiceUsageLeafPayload[];
+  serviceUsageRows: ChannelUsageReportServiceUsageRowPayload[];
 }
 
 /**
@@ -1098,7 +1097,7 @@ export class SellerPaymentManager {
       verifierCount: this._usageReportVerifierCount,
       buyerSpendingAuthSig: auth.spendingAuthSig,
       pricingSnapshotHash: draft.pricingSnapshotHash,
-      serviceUsageLeaves: draft.serviceUsageLeaves,
+      serviceUsageRows: draft.serviceUsageRows,
       reportedAt: Math.floor(Date.now() / 1000),
     };
     void Promise.resolve(this._onUsageReportReady(report)).catch((err) => {
@@ -1111,13 +1110,13 @@ export class SellerPaymentManager {
     if (!this._spent.has(params.channelId)) return null;
 
     const previous = this._usageReportDrafts.get(params.channelId);
-    const usageLeavesByKey = new Map<string, ChannelUsageReportServiceUsageLeafPayload>();
-    for (const leaf of previous?.serviceUsageLeaves ?? []) {
-      usageLeavesByKey.set(`${leaf.provider}:${leaf.service}`, leaf);
+    const usageRowsByKey = new Map<string, ChannelUsageReportServiceUsageRowPayload>();
+    for (const row of previous?.serviceUsageRows ?? []) {
+      usageRowsByKey.set(`${row.provider}:${row.service}`, row);
     }
     const usageKey = `${params.provider}:${params.service}`;
-    const prevUsage = usageLeavesByKey.get(usageKey);
-    usageLeavesByKey.set(usageKey, {
+    const prevUsage = usageRowsByKey.get(usageKey);
+    usageRowsByKey.set(usageKey, {
       channelId: params.channelId,
       provider: params.provider,
       service: params.service,
@@ -1133,21 +1132,21 @@ export class SellerPaymentManager {
       cumulativeAmountPaid: (BigInt(prevUsage?.cumulativeAmountPaid ?? '0') + params.costUsdc).toString(),
     });
 
-    const serviceUsageLeaves = [...usageLeavesByKey.values()];
-    const usageByServiceRoot = computeMerkleRoot(serviceUsageLeaves.map((leaf) => hashServiceUsageLeaf(leaf)));
-    const totals = serviceUsageLeaves.reduce(
-      (acc, leaf) => ({
-        fresh: acc.fresh + BigInt(leaf.cumulativeFreshInputTokens),
-        cached: acc.cached + BigInt(leaf.cumulativeCachedInputTokens),
-        output: acc.output + BigInt(leaf.cumulativeOutputTokens),
-        requests: acc.requests + BigInt(leaf.cumulativeRequestCount),
-        paid: acc.paid + BigInt(leaf.cumulativeAmountPaid),
+    const serviceUsageRows = [...usageRowsByKey.values()];
+    const serviceUsageHash = computeServiceUsageHash(serviceUsageRows);
+    const totals = serviceUsageRows.reduce(
+      (acc, row) => ({
+        fresh: acc.fresh + BigInt(row.cumulativeFreshInputTokens),
+        cached: acc.cached + BigInt(row.cumulativeCachedInputTokens),
+        output: acc.output + BigInt(row.cumulativeOutputTokens),
+        requests: acc.requests + BigInt(row.cumulativeRequestCount),
+        paid: acc.paid + BigInt(row.cumulativeAmountPaid),
       }),
       { fresh: 0n, cached: 0n, output: 0n, requests: 0n, paid: 0n },
     );
     const metadata: NeedAuthUsageReportMetadataPayload = {
       pricingSnapshotHash: params.pricingSnapshotHash,
-      usageByServiceRoot,
+      serviceUsageHash,
       receiptRoot: ZERO_BYTES32,
       cumulativeFreshInputTokens: totals.fresh.toString(),
       cumulativeCachedInputTokens: totals.cached.toString(),
@@ -1157,7 +1156,7 @@ export class SellerPaymentManager {
     };
     const encodedMetadata = encodeMetadataV2({
       pricingSnapshotHash: metadata.pricingSnapshotHash,
-      usageByServiceRoot: metadata.usageByServiceRoot,
+      serviceUsageHash: metadata.serviceUsageHash,
       receiptRoot: metadata.receiptRoot,
       cumulativeFreshInputTokens: BigInt(metadata.cumulativeFreshInputTokens),
       cumulativeCachedInputTokens: BigInt(metadata.cumulativeCachedInputTokens),
@@ -1169,7 +1168,7 @@ export class SellerPaymentManager {
       metadata,
       metadataHash: computeEncodedMetadataHash(encodedMetadata),
       pricingSnapshotHash: params.pricingSnapshotHash,
-      serviceUsageLeaves,
+      serviceUsageRows,
     });
     debugLog(`[SellerPayment] Usage report draft updated: channel=${params.channelId.slice(0, 18)}... paid=${metadata.cumulativeAmountPaid}`);
     return metadata;

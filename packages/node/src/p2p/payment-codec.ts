@@ -5,7 +5,7 @@ import {
   type PaymentRequiredPayload,
   type NeedAuthPayload,
   type ChannelUsageReportPayload,
-  type ChannelUsageReportServiceUsageLeafPayload,
+  type ChannelUsageReportServiceUsageRowPayload,
   type UsageReportAckPayload,
 } from '../types/protocol.js';
 
@@ -128,7 +128,7 @@ export function decodeNeedAuth(data: Uint8Array): NeedAuthPayload {
     const metadata = obj.usageReportMetadata as Record<string, unknown>;
     result.usageReportMetadata = {
       pricingSnapshotHash: requireString(metadata, 'pricingSnapshotHash'),
-      usageByServiceRoot: requireString(metadata, 'usageByServiceRoot'),
+      serviceUsageHash: requireString(metadata, 'serviceUsageHash'),
       receiptRoot: requireString(metadata, 'receiptRoot'),
       cumulativeFreshInputTokens: requireString(metadata, 'cumulativeFreshInputTokens'),
       cumulativeCachedInputTokens: requireString(metadata, 'cumulativeCachedInputTokens'),
@@ -153,7 +153,7 @@ export function decodePeerReport(data: Uint8Array): ChannelUsageReportPayload {
     selectionBeacon: requireString(obj, 'selectionBeacon'),
     verifierCount: requireNumber(obj, 'verifierCount'),
     pricingSnapshotHash: requireString(obj, 'pricingSnapshotHash'),
-    serviceUsageLeaves: parseArray(obj, 'serviceUsageLeaves', parseServiceUsageLeaf),
+    serviceUsageRows: parseArray(obj, 'serviceUsageRows', parseServiceUsageRow),
     reportedAt: requireNumber(obj, 'reportedAt'),
   };
   if (typeof obj.buyerSpendingAuthSig === 'string') result.buyerSpendingAuthSig = obj.buyerSpendingAuthSig;
@@ -180,7 +180,7 @@ export function decodeReportAck(data: Uint8Array): UsageReportAckPayload {
       cumulativeAmount: requireString(attestation, 'cumulativeAmount'),
       metadataHash: requireString(attestation, 'metadataHash'),
       pricingSnapshotHash: requireString(attestation, 'pricingSnapshotHash'),
-      usageByServiceRoot: requireString(attestation, 'usageByServiceRoot'),
+      serviceUsageHash: requireString(attestation, 'serviceUsageHash'),
       verifier: requireString(attestation, 'verifier'),
       verifierAgentId: requireString(attestation, 'verifierAgentId'),
       timestamp: requireNumber(attestation, 'timestamp'),
@@ -223,7 +223,7 @@ function parseArray<T>(
   });
 }
 
-function parseServiceUsageLeaf(obj: Record<string, unknown>): ChannelUsageReportServiceUsageLeafPayload {
+function parseServiceUsageRow(obj: Record<string, unknown>): ChannelUsageReportServiceUsageRowPayload {
   return {
     channelId: requireString(obj, 'channelId'),
     provider: requireString(obj, 'provider'),

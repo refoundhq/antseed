@@ -93,7 +93,7 @@ contract AntseedStatsV2Test is Test {
     function test_recordMetadata_allowsV2SplitAfterV1AggregateMetadata() public {
         bytes32 channelId = bytes32("chan-v1-v2");
         bytes32 pricingSnapshotHash = keccak256("pricing");
-        bytes32 usageByServiceRoot = keccak256("usage");
+        bytes32 serviceUsageHash = keccak256("usage");
         bytes32 receiptRoot = keccak256("receipt");
 
         vm.prank(writer);
@@ -111,7 +111,7 @@ contract AntseedStatsV2Test is Test {
             buyer,
             channelId,
             pricingSnapshotHash,
-            usageByServiceRoot,
+            serviceUsageHash,
             receiptRoot,
             100,
             50,
@@ -126,7 +126,7 @@ contract AntseedStatsV2Test is Test {
             abi.encode(
                 uint256(2),
                 pricingSnapshotHash,
-                usageByServiceRoot,
+                serviceUsageHash,
                 receiptRoot,
                 uint256(100),
                 uint256(50),
@@ -142,10 +142,10 @@ contract AntseedStatsV2Test is Test {
         assertEq(buyerStats.totalRequestCount, 3);
     }
 
-    function test_recordMetadata_decodesV2MetadataAndEmitsRoots() public {
+    function test_recordMetadata_decodesV2MetadataAndEmitsCommitments() public {
         bytes32 channelId = bytes32("chan-v2");
         bytes32 pricingSnapshotHash = keccak256("pricing");
-        bytes32 usageByServiceRoot = keccak256("usage");
+        bytes32 serviceUsageHash = keccak256("usage");
         bytes32 receiptRoot = keccak256("receipt");
 
         vm.prank(writer);
@@ -155,7 +155,7 @@ contract AntseedStatsV2Test is Test {
             buyer,
             channelId,
             pricingSnapshotHash,
-            usageByServiceRoot,
+            serviceUsageHash,
             receiptRoot,
             100,
             25,
@@ -170,7 +170,7 @@ contract AntseedStatsV2Test is Test {
             abi.encode(
                 uint256(2),
                 pricingSnapshotHash,
-                usageByServiceRoot,
+                serviceUsageHash,
                 receiptRoot,
                 uint256(100),
                 uint256(25),
@@ -193,7 +193,7 @@ contract AntseedStatsV2Test is Test {
             abi.encode(
                 uint256(2),
                 pricingSnapshotHash,
-                usageByServiceRoot,
+                serviceUsageHash,
                 receiptRoot,
                 uint256(130),
                 uint256(35),
@@ -220,7 +220,7 @@ contract AntseedStatsV2Test is Test {
             channelId,
             abi.encode(
                 uint256(2),
-                keccak256("catalog"),
+                keccak256("pricing"),
                 keccak256("usage"),
                 keccak256("receipt"),
                 uint256(100),
@@ -261,7 +261,7 @@ contract AntseedStatsV2Test is Test {
             channelId,
             abi.encode(
                 uint256(2),
-                keccak256("catalog"),
+                keccak256("pricing"),
                 keccak256("usage"),
                 keccak256("receipt"),
                 uint256(100),
@@ -307,7 +307,7 @@ contract AntseedStatsV2Test is Test {
         bytes32 channelId = keccak256("channel");
         bytes32 metadataHash = keccak256("metadata");
         bytes32 pricingSnapshotHash = keccak256("pricing");
-        bytes32 usageByServiceRoot = keccak256("usage");
+        bytes32 serviceUsageHash = keccak256("usage");
 
         vm.prank(verifier);
         vm.expectEmit(true, true, true, true);
@@ -321,7 +321,7 @@ contract AntseedStatsV2Test is Test {
             channelId,
             metadataHash,
             pricingSnapshotHash,
-            usageByServiceRoot,
+            serviceUsageHash,
             50e6,
             true
         );
@@ -335,7 +335,7 @@ contract AntseedStatsV2Test is Test {
             50e6,
             metadataHash,
             pricingSnapshotHash,
-            usageByServiceRoot,
+            serviceUsageHash,
             true
         );
 
@@ -365,8 +365,8 @@ contract AntseedStatsV2Test is Test {
         bytes32 channelId = keccak256("channel");
         bytes32 metadataHash = keccak256("metadata");
         bytes32 pricingSnapshotHash = keccak256("pricing");
-        AntseedStatsV2.ServiceUsageLeaf[] memory leaves = new AntseedStatsV2.ServiceUsageLeaf[](1);
-        leaves[0] = AntseedStatsV2.ServiceUsageLeaf({
+        AntseedStatsV2.ServiceUsageRow[] memory rows = new AntseedStatsV2.ServiceUsageRow[](1);
+        rows[0] = AntseedStatsV2.ServiceUsageRow({
             channelId: channelId,
             serviceIdHash: keccak256("service:gpt"),
             inputUsdPerMillion: 3,
@@ -379,7 +379,7 @@ contract AntseedStatsV2Test is Test {
             cumulativeRequestCount: 3,
             cumulativeAmountPaid: 12345
         });
-        bytes32 usageByServiceRoot = _serviceUsageLeafHash(leaves[0]);
+        bytes32 serviceUsageHash = _singleServiceUsageHash(rows[0]);
 
         vm.prank(verifier);
         vm.expectEmit(true, true, true, true);
@@ -393,7 +393,7 @@ contract AntseedStatsV2Test is Test {
             channelId,
             metadataHash,
             pricingSnapshotHash,
-            usageByServiceRoot,
+            serviceUsageHash,
             12345,
             true
         );
@@ -401,17 +401,17 @@ contract AntseedStatsV2Test is Test {
         emit AntseedStatsV2.UsageReportServiceUsageRecorded(
             reportHash,
             agentId,
-            leaves[0].serviceIdHash,
+            rows[0].serviceIdHash,
             channelId,
-            leaves[0].inputUsdPerMillion,
-            leaves[0].cachedInputUsdPerMillion,
-            leaves[0].outputUsdPerMillion,
-            leaves[0].serviceMode,
-            leaves[0].cumulativeFreshInputTokens,
-            leaves[0].cumulativeCachedInputTokens,
-            leaves[0].cumulativeOutputTokens,
-            leaves[0].cumulativeRequestCount,
-            leaves[0].cumulativeAmountPaid
+            rows[0].inputUsdPerMillion,
+            rows[0].cachedInputUsdPerMillion,
+            rows[0].outputUsdPerMillion,
+            rows[0].serviceMode,
+            rows[0].cumulativeFreshInputTokens,
+            rows[0].cumulativeCachedInputTokens,
+            rows[0].cumulativeOutputTokens,
+            rows[0].cumulativeRequestCount,
+            rows[0].cumulativeAmountPaid
         );
         statsV2.recordUsageReportVerificationWithServiceUsage(
             reportHash,
@@ -423,9 +423,9 @@ contract AntseedStatsV2Test is Test {
             12345,
             metadataHash,
             pricingSnapshotHash,
-            usageByServiceRoot,
+            serviceUsageHash,
             true,
-            leaves
+            rows
         );
 
         assertTrue(statsV2.reportServiceUsageRecorded(reportHash));
@@ -440,8 +440,8 @@ contract AntseedStatsV2Test is Test {
         bytes32 channelId = keccak256("channel");
         bytes32 metadataHash = keccak256("metadata");
         bytes32 pricingSnapshotHash = keccak256("pricing");
-        AntseedStatsV2.ServiceUsageLeaf[] memory leaves = new AntseedStatsV2.ServiceUsageLeaf[](1);
-        leaves[0] = AntseedStatsV2.ServiceUsageLeaf({
+        AntseedStatsV2.ServiceUsageRow[] memory rows = new AntseedStatsV2.ServiceUsageRow[](1);
+        rows[0] = AntseedStatsV2.ServiceUsageRow({
             channelId: channelId,
             serviceIdHash: keccak256("service:gpt"),
             inputUsdPerMillion: 3,
@@ -454,7 +454,7 @@ contract AntseedStatsV2Test is Test {
             cumulativeRequestCount: 3,
             cumulativeAmountPaid: 12345
         });
-        bytes32 usageByServiceRoot = _serviceUsageLeafHash(leaves[0]);
+        bytes32 serviceUsageHash = _singleServiceUsageHash(rows[0]);
 
         vm.prank(verifier);
         statsV2.recordUsageReportVerificationWithServiceUsage(
@@ -467,9 +467,9 @@ contract AntseedStatsV2Test is Test {
             12345,
             metadataHash,
             pricingSnapshotHash,
-            usageByServiceRoot,
+            serviceUsageHash,
             true,
-            leaves
+            rows
         );
 
         vm.recordLogs();
@@ -484,9 +484,9 @@ contract AntseedStatsV2Test is Test {
             12345,
             metadataHash,
             pricingSnapshotHash,
-            usageByServiceRoot,
+            serviceUsageHash,
             true,
-            leaves
+            rows
         );
         Vm.Log[] memory logs = vm.getRecordedLogs();
 
@@ -515,9 +515,9 @@ contract AntseedStatsV2Test is Test {
         assertEq(verifierTwoStats.acceptedCount, 1);
     }
 
-    function test_recordUsageReportVerificationWithServiceUsage_revert_invalidUsageRoot() public {
-        AntseedStatsV2.ServiceUsageLeaf[] memory leaves = new AntseedStatsV2.ServiceUsageLeaf[](1);
-        leaves[0] = AntseedStatsV2.ServiceUsageLeaf({
+    function test_recordUsageReportVerificationWithServiceUsage_revert_invalidServiceUsageHash() public {
+        AntseedStatsV2.ServiceUsageRow[] memory rows = new AntseedStatsV2.ServiceUsageRow[](1);
+        rows[0] = AntseedStatsV2.ServiceUsageRow({
             channelId: keccak256("channel"),
             serviceIdHash: keccak256("service:gpt"),
             inputUsdPerMillion: 3,
@@ -532,20 +532,20 @@ contract AntseedStatsV2Test is Test {
         });
 
         vm.prank(verifier);
-        vm.expectRevert(AntseedStatsV2.InvalidUsageByServiceRoot.selector);
+        vm.expectRevert(AntseedStatsV2.InvalidServiceUsageHash.selector);
         statsV2.recordUsageReportVerificationWithServiceUsage(
-            keccak256("bad-service-root-report"),
-            leaves[0].channelId,
+            keccak256("bad-service-hash-report"),
+            rows[0].channelId,
             seller,
             buyer,
             agentId,
             verifierAgentId,
             12345,
             keccak256("metadata"),
-            keccak256("catalog"),
-            keccak256("wrong-root"),
+            keccak256("pricing"),
+            keccak256("wrong-hash"),
             true,
-            leaves
+            rows
         );
     }
 
@@ -562,7 +562,7 @@ contract AntseedStatsV2Test is Test {
             verifierAgentId,
             0,
             keccak256("metadata"),
-            keccak256("catalog"),
+            keccak256("pricing"),
             keccak256("usage"),
             false
         );
@@ -591,7 +591,7 @@ contract AntseedStatsV2Test is Test {
             verifierAgentId,
             0,
             keccak256("metadata"),
-            keccak256("catalog"),
+            keccak256("pricing"),
             keccak256("usage"),
             true
         );
@@ -607,7 +607,7 @@ contract AntseedStatsV2Test is Test {
             verifierAgentId,
             0,
             keccak256("metadata"),
-            keccak256("catalog"),
+            keccak256("pricing"),
             keccak256("usage"),
             true
         );
@@ -625,7 +625,7 @@ contract AntseedStatsV2Test is Test {
             verifierAgentId,
             0,
             keccak256("metadata"),
-            keccak256("catalog"),
+            keccak256("pricing"),
             keccak256("usage"),
             true
         );
@@ -645,7 +645,7 @@ contract AntseedStatsV2Test is Test {
             verifierAgentId,
             0,
             keccak256("metadata"),
-            keccak256("catalog"),
+            keccak256("pricing"),
             keccak256("usage"),
             true
         );
@@ -665,25 +665,27 @@ contract AntseedStatsV2Test is Test {
             verifierAgentId,
             0,
             keccak256("metadata"),
-            keccak256("catalog"),
+            keccak256("pricing"),
             keccak256("usage"),
             true
         );
     }
 
-    function _serviceUsageLeafHash(AntseedStatsV2.ServiceUsageLeaf memory leaf) internal pure returns (bytes32) {
-        return keccak256(abi.encode(
-            leaf.channelId,
-            leaf.serviceIdHash,
-            leaf.inputUsdPerMillion,
-            leaf.cachedInputUsdPerMillion,
-            leaf.outputUsdPerMillion,
-            leaf.serviceMode,
-            leaf.cumulativeFreshInputTokens,
-            leaf.cumulativeCachedInputTokens,
-            leaf.cumulativeOutputTokens,
-            leaf.cumulativeRequestCount,
-            leaf.cumulativeAmountPaid
+    function _singleServiceUsageHash(AntseedStatsV2.ServiceUsageRow memory row) internal pure returns (bytes32) {
+        bytes32[] memory rowHashes = new bytes32[](1);
+        rowHashes[0] = keccak256(abi.encode(
+            row.channelId,
+            row.serviceIdHash,
+            row.inputUsdPerMillion,
+            row.cachedInputUsdPerMillion,
+            row.outputUsdPerMillion,
+            row.serviceMode,
+            row.cumulativeFreshInputTokens,
+            row.cumulativeCachedInputTokens,
+            row.cumulativeOutputTokens,
+            row.cumulativeRequestCount,
+            row.cumulativeAmountPaid
         ));
+        return keccak256(abi.encode(rowHashes));
     }
 }

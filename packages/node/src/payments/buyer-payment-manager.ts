@@ -933,7 +933,7 @@ export class BuyerPaymentManager {
       try {
         const parsed: SpendingAuthMetadataV2 = {
           pricingSnapshotHash: usageReportMetadata.pricingSnapshotHash,
-          usageByServiceRoot: usageReportMetadata.usageByServiceRoot,
+          serviceUsageHash: usageReportMetadata.serviceUsageHash,
           receiptRoot: usageReportMetadata.receiptRoot,
           cumulativeFreshInputTokens: BigInt(usageReportMetadata.cumulativeFreshInputTokens),
           cumulativeCachedInputTokens: BigInt(usageReportMetadata.cumulativeCachedInputTokens),

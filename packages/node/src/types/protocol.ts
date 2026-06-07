@@ -148,7 +148,7 @@ export interface NeedAuthPayload {
 
 export interface NeedAuthUsageReportMetadataPayload {
   pricingSnapshotHash: string;
-  usageByServiceRoot: string;
+  serviceUsageHash: string;
   receiptRoot: string;
   cumulativeFreshInputTokens: string;
   cumulativeCachedInputTokens: string;
@@ -157,7 +157,7 @@ export interface NeedAuthUsageReportMetadataPayload {
   cumulativeAmountPaid: string;
 }
 
-export interface ChannelUsageReportServiceUsageLeafPayload {
+export interface ChannelUsageReportServiceUsageRowPayload {
   channelId: string;
   provider: string;
   service: string;
@@ -189,7 +189,7 @@ export interface ChannelUsageReportPayload {
   buyerSpendingAuthSig?: string;
   /** Hash derived from the seller's existing signed /metadata pricing fields. */
   pricingSnapshotHash: string;
-  serviceUsageLeaves: ChannelUsageReportServiceUsageLeafPayload[];
+  serviceUsageRows: ChannelUsageReportServiceUsageRowPayload[];
   reportedAt: number;
 }
 
@@ -202,7 +202,7 @@ export interface ChannelReportAttestationPayload {
   cumulativeAmount: string;
   metadataHash: string;
   pricingSnapshotHash: string;
-  usageByServiceRoot: string;
+  serviceUsageHash: string;
   /**
    * Verifier seller peer address / peerId, 40 lowercase hex chars or an EVM
    * address. This is the identity that signed the attestation and can later be

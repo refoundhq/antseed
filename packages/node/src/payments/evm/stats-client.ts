@@ -1,6 +1,6 @@
 import { ethers, type AbstractSigner } from 'ethers';
 import { BaseEvmClient } from './base-evm-client.js';
-import type { ChannelReportAttestationPayload, ChannelUsageReportServiceUsageLeafPayload } from '../../types/protocol.js';
+import type { ChannelReportAttestationPayload, ChannelUsageReportServiceUsageRowPayload } from '../../types/protocol.js';
 
 export interface StatsClientConfig {
   rpcUrl: string;
@@ -35,7 +35,7 @@ export interface DecodedUsageReportVerificationRecorded {
   channelId: string;
   metadataHash: string;
   pricingSnapshotHash: string;
-  usageByServiceRoot: string;
+  serviceUsageHash: string;
   cumulativeAmount: bigint;
   accepted: boolean;
 }
@@ -61,10 +61,10 @@ export interface DecodedUsageReportServiceUsageRecorded {
 
 const STATS_ABI = [
   'event MetadataRecorded(uint256 indexed agentId, address indexed buyer, bytes32 indexed channelId, bytes32 metadataHash, uint256 inputTokens, uint256 outputTokens, uint256 requestCount)',
-  'event UsageReportVerificationRecorded(bytes32 indexed reportHash, uint256 indexed sellerAgentId, uint256 indexed verifierAgentId, address seller, address buyer, address verifier, bytes32 channelId, bytes32 metadataHash, bytes32 pricingSnapshotHash, bytes32 usageByServiceRoot, uint256 cumulativeAmount, bool accepted)',
+  'event UsageReportVerificationRecorded(bytes32 indexed reportHash, uint256 indexed sellerAgentId, uint256 indexed verifierAgentId, address seller, address buyer, address verifier, bytes32 channelId, bytes32 metadataHash, bytes32 pricingSnapshotHash, bytes32 serviceUsageHash, uint256 cumulativeAmount, bool accepted)',
   'event UsageReportServiceUsageRecorded(bytes32 indexed reportHash, uint256 indexed sellerAgentId, bytes32 indexed serviceIdHash, bytes32 channelId, uint256 inputUsdPerMillion, uint256 cachedInputUsdPerMillion, uint256 outputUsdPerMillion, uint256 serviceMode, uint256 cumulativeFreshInputTokens, uint256 cumulativeCachedInputTokens, uint256 cumulativeOutputTokens, uint256 cumulativeRequestCount, uint256 cumulativeAmountPaid)',
-  'function recordUsageReportVerification(bytes32 reportHash, bytes32 channelId, address seller, address buyer, uint256 sellerAgentId, uint256 verifierAgentId, uint256 cumulativeAmount, bytes32 metadataHash, bytes32 pricingSnapshotHash, bytes32 usageByServiceRoot, bool accepted) external',
-  'function recordUsageReportVerificationWithServiceUsage(bytes32 reportHash, bytes32 channelId, address seller, address buyer, uint256 sellerAgentId, uint256 verifierAgentId, uint256 cumulativeAmount, bytes32 metadataHash, bytes32 pricingSnapshotHash, bytes32 usageByServiceRoot, bool accepted, (bytes32 channelId, bytes32 serviceIdHash, uint256 inputUsdPerMillion, uint256 cachedInputUsdPerMillion, uint256 outputUsdPerMillion, uint256 serviceMode, uint256 cumulativeFreshInputTokens, uint256 cumulativeCachedInputTokens, uint256 cumulativeOutputTokens, uint256 cumulativeRequestCount, uint256 cumulativeAmountPaid)[] serviceUsageLeaves) external',
+  'function recordUsageReportVerification(bytes32 reportHash, bytes32 channelId, address seller, address buyer, uint256 sellerAgentId, uint256 verifierAgentId, uint256 cumulativeAmount, bytes32 metadataHash, bytes32 pricingSnapshotHash, bytes32 serviceUsageHash, bool accepted) external',
+  'function recordUsageReportVerificationWithServiceUsage(bytes32 reportHash, bytes32 channelId, address seller, address buyer, uint256 sellerAgentId, uint256 verifierAgentId, uint256 cumulativeAmount, bytes32 metadataHash, bytes32 pricingSnapshotHash, bytes32 serviceUsageHash, bool accepted, (bytes32 channelId, bytes32 serviceIdHash, uint256 inputUsdPerMillion, uint256 cachedInputUsdPerMillion, uint256 outputUsdPerMillion, uint256 serviceMode, uint256 cumulativeFreshInputTokens, uint256 cumulativeCachedInputTokens, uint256 cumulativeOutputTokens, uint256 cumulativeRequestCount, uint256 cumulativeAmountPaid)[] serviceUsageRows) external',
 ] as const;
 
 export class StatsClient extends BaseEvmClient {
@@ -144,7 +144,7 @@ export class StatsClient extends BaseEvmClient {
         channelId: parsed.args[6] as string,
         metadataHash: parsed.args[7] as string,
         pricingSnapshotHash: parsed.args[8] as string,
-        usageByServiceRoot: parsed.args[9] as string,
+        serviceUsageHash: parsed.args[9] as string,
         cumulativeAmount: parsed.args[10] as bigint,
         accepted: parsed.args[11] as boolean,
       });
@@ -202,7 +202,7 @@ export class StatsClient extends BaseEvmClient {
     signer: AbstractSigner,
     attestation: ChannelReportAttestationPayload,
     accepted = true,
-    serviceUsageLeaves?: readonly ChannelUsageReportServiceUsageLeafPayload[],
+    serviceUsageRows?: readonly ChannelUsageReportServiceUsageRowPayload[],
   ): Promise<string> {
     const baseArgs = [
       attestation.reportHash,
@@ -214,28 +214,28 @@ export class StatsClient extends BaseEvmClient {
       BigInt(attestation.cumulativeAmount),
       attestation.metadataHash,
       attestation.pricingSnapshotHash,
-      attestation.usageByServiceRoot,
+      attestation.serviceUsageHash,
       accepted,
     ] as const;
 
-    if (serviceUsageLeaves && serviceUsageLeaves.length > 0) {
+    if (serviceUsageRows && serviceUsageRows.length > 0) {
       return this._execWrite(
         signer,
         STATS_ABI,
         'recordUsageReportVerificationWithServiceUsage',
         ...baseArgs,
-        serviceUsageLeaves.map((leaf) => ({
-          channelId: leaf.channelId,
-          serviceIdHash: leaf.serviceIdHash,
-          inputUsdPerMillion: BigInt(leaf.inputUsdPerMillion),
-          cachedInputUsdPerMillion: BigInt(leaf.cachedInputUsdPerMillion),
-          outputUsdPerMillion: BigInt(leaf.outputUsdPerMillion),
-          serviceMode: BigInt(leaf.serviceMode),
-          cumulativeFreshInputTokens: BigInt(leaf.cumulativeFreshInputTokens),
-          cumulativeCachedInputTokens: BigInt(leaf.cumulativeCachedInputTokens),
-          cumulativeOutputTokens: BigInt(leaf.cumulativeOutputTokens),
-          cumulativeRequestCount: BigInt(leaf.cumulativeRequestCount),
-          cumulativeAmountPaid: BigInt(leaf.cumulativeAmountPaid),
+        serviceUsageRows.map((row) => ({
+          channelId: row.channelId,
+          serviceIdHash: row.serviceIdHash,
+          inputUsdPerMillion: BigInt(row.inputUsdPerMillion),
+          cachedInputUsdPerMillion: BigInt(row.cachedInputUsdPerMillion),
+          outputUsdPerMillion: BigInt(row.outputUsdPerMillion),
+          serviceMode: BigInt(row.serviceMode),
+          cumulativeFreshInputTokens: BigInt(row.cumulativeFreshInputTokens),
+          cumulativeCachedInputTokens: BigInt(row.cumulativeCachedInputTokens),
+          cumulativeOutputTokens: BigInt(row.cumulativeOutputTokens),
+          cumulativeRequestCount: BigInt(row.cumulativeRequestCount),
+          cumulativeAmountPaid: BigInt(row.cumulativeAmountPaid),
         })),
       );
     }

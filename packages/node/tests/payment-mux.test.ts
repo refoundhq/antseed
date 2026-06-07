@@ -166,7 +166,7 @@ describe('PaymentMux', () => {
         selectionBeacon: '0x' + '99'.repeat(32),
         verifierCount: 3,
         pricingSnapshotHash: '0x' + 'bb'.repeat(32),
-        serviceUsageLeaves: [],
+        serviceUsageRows: [],
         reportedAt: 1700000000,
       };
       const reportFrame: FramedMessage = {

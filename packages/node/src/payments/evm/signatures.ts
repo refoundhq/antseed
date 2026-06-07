@@ -62,7 +62,7 @@ export interface SpendingAuthMetadata {
 
 export interface SpendingAuthMetadataV2 {
   pricingSnapshotHash: string;
-  usageByServiceRoot: string;
+  serviceUsageHash: string;
   receiptRoot: string;
   cumulativeFreshInputTokens: bigint;
   cumulativeCachedInputTokens: bigint;
@@ -75,21 +75,7 @@ export type DecodedSpendingAuthMetadata =
   | ({ version: 1n } & SpendingAuthMetadata)
   | ({ version: 2n } & SpendingAuthMetadataV2);
 
-export interface ServiceCatalogLeaf {
-  sellerAgentId: Uintish;
-  sellerAddress: string;
-  serviceIdHash: string;
-  tokenizerIdHash: string;
-  inputUsdPerMillion: Uintish;
-  cachedInputUsdPerMillion: Uintish;
-  outputUsdPerMillion: Uintish;
-  serviceMode: Uintish;
-  termsHash: string;
-  validFrom: Uintish;
-  validUntil: Uintish;
-}
-
-export interface ServiceUsageLeaf {
+export interface ServiceUsageRow {
   channelId: string;
   provider: string;
   service: string;
@@ -103,21 +89,6 @@ export interface ServiceUsageLeaf {
   cumulativeOutputTokens: Uintish;
   cumulativeRequestCount: Uintish;
   cumulativeAmountPaid: Uintish;
-}
-
-export interface ReceiptLeaf {
-  channelId: string;
-  requestIndex: Uintish;
-  requestIdHash: string;
-  requestHash: string;
-  responseHash: string;
-  serviceIdHash: string;
-  catalogLeafHash: string;
-  freshInputTokens: Uintish;
-  cachedInputTokens: Uintish;
-  outputTokens: Uintish;
-  costUsdc: Uintish;
-  cumulativeAmountAfterRequest: Uintish;
 }
 
 export const METADATA_V1_VERSION = 1n;
@@ -142,7 +113,7 @@ export function encodeMetadataV2(metadata: SpendingAuthMetadataV2): string {
     [
       METADATA_V2_VERSION,
       metadata.pricingSnapshotHash,
-      metadata.usageByServiceRoot,
+      metadata.serviceUsageHash,
       metadata.receiptRoot,
       metadata.cumulativeFreshInputTokens,
       metadata.cumulativeCachedInputTokens,
@@ -171,7 +142,7 @@ export function decodeMetadata(encodedMetadata: string): DecodedSpendingAuthMeta
     const [
       ,
       pricingSnapshotHash,
-      usageByServiceRoot,
+      serviceUsageHash,
       receiptRoot,
       cumulativeFreshInputTokens,
       cumulativeCachedInputTokens,
@@ -186,7 +157,7 @@ export function decodeMetadata(encodedMetadata: string): DecodedSpendingAuthMeta
     return {
       version: METADATA_V2_VERSION,
       pricingSnapshotHash,
-      usageByServiceRoot,
+      serviceUsageHash,
       receiptRoot,
       cumulativeFreshInputTokens,
       cumulativeCachedInputTokens,
@@ -214,120 +185,41 @@ export function hashUtf8(value: string): string {
   return id(value);
 }
 
-export function hashServiceCatalogLeaf(leaf: ServiceCatalogLeaf): string {
-  const coder = AbiCoder.defaultAbiCoder();
-  return keccak256(coder.encode(
-    ['uint256', 'address', 'bytes32', 'bytes32', 'uint256', 'uint256', 'uint256', 'uint256', 'bytes32', 'uint256', 'uint256'],
-    [
-      toBigInt(leaf.sellerAgentId),
-      leaf.sellerAddress,
-      leaf.serviceIdHash,
-      leaf.tokenizerIdHash,
-      toBigInt(leaf.inputUsdPerMillion),
-      toBigInt(leaf.cachedInputUsdPerMillion),
-      toBigInt(leaf.outputUsdPerMillion),
-      toBigInt(leaf.serviceMode),
-      leaf.termsHash,
-      toBigInt(leaf.validFrom),
-      toBigInt(leaf.validUntil),
-    ],
-  ));
-}
-
-export function hashServiceUsageLeaf(leaf: ServiceUsageLeaf): string {
+export function hashServiceUsageRow(row: ServiceUsageRow): string {
   const coder = AbiCoder.defaultAbiCoder();
   return keccak256(coder.encode(
     ['bytes32', 'bytes32', 'uint256', 'uint256', 'uint256', 'uint256', 'uint256', 'uint256', 'uint256', 'uint256', 'uint256'],
     [
-      leaf.channelId,
-      leaf.serviceIdHash,
-      toBigInt(leaf.inputUsdPerMillion),
-      toBigInt(leaf.cachedInputUsdPerMillion),
-      toBigInt(leaf.outputUsdPerMillion),
-      toBigInt(leaf.serviceMode),
-      toBigInt(leaf.cumulativeFreshInputTokens),
-      toBigInt(leaf.cumulativeCachedInputTokens),
-      toBigInt(leaf.cumulativeOutputTokens),
-      toBigInt(leaf.cumulativeRequestCount),
-      toBigInt(leaf.cumulativeAmountPaid),
+      row.channelId,
+      row.serviceIdHash,
+      toBigInt(row.inputUsdPerMillion),
+      toBigInt(row.cachedInputUsdPerMillion),
+      toBigInt(row.outputUsdPerMillion),
+      toBigInt(row.serviceMode),
+      toBigInt(row.cumulativeFreshInputTokens),
+      toBigInt(row.cumulativeCachedInputTokens),
+      toBigInt(row.cumulativeOutputTokens),
+      toBigInt(row.cumulativeRequestCount),
+      toBigInt(row.cumulativeAmountPaid),
     ],
   ));
 }
 
-export function hashReceiptLeaf(leaf: ReceiptLeaf): string {
+export function computeServiceUsageHash(rows: readonly ServiceUsageRow[]): string {
+  const rowHashes = rows.map(hashServiceUsageRow);
+  if (rowHashes.length === 0) return ZERO_BYTES32;
   const coder = AbiCoder.defaultAbiCoder();
-  return keccak256(coder.encode(
-    ['bytes32', 'uint256', 'bytes32', 'bytes32', 'bytes32', 'bytes32', 'bytes32', 'uint256', 'uint256', 'uint256', 'uint256', 'uint256'],
-    [
-      leaf.channelId,
-      toBigInt(leaf.requestIndex),
-      leaf.requestIdHash,
-      leaf.requestHash,
-      leaf.responseHash,
-      leaf.serviceIdHash,
-      leaf.catalogLeafHash,
-      toBigInt(leaf.freshInputTokens),
-      toBigInt(leaf.cachedInputTokens),
-      toBigInt(leaf.outputTokens),
-      toBigInt(leaf.costUsdc),
-      toBigInt(leaf.cumulativeAmountAfterRequest),
-    ],
-  ));
+  return keccak256(coder.encode(['bytes32[]'], [[...rowHashes].sort(compareHex)]));
 }
 
-export function computeMerkleRoot(leaves: readonly string[]): string {
-  if (leaves.length === 0) return ZERO_BYTES32;
-  let level = [...leaves].sort(compareHex);
-  while (level.length > 1) {
-    const next: string[] = [];
-    for (let i = 0; i < level.length; i += 2) {
-      const left = level[i]!;
-      const right = level[i + 1] ?? left;
-      next.push(hashMerklePair(left, right));
-    }
-    level = next;
-  }
-  return level[0]!;
-}
-
-export function computeMerkleProof(leaves: readonly string[], targetLeaf: string): string[] {
-  if (leaves.length === 0) return [];
-  let level = [...leaves].sort(compareHex);
-  let index = level.findIndex((leaf) => leaf.toLowerCase() === targetLeaf.toLowerCase());
-  if (index === -1) {
-    throw new Error('Target leaf is not present in Merkle tree');
-  }
-
-  const proof: string[] = [];
-  while (level.length > 1) {
-    const siblingIndex = index % 2 === 0 ? index + 1 : index - 1;
-    proof.push(level[siblingIndex] ?? level[index]!);
-
-    const next: string[] = [];
-    for (let i = 0; i < level.length; i += 2) {
-      const left = level[i]!;
-      const right = level[i + 1] ?? left;
-      next.push(hashMerklePair(left, right));
-    }
-    index = Math.floor(index / 2);
-    level = next;
-  }
-  return proof;
-}
-
-export function verifyMerkleProof(leaf: string, proof: readonly string[], expectedRoot: string): boolean {
-  const root = proof.reduce((acc, sibling) => hashMerklePair(acc, sibling), leaf);
-  return root.toLowerCase() === expectedRoot.toLowerCase();
-}
-
-export function sumServiceUsageLeaves(leaves: readonly ServiceUsageLeaf[]): Omit<SpendingAuthMetadataV2, 'pricingSnapshotHash' | 'usageByServiceRoot' | 'receiptRoot'> {
-  return leaves.reduce(
-    (acc, leaf) => ({
-      cumulativeFreshInputTokens: acc.cumulativeFreshInputTokens + toBigInt(leaf.cumulativeFreshInputTokens),
-      cumulativeCachedInputTokens: acc.cumulativeCachedInputTokens + toBigInt(leaf.cumulativeCachedInputTokens),
-      cumulativeOutputTokens: acc.cumulativeOutputTokens + toBigInt(leaf.cumulativeOutputTokens),
-      cumulativeRequestCount: acc.cumulativeRequestCount + toBigInt(leaf.cumulativeRequestCount),
-      cumulativeAmountPaid: acc.cumulativeAmountPaid + toBigInt(leaf.cumulativeAmountPaid),
+export function sumServiceUsageRows(rows: readonly ServiceUsageRow[]): Omit<SpendingAuthMetadataV2, 'pricingSnapshotHash' | 'serviceUsageHash' | 'receiptRoot'> {
+  return rows.reduce(
+    (acc, row) => ({
+      cumulativeFreshInputTokens: acc.cumulativeFreshInputTokens + toBigInt(row.cumulativeFreshInputTokens),
+      cumulativeCachedInputTokens: acc.cumulativeCachedInputTokens + toBigInt(row.cumulativeCachedInputTokens),
+      cumulativeOutputTokens: acc.cumulativeOutputTokens + toBigInt(row.cumulativeOutputTokens),
+      cumulativeRequestCount: acc.cumulativeRequestCount + toBigInt(row.cumulativeRequestCount),
+      cumulativeAmountPaid: acc.cumulativeAmountPaid + toBigInt(row.cumulativeAmountPaid),
     }),
     {
       cumulativeFreshInputTokens: 0n,
@@ -339,10 +231,10 @@ export function sumServiceUsageLeaves(leaves: readonly ServiceUsageLeaf[]): Omit
   );
 }
 
-export function metadataV2MatchesServiceUsage(metadata: SpendingAuthMetadataV2, leaves: readonly ServiceUsageLeaf[]): boolean {
-  const root = computeMerkleRoot(leaves.map(hashServiceUsageLeaf));
-  const sums = sumServiceUsageLeaves(leaves);
-  return root.toLowerCase() === metadata.usageByServiceRoot.toLowerCase()
+export function metadataV2MatchesServiceUsage(metadata: SpendingAuthMetadataV2, rows: readonly ServiceUsageRow[]): boolean {
+  const serviceUsageHash = computeServiceUsageHash(rows);
+  const sums = sumServiceUsageRows(rows);
+  return serviceUsageHash.toLowerCase() === metadata.serviceUsageHash.toLowerCase()
     && sums.cumulativeFreshInputTokens === metadata.cumulativeFreshInputTokens
     && sums.cumulativeCachedInputTokens === metadata.cumulativeCachedInputTokens
     && sums.cumulativeOutputTokens === metadata.cumulativeOutputTokens
@@ -366,12 +258,6 @@ function compareHex(a: string, b: string): number {
   const aa = a.toLowerCase();
   const bb = b.toLowerCase();
   return aa < bb ? -1 : aa > bb ? 1 : 0;
-}
-
-function hashMerklePair(a: string, b: string): string {
-  const [left, right] = compareHex(a, b) <= 0 ? [a, b] : [b, a];
-  const coder = AbiCoder.defaultAbiCoder();
-  return keccak256(coder.encode(['bytes32', 'bytes32'], [left, right]));
 }
 
 // =========================================================================

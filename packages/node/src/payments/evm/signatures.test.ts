@@ -4,25 +4,17 @@ import {
   SERVICE_MODE_PAID,
   ZERO_BYTES32,
   computeEncodedMetadataHash,
-  computeMerkleProof,
-  computeMerkleRoot,
+  computeServiceUsageHash,
   decodeMetadata,
   encodeMetadata,
   encodeMetadataV2,
-  hashReceiptLeaf,
-  hashServiceCatalogLeaf,
-  hashServiceUsageLeaf,
   hashUtf8,
   metadataV2MatchesServiceUsage,
-  verifyMerkleProof,
-  type ServiceUsageLeaf,
+  type ServiceUsageRow,
   type SpendingAuthMetadataV2,
 } from './signatures.js';
 
 const channelId = `0x${'11'.repeat(32)}`;
-const seller = `0x${'22'.repeat(20)}`;
-const requestHash = `0x${'33'.repeat(32)}`;
-const responseHash = `0x${'44'.repeat(32)}`;
 
 describe('spending auth metadata helpers', () => {
   it('keeps V1 metadata backward-compatible', () => {
@@ -40,11 +32,11 @@ describe('spending auth metadata helpers', () => {
     });
   });
 
-  it('encodes and decodes V2 metadata with roots and split input totals', () => {
+  it('encodes and decodes V2 metadata with service usage hash and split input totals', () => {
     const metadata: SpendingAuthMetadataV2 = {
       pricingSnapshotHash: `0x${'aa'.repeat(32)}`,
-      usageByServiceRoot: `0x${'bb'.repeat(32)}`,
-      receiptRoot: `0x${'cc'.repeat(32)}`,
+      serviceUsageHash: `0x${'bb'.repeat(32)}`,
+      receiptRoot: ZERO_BYTES32,
       cumulativeFreshInputTokens: 100n,
       cumulativeCachedInputTokens: 25n,
       cumulativeOutputTokens: 50n,
@@ -57,48 +49,13 @@ describe('spending auth metadata helpers', () => {
     expect(decodeMetadata(encoded)).toEqual({ version: 2n, ...metadata });
   });
 
-  it('builds verifiable catalog, usage, and receipt roots', () => {
-    const serviceIdHash = hashUtf8('openai:gpt-4.1');
-    const tokenizerIdHash = hashUtf8('cl100k_base');
-    const termsHash = hashUtf8('standard paid terms');
-    const catalogLeafHash = hashServiceCatalogLeaf({
-      sellerAgentId: 42n,
-      sellerAddress: seller,
-      serviceIdHash,
-      tokenizerIdHash,
-      inputUsdPerMillion: 2_000_000n,
-      cachedInputUsdPerMillion: 500_000n,
-      outputUsdPerMillion: 8_000_000n,
-      serviceMode: SERVICE_MODE_PAID,
-      termsHash,
-      validFrom: 1_700_000_000n,
-      validUntil: 1_800_000_000n,
-    });
-    const freeCatalogLeafHash = hashServiceCatalogLeaf({
-      sellerAgentId: 42n,
-      sellerAddress: seller,
-      serviceIdHash: hashUtf8('local:free-demo'),
-      tokenizerIdHash,
-      inputUsdPerMillion: 0n,
-      cachedInputUsdPerMillion: 0n,
-      outputUsdPerMillion: 0n,
-      serviceMode: SERVICE_MODE_FREE,
-      termsHash: hashUtf8('free demo terms'),
-      validFrom: 1_700_000_000n,
-      validUntil: 1_800_000_000n,
-    });
-
-    const catalogRoot = computeMerkleRoot([catalogLeafHash, freeCatalogLeafHash]);
-    const proof = computeMerkleProof([catalogLeafHash, freeCatalogLeafHash], catalogLeafHash);
-    expect(verifyMerkleProof(catalogLeafHash, proof, catalogRoot)).toBe(true);
-    expect(computeMerkleRoot([])).toBe(ZERO_BYTES32);
-
-    const usageLeaves: ServiceUsageLeaf[] = [
+  it('computes an order-independent service usage hash and validates totals', () => {
+    const usageRows: ServiceUsageRow[] = [
       {
         channelId,
         provider: 'openai',
         service: 'gpt-4.1',
-        serviceIdHash,
+        serviceIdHash: hashUtf8('openai:gpt-4.1'),
         inputUsdPerMillion: 2_000_000n,
         cachedInputUsdPerMillion: 500_000n,
         outputUsdPerMillion: 8_000_000n,
@@ -126,25 +83,14 @@ describe('spending auth metadata helpers', () => {
       },
     ];
 
+    expect(computeServiceUsageHash([])).toBe(ZERO_BYTES32);
+    expect(computeServiceUsageHash(usageRows)).toBe(computeServiceUsageHash([...usageRows].reverse()));
+    expect(computeServiceUsageHash(usageRows.slice(0, 1))).not.toBe(computeServiceUsageHash(usageRows));
+
     const metadata: SpendingAuthMetadataV2 = {
-      pricingSnapshotHash: catalogRoot,
-      usageByServiceRoot: computeMerkleRoot(usageLeaves.map(hashServiceUsageLeaf)),
-      receiptRoot: computeMerkleRoot([
-        hashReceiptLeaf({
-          channelId,
-          requestIndex: 1n,
-          requestIdHash: hashUtf8('req-1'),
-          requestHash,
-          responseHash,
-          serviceIdHash,
-          catalogLeafHash,
-          freshInputTokens: 120n,
-          cachedInputTokens: 20n,
-          outputTokens: 80n,
-          costUsdc: 90_000n,
-          cumulativeAmountAfterRequest: 90_000n,
-        }),
-      ]),
+      pricingSnapshotHash: `0x${'aa'.repeat(32)}`,
+      serviceUsageHash: computeServiceUsageHash(usageRows),
+      receiptRoot: ZERO_BYTES32,
       cumulativeFreshInputTokens: 130n,
       cumulativeCachedInputTokens: 20n,
       cumulativeOutputTokens: 85n,
@@ -152,6 +98,6 @@ describe('spending auth metadata helpers', () => {
       cumulativeAmountPaid: 90_000n,
     };
 
-    expect(metadataV2MatchesServiceUsage(metadata, usageLeaves)).toBe(true);
+    expect(metadataV2MatchesServiceUsage(metadata, usageRows)).toBe(true);
   });
 });

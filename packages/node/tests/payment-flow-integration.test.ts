@@ -515,12 +515,12 @@ describe('Full Payment Flow Integration', () => {
     expect(report.verifierCount).toBe(2);
     expect(report.cumulativeAmount).toBe(costUsdc.toString());
     expect(report.metadataHash).toBe(buyerAcceptedReportAuth.metadataHash);
-    expect(report.serviceUsageLeaves).toHaveLength(1);
-    expect(report.serviceUsageLeaves[0]!.inputUsdPerMillion).toBe(String(pricing.inputUsdPerMillion));
-    expect(report.serviceUsageLeaves[0]!.cachedInputUsdPerMillion).toBe(String(pricing.cachedInputUsdPerMillion));
-    expect(report.serviceUsageLeaves[0]!.outputUsdPerMillion).toBe(String(pricing.outputUsdPerMillion));
-    expect(report.serviceUsageLeaves[0]!.cumulativeRequestCount).toBe('1');
-    expect(report.serviceUsageLeaves[0]!.cumulativeAmountPaid).toBe(costUsdc.toString());
+    expect(report.serviceUsageRows).toHaveLength(1);
+    expect(report.serviceUsageRows[0]!.inputUsdPerMillion).toBe(String(pricing.inputUsdPerMillion));
+    expect(report.serviceUsageRows[0]!.cachedInputUsdPerMillion).toBe(String(pricing.cachedInputUsdPerMillion));
+    expect(report.serviceUsageRows[0]!.outputUsdPerMillion).toBe(String(pricing.outputUsdPerMillion));
+    expect(report.serviceUsageRows[0]!.cumulativeRequestCount).toBe('1');
+    expect(report.serviceUsageRows[0]!.cumulativeAmountPaid).toBe(costUsdc.toString());
 
     const verification = verifyChannelUsageReport(report, {
       spendingAuthDomain: makeChannelsDomain(CHAIN_ID, SESSIONS_CONTRACT),
@@ -533,7 +533,7 @@ describe('Full Payment Flow Integration', () => {
       _signer: Wallet,
       _attestation: NonNullable<ReturnType<typeof createUsageReportAck>['attestation']>,
       _accepted: boolean,
-      _serviceUsageLeaves: ChannelUsageReportPayload['serviceUsageLeaves'],
+      _serviceUsageRows: ChannelUsageReportPayload['serviceUsageRows'],
     ) => '0xstatshash');
     const verifierWallets = [Wallet.createRandom(), Wallet.createRandom()];
     const acks = verifierWallets.map((wallet, index) => createUsageReportAck(report, verification, {
@@ -546,7 +546,7 @@ describe('Full Payment Flow Integration', () => {
       const ack = acks[i]!;
       expect(ack.accepted).toBe(true);
       expect(ack.attestation ? verifyChannelReportAttestation(ack.attestation) : false).toBe(true);
-      await recordUsageReportVerification(verifierWallets[i]!, ack.attestation!, ack.accepted, report.serviceUsageLeaves);
+      await recordUsageReportVerification(verifierWallets[i]!, ack.attestation!, ack.accepted, report.serviceUsageRows);
     }
 
     expect(recordUsageReportVerification).toHaveBeenCalledTimes(2);
