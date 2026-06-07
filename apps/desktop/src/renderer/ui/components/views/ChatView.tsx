@@ -13,6 +13,7 @@ import {
   GitBranchIcon,
   Mic01Icon,
   Search01Icon,
+  SecurityWarningIcon,
   Shield01Icon,
   Tick02Icon
 } from '@hugeicons/core-free-icons';
@@ -54,19 +55,16 @@ const NEAR_BOTTOM_PX = 40;
 const PERMISSION_MODES: Array<{
   value: ChatPermissionMode;
   label: string;
-  description: string;
   tone: 'safe' | 'risk';
 }> = [
   {
     value: 'manual',
     label: 'Ask first',
-    description: 'Ask before commands, file edits, writes, and dev servers.',
     tone: 'safe',
   },
   {
     value: 'full',
     label: 'Full access',
-    description: 'Run commands and make changes without asking each time.',
     tone: 'risk',
   },
 ];
@@ -967,6 +965,22 @@ export function ChatView({ active, onSelectView }: ChatViewProps) {
     scrollChatToBottom('smooth');
   }, [scrollChatToBottom]);
 
+  const activeToolApprovalRequests = useMemo(() => {
+    const activeConversationId = snap.chatActiveConversation;
+    if (!activeConversationId) return [];
+    const activeConversation = Array.isArray(snap.chatConversations)
+      ? snap.chatConversations.find((conversation) => {
+          const record = conversation as Record<string, unknown>;
+          return String(record.id ?? '') === activeConversationId;
+        }) as Record<string, unknown> | undefined
+      : undefined;
+    const activePeerId = String(activeConversation?.peerId ?? snap.chatSelectedPeerId ?? '').trim();
+    if (!activePeerId) {
+      return snap.chatToolApprovalRequests.filter((request) => request.conversationId === activeConversationId);
+    }
+    return snap.chatToolApprovalRequests.filter((request) => request.peerId === activePeerId);
+  }, [snap.chatActiveConversation, snap.chatConversations, snap.chatSelectedPeerId, snap.chatToolApprovalRequests]);
+  const activeToolApprovalRequest = activeToolApprovalRequests[0] ?? null;
   const showWelcome =
     snap.chatConversationsLoaded &&
     !snap.chatActiveConversation &&
@@ -1305,11 +1319,11 @@ export function ChatView({ active, onSelectView }: ChatViewProps) {
               onAddCredits={() => actions.openPaymentsPortal?.('deposit')}
             />
             <ToolApprovalCard
-              request={snap.chatToolApprovalRequest}
-              pendingCount={snap.chatToolApprovalRequests.length}
-              onAllowOnce={() => actions.decideToolApproval('allow_once')}
-              onAlwaysAllow={() => actions.decideToolApproval('always_allow_peer')}
-              onDeny={() => actions.decideToolApproval('deny')}
+              request={activeToolApprovalRequest}
+              pendingCount={activeToolApprovalRequests.length}
+              onAllowOnce={() => activeToolApprovalRequest && actions.decideToolApproval('allow_once', activeToolApprovalRequest.id)}
+              onAlwaysAllow={() => activeToolApprovalRequest && actions.decideToolApproval('always_allow_peer', activeToolApprovalRequest.id)}
+              onDeny={() => activeToolApprovalRequest && actions.decideToolApproval('deny', activeToolApprovalRequest.id)}
             />
 
             {attachedFiles.length > 0 && (
@@ -1433,7 +1447,11 @@ export function ChatView({ active, onSelectView }: ChatViewProps) {
                   aria-haspopup="menu"
                   aria-expanded={permissionMenuOpen}
                 >
-                  <HugeiconsIcon icon={Shield01Icon} size={14} strokeWidth={1.7} />
+                  <HugeiconsIcon
+                    icon={snap.chatPermissionMode === 'full' ? SecurityWarningIcon : Shield01Icon}
+                    size={14}
+                    strokeWidth={1.7}
+                  />
                   <span>{selectedPermissionMode.label}</span>
                   <span className={styles.permissionModeChevron} aria-hidden="true" />
                 </button>
@@ -1453,13 +1471,13 @@ export function ChatView({ active, onSelectView }: ChatViewProps) {
                             setPermissionMenuOpen(false);
                           }}
                         >
-                          <span className={`${styles.permissionModeOptionIcon} ${mode.tone === 'risk' ? styles.permissionModeOptionIconRisk : styles.permissionModeOptionIconSafe}`}>
-                            <HugeiconsIcon icon={Shield01Icon} size={14} strokeWidth={1.7} />
-                          </span>
-                          <span className={styles.permissionModeOptionText}>
-                            <span className={styles.permissionModeOptionLabel}>{mode.label}</span>
-                            <span className={styles.permissionModeOptionDescription}>{mode.description}</span>
-                          </span>
+                          <HugeiconsIcon
+                            icon={mode.value === 'full' ? SecurityWarningIcon : Shield01Icon}
+                            size={14}
+                            strokeWidth={1.7}
+                            className={mode.value === 'full' ? styles.permissionModeOptionIconRisk : styles.permissionModeOptionIconSafe}
+                          />
+                          <span className={styles.permissionModeOptionLabel}>{mode.label}</span>
                           {selected ? <span className={styles.permissionModeOptionCheck}>✓</span> : null}
                         </button>
                       );

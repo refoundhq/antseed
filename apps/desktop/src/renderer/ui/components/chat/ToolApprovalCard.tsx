@@ -9,37 +9,67 @@ type ToolApprovalCardProps = {
   onDeny: () => void;
 };
 
-function getWorkspaceLabel(workspacePath: string): string {
-  const trimmed = workspacePath.trim().replace(/[\\/]+$/, '');
-  if (!trimmed) return 'this workspace';
-  return trimmed.split(/[\\/]/).filter(Boolean).pop() || trimmed;
+function getPeerLabel(request: ToolApprovalRequest): string {
+  return request.peerName || (request.peerId ? `${request.peerId.slice(0, 8)}…` : 'this peer');
 }
 
-function getPeerLabel(request: ToolApprovalRequest): string {
-  return request.peerName || (request.peerId ? `${request.peerId.slice(0, 8)}…` : 'No pinned peer');
+function getToolLabel(toolName: string): string {
+  return toolName.replace(/_/g, ' ');
+}
+
+function shortenSubject(subject: string, workspacePath: string): string {
+  const trimmed = subject.trim();
+  const workspace = workspacePath.trim().replace(/[\\/]+$/, '');
+  if (!trimmed || !workspace) return trimmed;
+
+  return trimmed
+    .replaceAll(workspace, '.')
+    .replaceAll(workspace.replace(/ /g, '\\ '), '.');
 }
 
 export function ToolApprovalCard({ request, pendingCount = 0, onAllowOnce, onAlwaysAllow, onDeny }: ToolApprovalCardProps) {
   if (!request) return null;
+
   const queuedCount = Math.max(0, pendingCount - 1);
+  const peerLabel = getPeerLabel(request);
+  const toolLabel = getToolLabel(request.toolName);
+  const subject = request.subject ? shortenSubject(request.subject, request.workspacePath) : '';
+  const question = request.title;
+  const permissionLabel = request.permissionLabel || `${toolLabel} requests`;
+  const alwaysAllowTitle = `Future ${permissionLabel} from ${peerLabel} will run without asking.`;
 
   return (
-    <div className={styles.approval} role="group" aria-label={request.title}>
+    <div className={styles.approval} role="group" aria-label={question}>
       <div className={styles.header}>
-        <div>
-          <div className={styles.title}>{request.title}</div>
-          <div className={styles.description}>{request.description}</div>
+        <div className={styles.headerText}>
+          <span className={styles.kicker}>Tool approval · {peerLabel}</span>
+          <span className={styles.title}>{question}</span>
         </div>
-        {queuedCount > 0 ? <div className={styles.queueBadge}>{queuedCount} more pending</div> : null}
+        {queuedCount > 0 ? <span className={styles.queueBadge}>{queuedCount} queued</span> : null}
       </div>
-      {request.subject ? <div className={styles.subject}>{request.subject}</div> : null}
-      <div className={styles.meta}>Tool: {request.toolName} · Peer: {getPeerLabel(request)} · Workspace: {getWorkspaceLabel(request.workspacePath)}</div>
+
+      <div className={styles.requestLine}>
+        <span className={styles.tool}>{toolLabel}</span>
+        {subject ? <code className={styles.subject} title={request.subject}>{subject}</code> : null}
+      </div>
+
+      {request.canAlwaysAllow ? (
+        <div className={styles.scopeNote}>Always allow means future <strong>{permissionLabel}</strong> from <strong>{peerLabel}</strong> will not ask again.</div>
+      ) : null}
+
       <div className={styles.actions}>
-        <button type="button" className={styles.primary} onClick={onAllowOnce}>Allow once</button>
-        {request.canAlwaysAllow ? (
-          <button type="button" className={styles.secondary} onClick={onAlwaysAllow}>{request.alwaysAllowLabel}</button>
-        ) : null}
         <button type="button" className={styles.danger} onClick={onDeny}>Deny</button>
+        {request.canAlwaysAllow ? (
+          <button
+            type="button"
+            className={styles.secondary}
+            onClick={onAlwaysAllow}
+            title={alwaysAllowTitle}
+          >
+            {request.alwaysAllowLabel}
+          </button>
+        ) : null}
+        <button type="button" className={styles.primary} onClick={onAllowOnce}>Allow once</button>
       </div>
     </div>
   );
