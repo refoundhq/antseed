@@ -1,4 +1,4 @@
-import { AbiCoder, keccak256, type TypedDataDomain, verifyTypedData, type Wallet } from 'ethers';
+import { AbiCoder, isAddress, keccak256, type TypedDataDomain, verifyTypedData, type Wallet } from 'ethers';
 import type {
   ChannelReportAttestationPayload,
   ChannelUsageReportCatalogLeafPayload,
@@ -21,6 +21,7 @@ import {
   SERVICE_MODE_PAID,
   SPENDING_AUTH_TYPES,
   verifyMerkleProof,
+  ZERO_BYTES32,
   type ReceiptLeaf,
   type ServiceCatalogLeaf,
   type ServiceUsageLeaf,
@@ -213,11 +214,37 @@ export function verifyChannelUsageReport(
   options: UsageReportVerifierOptions = {},
 ): UsageReportVerificationResult {
   const issues: UsageReportVerificationIssue[] = [];
-  const reportHash = computeChannelUsageReportHash(report);
   const addIssue = (code: string, message: string) => issues.push({ code, message });
+
+  validateReportFields(report, addIssue);
+  if (issues.length > 0) {
+    return {
+      ok: false,
+      reportHash: ZERO_BYTES32,
+      metadata: null,
+      issues,
+    };
+  }
+
+  let reportHash = ZERO_BYTES32;
+  try {
+    reportHash = computeChannelUsageReportHash(report);
+  } catch (err) {
+    addIssue('invalid-report-field', err instanceof Error ? err.message : String(err));
+    return {
+      ok: false,
+      reportHash,
+      metadata: null,
+      issues,
+    };
+  }
 
   if (computeEncodedMetadataHash(report.metadata).toLowerCase() !== report.metadataHash.toLowerCase()) {
     addIssue('metadata-hash-mismatch', 'metadataHash does not match keccak256(metadata)');
+  }
+
+  if (!verifySellerCatalogSignature(report)) {
+    addIssue('invalid-seller-catalog-signature', 'sellerCatalogSig does not recover the report seller');
   }
 
   let metadata: SpendingAuthMetadataV2 | null = null;
@@ -363,6 +390,28 @@ export function encodeAttestationForSigning(attestation: Omit<ChannelReportAttes
   });
 }
 
+export function encodeSellerCatalogForSigning(
+  catalog: Pick<ChannelUsageReportPayload, 'seller' | 'sellerAgentId' | 'catalogRoot'>,
+): string {
+  return JSON.stringify({
+    type: 'AntseedSellerCatalog',
+    version: 1,
+    seller: normalizeAddress(catalog.seller),
+    sellerAgentId: BigInt(catalog.sellerAgentId).toString(),
+    catalogRoot: catalog.catalogRoot.toLowerCase(),
+  });
+}
+
+export function verifySellerCatalogSignature(
+  report: Pick<ChannelUsageReportPayload, 'seller' | 'sellerAgentId' | 'catalogRoot' | 'sellerCatalogSig'>,
+): boolean {
+  return verifyUtf8(
+    normalizeAddress(report.seller),
+    encodeSellerCatalogForSigning(report),
+    stripHexPrefix(report.sellerCatalogSig),
+  );
+}
+
 function verifyUsageLeaves(
   report: ChannelUsageReportPayload,
   usageLeaves: ServiceUsageLeaf[],
@@ -483,18 +532,22 @@ function verifyPaidAuthorization(
   } else if (!options.spendingAuthDomain) {
     addIssue('missing-spending-auth-domain', 'paid report verification requires an AntseedChannels EIP-712 domain');
   } else {
-    const recovered = verifyTypedData(
-      options.spendingAuthDomain,
-      SPENDING_AUTH_TYPES,
-      {
-        channelId: report.channelId,
-        cumulativeAmount,
-        metadataHash: report.metadataHash,
-      },
-      report.buyerSpendingAuthSig,
-    );
-    if (recovered.toLowerCase() !== report.buyer.toLowerCase()) {
-      addIssue('buyer-spending-auth-mismatch', 'buyerSpendingAuthSig does not recover the report buyer');
+    try {
+      const recovered = verifyTypedData(
+        options.spendingAuthDomain,
+        SPENDING_AUTH_TYPES,
+        {
+          channelId: report.channelId,
+          cumulativeAmount,
+          metadataHash: report.metadataHash,
+        },
+        report.buyerSpendingAuthSig,
+      );
+      if (recovered.toLowerCase() !== report.buyer.toLowerCase()) {
+        addIssue('buyer-spending-auth-mismatch', 'buyerSpendingAuthSig does not recover the report buyer');
+      }
+    } catch (err) {
+      addIssue('invalid-buyer-spending-auth', err instanceof Error ? err.message : String(err));
     }
   }
 
@@ -548,6 +601,112 @@ function fromReceiptPayload(payload: ChannelUsageReportReceiptLeafPayload): Rece
     costUsdc: payload.costUsdc,
     cumulativeAmountAfterRequest: payload.cumulativeAmountAfterRequest,
   };
+}
+
+function validateReportFields(
+  report: ChannelUsageReportPayload,
+  addIssue: (code: string, message: string) => void,
+): void {
+  validateBytes32('channelId', report.channelId, addIssue);
+  validateAddress('buyer', report.buyer, addIssue);
+  validateAddress('seller', report.seller, addIssue);
+  validateUintString('sellerAgentId', report.sellerAgentId, addIssue);
+  validateUintString('cumulativeAmount', report.cumulativeAmount, addIssue);
+  validateHexData('metadata', report.metadata, addIssue);
+  validateBytes32('metadataHash', report.metadataHash, addIssue);
+  validateBytes32('selectionBeacon', report.selectionBeacon, addIssue);
+  validateUintNumber('verifierCount', report.verifierCount, addIssue);
+  validateBytes32('catalogRoot', report.catalogRoot, addIssue);
+  validateSignature('sellerCatalogSig', report.sellerCatalogSig, addIssue);
+  if (report.buyerSpendingAuthSig !== undefined) {
+    validateSignature('buyerSpendingAuthSig', report.buyerSpendingAuthSig, addIssue);
+  }
+  validateUintNumber('reportedAt', report.reportedAt, addIssue);
+
+  report.serviceCatalogLeaves.forEach((leaf, index) => {
+    const prefix = `serviceCatalogLeaves[${index}]`;
+    validateUintString(`${prefix}.sellerAgentId`, leaf.sellerAgentId, addIssue);
+    validateAddress(`${prefix}.sellerAddress`, leaf.sellerAddress, addIssue);
+    validateBytes32(`${prefix}.serviceIdHash`, leaf.serviceIdHash, addIssue);
+    validateBytes32(`${prefix}.tokenizerIdHash`, leaf.tokenizerIdHash, addIssue);
+    validateUintString(`${prefix}.inputUsdPerMillion`, leaf.inputUsdPerMillion, addIssue);
+    validateUintString(`${prefix}.cachedInputUsdPerMillion`, leaf.cachedInputUsdPerMillion, addIssue);
+    validateUintString(`${prefix}.outputUsdPerMillion`, leaf.outputUsdPerMillion, addIssue);
+    validateUintString(`${prefix}.serviceMode`, leaf.serviceMode, addIssue);
+    validateBytes32(`${prefix}.termsHash`, leaf.termsHash, addIssue);
+    validateUintString(`${prefix}.validFrom`, leaf.validFrom, addIssue);
+    validateUintString(`${prefix}.validUntil`, leaf.validUntil, addIssue);
+  });
+
+  report.serviceUsageLeaves.forEach((leaf, index) => {
+    const prefix = `serviceUsageLeaves[${index}]`;
+    validateBytes32(`${prefix}.channelId`, leaf.channelId, addIssue);
+    validateBytes32(`${prefix}.serviceIdHash`, leaf.serviceIdHash, addIssue);
+    validateBytes32(`${prefix}.catalogLeafHash`, leaf.catalogLeafHash, addIssue);
+    validateUintString(`${prefix}.serviceMode`, leaf.serviceMode, addIssue);
+    validateUintString(`${prefix}.cumulativeFreshInputTokens`, leaf.cumulativeFreshInputTokens, addIssue);
+    validateUintString(`${prefix}.cumulativeCachedInputTokens`, leaf.cumulativeCachedInputTokens, addIssue);
+    validateUintString(`${prefix}.cumulativeOutputTokens`, leaf.cumulativeOutputTokens, addIssue);
+    validateUintString(`${prefix}.cumulativeRequestCount`, leaf.cumulativeRequestCount, addIssue);
+    validateUintString(`${prefix}.cumulativeAmountPaid`, leaf.cumulativeAmountPaid, addIssue);
+  });
+
+  report.receiptLeavesOrProofs.forEach((leaf, index) => {
+    const prefix = `receiptLeavesOrProofs[${index}]`;
+    validateBytes32(`${prefix}.channelId`, leaf.channelId, addIssue);
+    validateUintString(`${prefix}.requestIndex`, leaf.requestIndex, addIssue);
+    validateBytes32(`${prefix}.requestIdHash`, leaf.requestIdHash, addIssue);
+    validateBytes32(`${prefix}.requestHash`, leaf.requestHash, addIssue);
+    validateBytes32(`${prefix}.responseHash`, leaf.responseHash, addIssue);
+    validateBytes32(`${prefix}.serviceIdHash`, leaf.serviceIdHash, addIssue);
+    validateBytes32(`${prefix}.catalogLeafHash`, leaf.catalogLeafHash, addIssue);
+    validateUintString(`${prefix}.freshInputTokens`, leaf.freshInputTokens, addIssue);
+    validateUintString(`${prefix}.cachedInputTokens`, leaf.cachedInputTokens, addIssue);
+    validateUintString(`${prefix}.outputTokens`, leaf.outputTokens, addIssue);
+    validateUintString(`${prefix}.costUsdc`, leaf.costUsdc, addIssue);
+    validateUintString(`${prefix}.cumulativeAmountAfterRequest`, leaf.cumulativeAmountAfterRequest, addIssue);
+  });
+
+  for (const [leafHash, proof] of Object.entries(report.catalogMerkleProofs)) {
+    validateBytes32(`catalogMerkleProofs key ${leafHash}`, leafHash, addIssue);
+    proof.forEach((entry, index) => validateBytes32(`catalogMerkleProofs[${leafHash}][${index}]`, entry, addIssue));
+  }
+}
+
+function validateAddress(field: string, value: string, addIssue: (code: string, message: string) => void): void {
+  if (!isAddress(value)) {
+    addIssue('invalid-report-field', `${field} must be an EVM address`);
+  }
+}
+
+function validateBytes32(field: string, value: string, addIssue: (code: string, message: string) => void): void {
+  if (!/^0x[0-9a-fA-F]{64}$/.test(value)) {
+    addIssue('invalid-report-field', `${field} must be a bytes32 hex string`);
+  }
+}
+
+function validateHexData(field: string, value: string, addIssue: (code: string, message: string) => void): void {
+  if (!/^0x(?:[0-9a-fA-F]{2})*$/.test(value)) {
+    addIssue('invalid-report-field', `${field} must be even-length hex data`);
+  }
+}
+
+function validateUintString(field: string, value: string, addIssue: (code: string, message: string) => void): void {
+  if (!/^(0|[1-9][0-9]*)$/.test(value)) {
+    addIssue('invalid-report-field', `${field} must be a base-10 uint string`);
+  }
+}
+
+function validateUintNumber(field: string, value: number, addIssue: (code: string, message: string) => void): void {
+  if (!Number.isSafeInteger(value) || value < 0) {
+    addIssue('invalid-report-field', `${field} must be a non-negative safe integer`);
+  }
+}
+
+function validateSignature(field: string, value: string, addIssue: (code: string, message: string) => void): void {
+  if (!/^(0x)?[0-9a-fA-F]{130}$/.test(value)) {
+    addIssue('invalid-report-field', `${field} must be a 65-byte hex signature`);
+  }
 }
 
 function toBigInt(value: bigint | number | string): bigint {

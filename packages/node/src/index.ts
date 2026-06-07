@@ -99,6 +99,7 @@ export {
   createChannelReportAttestation,
   createUsageReportAck,
   encodeAttestationForSigning,
+  encodeSellerCatalogForSigning,
   computeChannelUsageReportHash,
   computeUsageReportVerifierSelectionSeed,
   getUsageReportVerifierAssignment,
@@ -106,6 +107,7 @@ export {
   shouldVerifyUsageReport,
   verifyChannelUsageReport,
   verifyChannelReportAttestation,
+  verifySellerCatalogSignature,
 } from './payments/usage-report-verifier.js';
 export type {
   SelectedUsageReportVerifier,
