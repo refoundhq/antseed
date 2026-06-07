@@ -1,13 +1,13 @@
 import { createPortal } from 'react-dom';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { HugeiconsIcon } from '@hugeicons/react';
-import { Copy01Icon, Tick02Icon, BrowserIcon } from '@hugeicons/core-free-icons';
-import * as Tooltip from '@radix-ui/react-tooltip';
+import { BrowserIcon } from '@hugeicons/core-free-icons';
 import type { ReactNode } from 'react';
 import { MarkdownContent } from './chat-utils.js';
 import { findSensitiveChatArtifacts } from './chat-safety';
 import styles from './ChatBubble.module.scss';
 import { AttachmentViewer, type ViewerAttachment } from './AttachmentViewer';
+import { ChatCopyButton } from './ChatCopyButton';
 import type { ChatMessage, ContentBlock } from './chat-shared';
 import {
   buildChatMetaParts,
@@ -834,58 +834,25 @@ function extractPlainText(content: unknown): string {
 }
 
 function CopyResponseButton({ content }: { content: unknown }) {
-  const [copied, setCopied] = useState(false);
-  const timerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
-
-  useEffect(() => {
-    return () => {
-      if (timerRef.current !== null) window.clearTimeout(timerRef.current);
-    };
+  const getText = useCallback(() => extractPlainText(content), [content]);
+  const confirmCopy = useCallback((text: string) => {
+    const artifacts = findSensitiveChatArtifacts(text);
+    if (artifacts.length === 0) return true;
+    return window.confirm(
+      'This response contains hidden addresses or gated links. AntSeed will never ask you to send funds, deposit, top up, connect a wallet, or approve transactions from chat. Copy the original response anyway?',
+    );
   }, []);
 
-  const handleCopy = useCallback(() => {
-    const text = extractPlainText(content);
-    if (!text) return;
-    const artifacts = findSensitiveChatArtifacts(text);
-    if (artifacts.length > 0) {
-      const shouldCopy = window.confirm(
-        'This response contains hidden addresses or gated links. AntSeed will never ask you to send funds, deposit, top up, connect a wallet, or approve transactions from chat. Copy the original response anyway?',
-      );
-      if (!shouldCopy) return;
-    }
-    navigator.clipboard.writeText(text).then(() => {
-      setCopied(true);
-      if (timerRef.current !== null) window.clearTimeout(timerRef.current);
-      timerRef.current = window.setTimeout(() => setCopied(false), 2000);
-    }).catch(() => {/* clipboard denied — silently ignore */});
-  }, [content]);
-
   return (
-    <Tooltip.Provider delayDuration={300}>
-      <Tooltip.Root>
-        <Tooltip.Trigger asChild>
-          <button
-            type="button"
-            className={`${styles.copyResponseBtn}${copied ? ` ${styles.copyResponseBtnCopied}` : ''}`}
-            onClick={handleCopy}
-            aria-label={copied ? 'Copied!' : 'Copy response'}
-          >
-            <HugeiconsIcon
-              icon={copied ? Tick02Icon : Copy01Icon}
-              size={16}
-              color="currentColor"
-              strokeWidth={2}
-            />
-          </button>
-        </Tooltip.Trigger>
-        <Tooltip.Portal>
-          <Tooltip.Content className={styles.tooltipContent} sideOffset={5}>
-            {copied ? 'Copied!' : 'Copy'}
-            <Tooltip.Arrow className={styles.tooltipArrow} />
-          </Tooltip.Content>
-        </Tooltip.Portal>
-      </Tooltip.Root>
-    </Tooltip.Provider>
+    <ChatCopyButton
+      getText={getText}
+      onBeforeCopy={confirmCopy}
+      className={styles.copyResponseBtn}
+      copiedClassName={styles.copyResponseBtnCopied}
+      iconSize={16}
+      timeoutMs={2000}
+      ariaLabel="Copy response"
+    />
   );
 }
 

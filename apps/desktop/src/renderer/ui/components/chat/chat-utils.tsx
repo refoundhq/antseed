@@ -10,6 +10,7 @@ import {
   segmentSensitiveChatText,
 } from './chat-safety';
 import type { SensitiveChatArtifact } from './chat-safety';
+import { ChatCopyButton } from './ChatCopyButton';
 
 type MarkdownContentProps = {
   text: string;
@@ -262,12 +263,17 @@ function renderInlineToken(token: MarkdownToken, key: string, highlightQuery?: s
       return <strong key={key}>{renderInlineTokens(token.tokens, key, highlightQuery, activeHighlight)}</strong>;
     case 'em':
       return <em key={key}>{renderInlineTokens(token.tokens, key, highlightQuery, activeHighlight)}</em>;
-    case 'codespan':
+    case 'codespan': {
+      const codeText = normalizeText(token.text);
       return (
-        <code key={key} className="chat-inline-code">
-          {splitSafeHighlightedText(normalizeText(token.text), highlightQuery, key, activeHighlight)}
-        </code>
+        <span key={key} className="chat-inline-code-wrap">
+          <code className="chat-inline-code">
+            {splitSafeHighlightedText(codeText, highlightQuery, key, activeHighlight)}
+          </code>
+          <CopyButton text={codeText} className="chat-inline-code-copy-btn" size={12} stopClickPropagation />
+        </span>
       );
+    }
     case 'br':
       return <br key={key} />;
     case 'del':
@@ -336,25 +342,32 @@ function renderListItemContent(token: MarkdownToken, key: string, highlightQuery
   return splitSafeHighlightedText(normalizeText(token.text ?? token.raw), highlightQuery, key, activeHighlight);
 }
 
-function CodeBlock({ code, lang, highlightQuery, activeHighlight }: { code: string; lang?: string; highlightQuery?: string; activeHighlight?: boolean }) {
-  const [copied, setCopied] = useState(false);
-  const langLabel = normalizeText(lang).trim() || 'code';
+function CopyButton({ text, className, size = 14, stopClickPropagation = false }: {
+  text: string;
+  className: string;
+  size?: number;
+  stopClickPropagation?: boolean;
+}) {
+  return (
+    <ChatCopyButton
+      text={text}
+      className={className}
+      copiedClassName={`${className}-copied`}
+      iconSize={size}
+      stopClickPropagation={stopClickPropagation}
+      onBeforeCopy={confirmCopyIfSensitive}
+    />
+  );
+}
 
-  const handleCopy = (): void => {
-    if (!confirmCopyIfSensitive(code)) return;
-    void navigator.clipboard.writeText(code).then(() => {
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1500);
-    });
-  };
+function CodeBlock({ code, lang, highlightQuery, activeHighlight }: { code: string; lang?: string; highlightQuery?: string; activeHighlight?: boolean }) {
+  const langLabel = normalizeText(lang).trim() || 'code';
 
   return (
     <div className="chat-code-container">
       <div className="chat-code-header">
         <span className="code-lang">{langLabel}</span>
-        <button className="chat-code-copy-btn" type="button" onClick={handleCopy}>
-          {copied ? 'Copied!' : 'Copy'}
-        </button>
+        <CopyButton text={code} className="chat-code-copy-btn" />
       </div>
       <pre>
         <code>{splitSafeHighlightedText(code, highlightQuery, 'code', activeHighlight)}</code>
@@ -386,8 +399,17 @@ function renderBlockToken(token: MarkdownToken, key: string, highlightQuery?: st
     }
     case 'code':
       return <CodeBlock key={key} code={normalizeText(token.text)} lang={token.lang} highlightQuery={highlightQuery} activeHighlight={activeHighlight} />;
-    case 'blockquote':
-      return <blockquote key={key}>{renderBlockTokens(token.tokens ?? [], key, highlightQuery, activeHighlight)}</blockquote>;
+    case 'blockquote': {
+      const bqText = flattenPlainText(token.tokens);
+      return (
+        <div key={key} className="chat-blockquote-container">
+          <div className="chat-blockquote-header">
+            <CopyButton text={bqText} className="chat-blockquote-copy-btn" />
+          </div>
+          <blockquote>{renderBlockTokens(token.tokens ?? [], key, highlightQuery, activeHighlight)}</blockquote>
+        </div>
+      );
+    }
     case 'hr':
       return <hr key={key} />;
     case 'list': {
