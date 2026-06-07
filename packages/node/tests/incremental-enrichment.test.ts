@@ -22,6 +22,7 @@ describe('AntseedNode incremental discovery enrichment', () => {
       getAgentId: vi.fn().mockResolvedValue(123),
       getStake: vi.fn().mockResolvedValue(10_000_000n),
       getStakedAt: vi.fn().mockResolvedValue(nowSec - 86_400),
+      isStakedAboveMin: vi.fn().mockResolvedValue(true),
     };
     (node as any)._channelsClient = {
       getAgentStats: vi.fn().mockResolvedValue({
