@@ -4,8 +4,8 @@ import { StatsClient } from './stats-client.js';
 
 const STATS_ABI = [
   'event MetadataRecorded(uint256 indexed agentId, address indexed buyer, bytes32 indexed channelId, bytes32 metadataHash, uint256 inputTokens, uint256 outputTokens, uint256 requestCount)',
-  'event UsageReportVerificationRecorded(bytes32 indexed reportHash, uint256 indexed sellerAgentId, uint256 indexed verifierAgentId, address seller, address buyer, address verifier, bytes32 channelId, bytes32 metadataHash, bytes32 catalogRoot, bytes32 usageByServiceRoot, uint256 cumulativeAmount, bool accepted)',
-  'event UsageReportServiceUsageRecorded(bytes32 indexed reportHash, uint256 indexed sellerAgentId, bytes32 indexed serviceIdHash, bytes32 channelId, bytes32 catalogLeafHash, uint256 serviceMode, uint256 cumulativeFreshInputTokens, uint256 cumulativeCachedInputTokens, uint256 cumulativeOutputTokens, uint256 cumulativeRequestCount, uint256 cumulativeAmountPaid)',
+  'event UsageReportVerificationRecorded(bytes32 indexed reportHash, uint256 indexed sellerAgentId, uint256 indexed verifierAgentId, address seller, address buyer, address verifier, bytes32 channelId, bytes32 metadataHash, bytes32 pricingSnapshotHash, bytes32 usageByServiceRoot, uint256 cumulativeAmount, bool accepted)',
+  'event UsageReportServiceUsageRecorded(bytes32 indexed reportHash, uint256 indexed sellerAgentId, bytes32 indexed serviceIdHash, bytes32 channelId, uint256 inputUsdPerMillion, uint256 cachedInputUsdPerMillion, uint256 outputUsdPerMillion, uint256 serviceMode, uint256 cumulativeFreshInputTokens, uint256 cumulativeCachedInputTokens, uint256 cumulativeOutputTokens, uint256 cumulativeRequestCount, uint256 cumulativeAmountPaid)',
 ] as const;
 
 const CONTRACT_ADDRESS = '0x0000000000000000000000000000000000000001';
@@ -55,7 +55,7 @@ function buildVerificationLog(params: {
   verifier: string;
   channelId: string;
   metadataHash: string;
-  catalogRoot: string;
+  pricingSnapshotHash: string;
   usageByServiceRoot: string;
   cumulativeAmount: bigint;
   accepted: boolean;
@@ -73,7 +73,7 @@ function buildVerificationLog(params: {
     params.verifier,
     params.channelId,
     params.metadataHash,
-    params.catalogRoot,
+    params.pricingSnapshotHash,
     params.usageByServiceRoot,
     params.cumulativeAmount,
     params.accepted,
@@ -93,7 +93,9 @@ function buildServiceUsageLog(params: {
   sellerAgentId: bigint;
   serviceIdHash: string;
   channelId: string;
-  catalogLeafHash: string;
+  inputUsdPerMillion: bigint;
+  cachedInputUsdPerMillion: bigint;
+  outputUsdPerMillion: bigint;
   serviceMode: bigint;
   cumulativeFreshInputTokens: bigint;
   cumulativeCachedInputTokens: bigint;
@@ -110,7 +112,9 @@ function buildServiceUsageLog(params: {
     params.sellerAgentId,
     params.serviceIdHash,
     params.channelId,
-    params.catalogLeafHash,
+    params.inputUsdPerMillion,
+    params.cachedInputUsdPerMillion,
+    params.outputUsdPerMillion,
     params.serviceMode,
     params.cumulativeFreshInputTokens,
     params.cumulativeCachedInputTokens,
@@ -244,7 +248,7 @@ describe('StatsClient', () => {
     const verifier = ethers.getAddress('0x0000000000000000000000000000000000000033');
     const channelId = '0x' + 'ab'.repeat(32);
     const metadataHash = '0x' + 'cd'.repeat(32);
-    const catalogRoot = '0x' + 'ef'.repeat(32);
+    const pricingSnapshotHash = '0x' + 'ef'.repeat(32);
     const usageByServiceRoot = '0x' + '01'.repeat(32);
     const transactionHash = '0x' + 'ff'.repeat(32);
 
@@ -258,7 +262,7 @@ describe('StatsClient', () => {
       verifier,
       channelId,
       metadataHash,
-      catalogRoot,
+      pricingSnapshotHash,
       usageByServiceRoot,
       cumulativeAmount: 50_000_000n,
       accepted: true,
@@ -282,7 +286,7 @@ describe('StatsClient', () => {
       verifier: verifier.toLowerCase(),
       channelId,
       metadataHash,
-      catalogRoot,
+      pricingSnapshotHash,
       usageByServiceRoot,
       cumulativeAmount: 50_000_000n,
       accepted: true,
@@ -293,7 +297,6 @@ describe('StatsClient', () => {
     const reportHash = '0x' + '12'.repeat(32);
     const serviceIdHash = '0x' + '34'.repeat(32);
     const channelId = '0x' + 'ab'.repeat(32);
-    const catalogLeafHash = '0x' + 'cd'.repeat(32);
     const transactionHash = '0x' + 'ff'.repeat(32);
 
     const client = makeClient();
@@ -302,7 +305,9 @@ describe('StatsClient', () => {
       sellerAgentId: 42n,
       serviceIdHash,
       channelId,
-      catalogLeafHash,
+      inputUsdPerMillion: 3n,
+      cachedInputUsdPerMillion: 1n,
+      outputUsdPerMillion: 15n,
       serviceMode: 1n,
       cumulativeFreshInputTokens: 100n,
       cumulativeCachedInputTokens: 20n,
@@ -325,7 +330,9 @@ describe('StatsClient', () => {
       sellerAgentId: 42n,
       serviceIdHash,
       channelId,
-      catalogLeafHash,
+      inputUsdPerMillion: 3n,
+      cachedInputUsdPerMillion: 1n,
+      outputUsdPerMillion: 15n,
       serviceMode: 1n,
       cumulativeFreshInputTokens: 100n,
       cumulativeCachedInputTokens: 20n,

@@ -1409,8 +1409,10 @@ export class AntseedNode extends EventEmitter {
     if (!verifier) return;
 
     const { channels: channelsAddress } = await this._usageReportChannelsContext();
+    const sellerMetadata = await this._usageReportSellerMetadata(reporterPeerId);
     const verification = verifyChannelUsageReport(report, {
       spendingAuthDomain: makeChannelsDomain(this._config.payments?.chainId ?? 8453, channelsAddress),
+      sellerMetadata,
     });
     const candidates = [
       ...this._usageReportVerifierCandidates(),
@@ -1475,6 +1477,17 @@ export class AntseedNode extends EventEmitter {
       throw new Error("Channels client is not configured");
     }
     return { channels: await this._channelsClient.readAddress };
+  }
+
+  private async _usageReportSellerMetadata(peerId: PeerId): Promise<PeerInfo["metadata"] | null> {
+    const known = this._knownPeers.get(peerId)?.metadata;
+    if (known) return known;
+    try {
+      const peer = await this.findPeer(peerId);
+      return peer?.metadata ?? null;
+    } catch {
+      return null;
+    }
   }
 
   private _usageReportVerifierCandidates(): UsageReportVerifierCandidate[] {

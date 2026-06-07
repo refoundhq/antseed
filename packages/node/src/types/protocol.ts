@@ -147,7 +147,7 @@ export interface NeedAuthPayload {
 // ─── Peer-Verifiable Usage Reports (0x60-0x61) ─────────────────
 
 export interface NeedAuthUsageReportMetadataPayload {
-  catalogRoot: string;
+  pricingSnapshotHash: string;
   usageByServiceRoot: string;
   receiptRoot: string;
   cumulativeFreshInputTokens: string;
@@ -159,43 +159,18 @@ export interface NeedAuthUsageReportMetadataPayload {
 
 export interface ChannelUsageReportServiceUsageLeafPayload {
   channelId: string;
+  provider: string;
+  service: string;
   serviceIdHash: string;
-  catalogLeafHash: string;
+  inputUsdPerMillion: string;
+  cachedInputUsdPerMillion: string;
+  outputUsdPerMillion: string;
   serviceMode: string;
   cumulativeFreshInputTokens: string;
   cumulativeCachedInputTokens: string;
   cumulativeOutputTokens: string;
   cumulativeRequestCount: string;
   cumulativeAmountPaid: string;
-}
-
-export interface ChannelUsageReportCatalogLeafPayload {
-  sellerAgentId: string;
-  sellerAddress: string;
-  serviceIdHash: string;
-  tokenizerIdHash: string;
-  inputUsdPerMillion: string;
-  cachedInputUsdPerMillion: string;
-  outputUsdPerMillion: string;
-  serviceMode: string;
-  termsHash: string;
-  validFrom: string;
-  validUntil: string;
-}
-
-export interface ChannelUsageReportReceiptLeafPayload {
-  channelId: string;
-  requestIndex: string;
-  requestIdHash: string;
-  requestHash: string;
-  responseHash: string;
-  serviceIdHash: string;
-  catalogLeafHash: string;
-  freshInputTokens: string;
-  cachedInputTokens: string;
-  outputTokens: string;
-  costUsdc: string;
-  cumulativeAmountAfterRequest: string;
 }
 
 export interface ChannelUsageReportPayload {
@@ -212,12 +187,9 @@ export interface ChannelUsageReportPayload {
   verifierCount: number;
   /** Required for paid usage; omitted for free-only reports. */
   buyerSpendingAuthSig?: string;
-  catalogRoot: string;
-  sellerCatalogSig: string;
+  /** Hash derived from the seller's existing signed /metadata pricing fields. */
+  pricingSnapshotHash: string;
   serviceUsageLeaves: ChannelUsageReportServiceUsageLeafPayload[];
-  serviceCatalogLeaves: ChannelUsageReportCatalogLeafPayload[];
-  catalogMerkleProofs: Record<string, string[]>;
-  receiptLeavesOrProofs: ChannelUsageReportReceiptLeafPayload[];
   reportedAt: number;
 }
 
@@ -229,7 +201,7 @@ export interface ChannelReportAttestationPayload {
   buyer: string;
   cumulativeAmount: string;
   metadataHash: string;
-  catalogRoot: string;
+  pricingSnapshotHash: string;
   usageByServiceRoot: string;
   /**
    * Verifier seller peer address / peerId, 40 lowercase hex chars or an EVM

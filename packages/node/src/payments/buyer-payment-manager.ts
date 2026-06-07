@@ -379,7 +379,7 @@ export class BuyerPaymentManager {
     paymentMux: PaymentMux,
   ): Promise<void> {
     const metadataHashHex = computeMetadataHash(metadata);
-    const encodedMetadata = 'catalogRoot' in metadata ? encodeMetadataV2(metadata) : encodeMetadata(metadata);
+    const encodedMetadata = 'pricingSnapshotHash' in metadata ? encodeMetadataV2(metadata) : encodeMetadata(metadata);
     const metadataMsg: SpendingAuthMessage = {
       channelId: session.sessionId,
       cumulativeAmount,
@@ -932,7 +932,7 @@ export class BuyerPaymentManager {
     if (usageReportMetadata) {
       try {
         const parsed: SpendingAuthMetadataV2 = {
-          catalogRoot: usageReportMetadata.catalogRoot,
+          pricingSnapshotHash: usageReportMetadata.pricingSnapshotHash,
           usageByServiceRoot: usageReportMetadata.usageByServiceRoot,
           receiptRoot: usageReportMetadata.receiptRoot,
           cumulativeFreshInputTokens: BigInt(usageReportMetadata.cumulativeFreshInputTokens),

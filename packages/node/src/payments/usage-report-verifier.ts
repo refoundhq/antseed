@@ -1,29 +1,26 @@
-import { AbiCoder, isAddress, keccak256, type TypedDataDomain, verifyTypedData, type Wallet } from 'ethers';
+import { AbiCoder, isAddress, keccak256, toUtf8Bytes, type TypedDataDomain, verifyTypedData, type Wallet } from 'ethers';
 import type {
   ChannelReportAttestationPayload,
-  ChannelUsageReportCatalogLeafPayload,
   ChannelUsageReportPayload,
-  ChannelUsageReportReceiptLeafPayload,
   ChannelUsageReportServiceUsageLeafPayload,
   UsageReportAckPayload,
 } from '../types/protocol.js';
+import type { PeerMetadata, TokenPricingUsdPerMillion } from '../discovery/peer-metadata.js';
+import { encodeMetadataForSigning } from '../discovery/metadata-codec.js';
 import { computeCostUsdc } from './pricing.js';
-import { signUtf8, verifyUtf8 } from '../p2p/identity.js';
+import { signUtf8, verifySignature, verifyUtf8 } from '../p2p/identity.js';
+import { hexToBytes } from '../utils/hex.js';
 import {
   computeEncodedMetadataHash,
   computeMerkleRoot,
   decodeMetadata,
-  hashReceiptLeaf,
-  hashServiceCatalogLeaf,
   hashServiceUsageLeaf,
+  hashUtf8,
   metadataV2MatchesServiceUsage,
   SERVICE_MODE_FREE,
   SERVICE_MODE_PAID,
   SPENDING_AUTH_TYPES,
-  verifyMerkleProof,
   ZERO_BYTES32,
-  type ReceiptLeaf,
-  type ServiceCatalogLeaf,
   type ServiceUsageLeaf,
   type SpendingAuthMetadataV2,
 } from './evm/signatures.js';
@@ -94,6 +91,8 @@ export interface UsageReportVerifierOptions {
    * claim more paid amount than the compatible on-chain channel state.
    */
   settledCumulativeAmount?: bigint | string;
+  /** Existing signed seller /metadata resolved through DHT/http. Used as pricing source of truth. */
+  sellerMetadata?: PeerMetadata | null;
 }
 
 export function computeUsageReportVerifierSelectionSeed(
@@ -187,7 +186,6 @@ export function computeChannelUsageReportHash(report: ChannelUsageReportPayload)
       'bytes32',
       'bytes32',
       'bytes32',
-      'bytes32',
       'uint256',
       'bytes32',
       'uint256',
@@ -199,9 +197,8 @@ export function computeChannelUsageReportHash(report: ChannelUsageReportPayload)
       BigInt(report.sellerAgentId),
       BigInt(report.cumulativeAmount),
       report.metadataHash,
-      report.catalogRoot,
+      report.pricingSnapshotHash,
       computeMerkleRoot(report.serviceUsageLeaves.map((leaf) => hashServiceUsageLeaf(fromServiceUsagePayload(leaf)))),
-      computeMerkleRoot(report.receiptLeavesOrProofs.map((leaf) => hashReceiptLeaf(fromReceiptPayload(leaf)))),
       BigInt(report.reportedAt),
       report.selectionBeacon,
       BigInt(report.verifierCount),
@@ -243,10 +240,6 @@ export function verifyChannelUsageReport(
     addIssue('metadata-hash-mismatch', 'metadataHash does not match keccak256(metadata)');
   }
 
-  if (!verifySellerCatalogSignature(report)) {
-    addIssue('invalid-seller-catalog-signature', 'sellerCatalogSig does not recover the report seller');
-  }
-
   let metadata: SpendingAuthMetadataV2 | null = null;
   try {
     const decoded = decodeMetadata(report.metadata);
@@ -259,47 +252,22 @@ export function verifyChannelUsageReport(
     addIssue('metadata-decode-failed', err instanceof Error ? err.message : String(err));
   }
 
-  const catalogLeaves = report.serviceCatalogLeaves.map(fromCatalogPayload);
-  const catalogLeafHashes = new Map<string, ServiceCatalogLeaf>();
-  for (const leaf of catalogLeaves) {
-    const leafHash = hashServiceCatalogLeaf(leaf);
-    catalogLeafHashes.set(leafHash.toLowerCase(), leaf);
-    const proof = report.catalogMerkleProofs[leafHash] ?? report.catalogMerkleProofs[leafHash.toLowerCase()];
-    if (!proof) {
-      addIssue('missing-catalog-proof', `catalog leaf ${leafHash} is missing a Merkle proof`);
-    } else if (!verifyMerkleProof(leafHash, proof, report.catalogRoot)) {
-      addIssue('invalid-catalog-proof', `catalog leaf ${leafHash} is not included in catalogRoot`);
-    }
-    if (leaf.sellerAddress.toLowerCase() !== report.seller.toLowerCase()) {
-      addIssue('catalog-seller-mismatch', `catalog leaf ${leafHash} seller does not match report seller`);
-    }
-    if (toBigInt(leaf.sellerAgentId) !== BigInt(report.sellerAgentId)) {
-      addIssue('catalog-agent-mismatch', `catalog leaf ${leafHash} sellerAgentId does not match report sellerAgentId`);
-    }
-    const reportedAt = BigInt(report.reportedAt);
-    if (reportedAt < toBigInt(leaf.validFrom) || reportedAt > toBigInt(leaf.validUntil)) {
-      addIssue('catalog-window-mismatch', `catalog leaf ${leafHash} validity window does not cover reportedAt`);
-    }
-  }
-
   const usageLeaves = report.serviceUsageLeaves.map(fromServiceUsagePayload);
-  const receiptLeaves = report.receiptLeavesOrProofs.map(fromReceiptPayload);
 
   if (metadata) {
-    if (metadata.catalogRoot.toLowerCase() !== report.catalogRoot.toLowerCase()) {
-      addIssue('catalog-root-mismatch', 'report catalogRoot does not match metadata catalogRoot');
+    if (metadata.pricingSnapshotHash.toLowerCase() !== report.pricingSnapshotHash.toLowerCase()) {
+      addIssue('pricing-snapshot-mismatch', 'report pricingSnapshotHash does not match metadata pricing commitment');
     }
     if (!metadataV2MatchesServiceUsage(metadata, usageLeaves)) {
       addIssue('usage-root-or-total-mismatch', 'usageByServiceRoot or usage totals do not match service usage leaves');
     }
-    const receiptRoot = computeMerkleRoot(receiptLeaves.map(hashReceiptLeaf));
-    if (receiptRoot.toLowerCase() !== metadata.receiptRoot.toLowerCase()) {
-      addIssue('receipt-root-mismatch', 'receiptRoot does not match receipt leaves');
+    if (metadata.receiptRoot.toLowerCase() !== ZERO_BYTES32) {
+      addIssue('unsupported-receipt-root', 'simplified usage reports require zero receiptRoot');
     }
   }
 
-  verifyUsageLeaves(report, usageLeaves, catalogLeafHashes, addIssue);
-  verifyReceipts(report, usageLeaves, receiptLeaves, catalogLeafHashes, addIssue);
+  verifyUsageLeaves(report, usageLeaves, addIssue);
+  verifyAnnouncedPricing(report, usageLeaves, options.sellerMetadata ?? null, addIssue);
   verifyPaidAuthorization(report, metadata, options, addIssue);
 
   return {
@@ -328,7 +296,7 @@ export function createChannelReportAttestation(
     buyer: report.buyer,
     cumulativeAmount: report.cumulativeAmount,
     metadataHash: report.metadataHash,
-    catalogRoot: verification.metadata.catalogRoot,
+    pricingSnapshotHash: report.pricingSnapshotHash,
     usageByServiceRoot: verification.metadata.usageByServiceRoot,
     verifier: normalizeAddress(verifierIdentity.verifier),
     verifierAgentId: verifierIdentity.verifierAgentId,
@@ -382,7 +350,7 @@ export function encodeAttestationForSigning(attestation: Omit<ChannelReportAttes
     buyer: normalizeAddress(attestation.buyer),
     cumulativeAmount: attestation.cumulativeAmount,
     metadataHash: attestation.metadataHash,
-    catalogRoot: attestation.catalogRoot,
+    pricingSnapshotHash: attestation.pricingSnapshotHash,
     usageByServiceRoot: attestation.usageByServiceRoot,
     verifier: normalizeAddress(attestation.verifier),
     verifierAgentId: attestation.verifierAgentId,
@@ -390,48 +358,18 @@ export function encodeAttestationForSigning(attestation: Omit<ChannelReportAttes
   });
 }
 
-export function encodeSellerCatalogForSigning(
-  catalog: Pick<ChannelUsageReportPayload, 'seller' | 'sellerAgentId' | 'catalogRoot'>,
-): string {
-  return JSON.stringify({
-    type: 'AntseedSellerCatalog',
-    version: 1,
-    seller: normalizeAddress(catalog.seller),
-    sellerAgentId: BigInt(catalog.sellerAgentId).toString(),
-    catalogRoot: catalog.catalogRoot.toLowerCase(),
-  });
-}
-
-export function verifySellerCatalogSignature(
-  report: Pick<ChannelUsageReportPayload, 'seller' | 'sellerAgentId' | 'catalogRoot' | 'sellerCatalogSig'>,
-): boolean {
-  return verifyUtf8(
-    normalizeAddress(report.seller),
-    encodeSellerCatalogForSigning(report),
-    stripHexPrefix(report.sellerCatalogSig),
-  );
-}
-
 function verifyUsageLeaves(
   report: ChannelUsageReportPayload,
   usageLeaves: ServiceUsageLeaf[],
-  catalogLeafHashes: Map<string, ServiceCatalogLeaf>,
   addIssue: (code: string, message: string) => void,
 ): void {
   for (const leaf of usageLeaves) {
     if (leaf.channelId.toLowerCase() !== report.channelId.toLowerCase()) {
       addIssue('usage-channel-mismatch', 'service usage leaf channelId does not match report channelId');
     }
-    const catalogLeaf = catalogLeafHashes.get(leaf.catalogLeafHash.toLowerCase());
-    if (!catalogLeaf) {
-      addIssue('missing-usage-catalog-leaf', `usage leaf references unknown catalog leaf ${leaf.catalogLeafHash}`);
-      continue;
-    }
-    if (leaf.serviceIdHash.toLowerCase() !== catalogLeaf.serviceIdHash.toLowerCase()) {
-      addIssue('usage-service-mismatch', 'usage leaf serviceIdHash does not match referenced catalog leaf');
-    }
-    if (toBigInt(leaf.serviceMode) !== toBigInt(catalogLeaf.serviceMode)) {
-      addIssue('usage-mode-mismatch', 'usage leaf serviceMode does not match referenced catalog leaf');
+    const expectedServiceIdHash = serviceIdHash(leaf.provider, leaf.service);
+    if (leaf.serviceIdHash.toLowerCase() !== expectedServiceIdHash.toLowerCase()) {
+      addIssue('usage-service-hash-mismatch', 'service usage leaf serviceIdHash does not match provider/service');
     }
     if (toBigInt(leaf.serviceMode) === SERVICE_MODE_FREE && toBigInt(leaf.cumulativeAmountPaid) !== 0n) {
       addIssue('free-usage-paid-amount', 'free service usage leaf has nonzero paid amount');
@@ -439,76 +377,62 @@ function verifyUsageLeaves(
   }
 }
 
-function verifyReceipts(
+function verifyAnnouncedPricing(
   report: ChannelUsageReportPayload,
   usageLeaves: ServiceUsageLeaf[],
-  receiptLeaves: ReceiptLeaf[],
-  catalogLeafHashes: Map<string, ServiceCatalogLeaf>,
+  metadata: PeerMetadata | null,
   addIssue: (code: string, message: string) => void,
 ): void {
-  const receiptTotals = new Map<string, {
-    fresh: bigint;
-    cached: bigint;
-    output: bigint;
-    requests: bigint;
-    paid: bigint;
-  }>();
-
-  for (const leaf of receiptLeaves) {
-    if (leaf.channelId.toLowerCase() !== report.channelId.toLowerCase()) {
-      addIssue('receipt-channel-mismatch', 'receipt leaf channelId does not match report channelId');
-    }
-    const catalogLeaf = catalogLeafHashes.get(leaf.catalogLeafHash.toLowerCase());
-    if (!catalogLeaf) {
-      addIssue('missing-receipt-catalog-leaf', `receipt references unknown catalog leaf ${leaf.catalogLeafHash}`);
-      continue;
-    }
-    if (leaf.serviceIdHash.toLowerCase() !== catalogLeaf.serviceIdHash.toLowerCase()) {
-      addIssue('receipt-service-mismatch', 'receipt serviceIdHash does not match referenced catalog leaf');
-    }
-
-    const cost = toBigInt(leaf.costUsdc);
-    const mode = toBigInt(catalogLeaf.serviceMode);
-    if (mode === SERVICE_MODE_FREE && cost !== 0n) {
-      addIssue('free-receipt-cost', 'free service receipt has nonzero costUsdc');
-    }
-    if (mode === SERVICE_MODE_PAID) {
-      const expectedCost = computeCostUsdc(
-        Number(toBigInt(leaf.freshInputTokens)),
-        Number(toBigInt(leaf.outputTokens)),
-        {
-          inputUsdPerMillion: Number(toBigInt(catalogLeaf.inputUsdPerMillion)),
-          outputUsdPerMillion: Number(toBigInt(catalogLeaf.outputUsdPerMillion)),
-          cachedInputUsdPerMillion: Number(toBigInt(catalogLeaf.cachedInputUsdPerMillion)),
-        },
-        Number(toBigInt(leaf.cachedInputTokens)),
-      );
-      if (cost !== expectedCost) {
-        addIssue('paid-receipt-cost-mismatch', `paid receipt cost ${cost} does not match catalog pricing ${expectedCost}`);
-      }
-    }
-
-    const key = `${leaf.catalogLeafHash.toLowerCase()}:${leaf.serviceIdHash.toLowerCase()}`;
-    const current = receiptTotals.get(key) ?? { fresh: 0n, cached: 0n, output: 0n, requests: 0n, paid: 0n };
-    current.fresh += toBigInt(leaf.freshInputTokens);
-    current.cached += toBigInt(leaf.cachedInputTokens);
-    current.output += toBigInt(leaf.outputTokens);
-    current.requests += 1n;
-    current.paid += cost;
-    receiptTotals.set(key, current);
+  if (!metadata) {
+    addIssue('missing-seller-metadata', 'usage report verification requires the seller signed metadata used for pricing');
+    return;
   }
 
-  for (const usageLeaf of usageLeaves) {
-    const key = `${usageLeaf.catalogLeafHash.toLowerCase()}:${usageLeaf.serviceIdHash.toLowerCase()}`;
-    const totals = receiptTotals.get(key) ?? { fresh: 0n, cached: 0n, output: 0n, requests: 0n, paid: 0n };
+  const expectedPricingSnapshotHash = derivePricingSnapshotHash(metadata);
+  if (report.pricingSnapshotHash.toLowerCase() !== expectedPricingSnapshotHash.toLowerCase()) {
+    addIssue('pricing-snapshot-hash-mismatch', 'report pricingSnapshotHash does not match seller metadata pricing snapshot');
+  }
+
+  const metadataSeller = metadata.sellerContract
+    ? `0x${metadata.sellerContract}`
+    : `0x${metadata.peerId}`;
+  if (metadataSeller.toLowerCase() !== report.seller.toLowerCase()) {
+    addIssue('seller-metadata-mismatch', 'seller metadata identity does not match report seller');
+  }
+  if (!verifySellerMetadataSignature(metadata)) {
+    addIssue('invalid-seller-metadata-signature', 'seller metadata signature does not recover metadata peerId');
+  }
+
+  for (const leaf of usageLeaves) {
+    const pricing = getAnnouncedServicePricing(metadata, leaf.provider, leaf.service);
+    if (!pricing) {
+      addIssue('missing-announced-service-pricing', `seller metadata does not announce pricing for ${leaf.provider}:${leaf.service}`);
+      continue;
+    }
+    const expectedMode = isFreePricing(pricing) ? SERVICE_MODE_FREE : SERVICE_MODE_PAID;
+    if (toBigInt(leaf.serviceMode) !== expectedMode) {
+      addIssue('usage-mode-pricing-mismatch', 'service usage mode does not match announced pricing');
+    }
+    const expectedCachedPrice = pricing.cachedInputUsdPerMillion ?? pricing.inputUsdPerMillion;
     if (
-      totals.fresh !== toBigInt(usageLeaf.cumulativeFreshInputTokens)
-        || totals.cached !== toBigInt(usageLeaf.cumulativeCachedInputTokens)
-        || totals.output !== toBigInt(usageLeaf.cumulativeOutputTokens)
-        || totals.requests !== toBigInt(usageLeaf.cumulativeRequestCount)
-        || totals.paid !== toBigInt(usageLeaf.cumulativeAmountPaid)
+      toBigInt(leaf.inputUsdPerMillion) !== BigInt(pricing.inputUsdPerMillion)
+      || toBigInt(leaf.cachedInputUsdPerMillion) !== BigInt(expectedCachedPrice)
+      || toBigInt(leaf.outputUsdPerMillion) !== BigInt(pricing.outputUsdPerMillion)
     ) {
-      addIssue('receipt-usage-total-mismatch', 'receipt totals do not aggregate to the service usage leaf');
+      addIssue('usage-pricing-mismatch', 'service usage leaf pricing does not match announced metadata pricing');
+    }
+    const expectedCost = computeCostUsdc(
+      Number(toBigInt(leaf.cumulativeFreshInputTokens)),
+      Number(toBigInt(leaf.cumulativeOutputTokens)),
+      {
+        inputUsdPerMillion: Number(toBigInt(leaf.inputUsdPerMillion)),
+        cachedInputUsdPerMillion: Number(toBigInt(leaf.cachedInputUsdPerMillion)),
+        outputUsdPerMillion: Number(toBigInt(leaf.outputUsdPerMillion)),
+      },
+      Number(toBigInt(leaf.cumulativeCachedInputTokens)),
+    );
+    if (expectedCost !== toBigInt(leaf.cumulativeAmountPaid)) {
+      addIssue('announced-pricing-cost-mismatch', `service usage paid amount ${leaf.cumulativeAmountPaid} does not match announced pricing ${expectedCost}`);
     }
   }
 }
@@ -556,50 +480,21 @@ function verifyPaidAuthorization(
   }
 }
 
-function fromCatalogPayload(payload: ChannelUsageReportCatalogLeafPayload): ServiceCatalogLeaf {
-  return {
-    sellerAgentId: payload.sellerAgentId,
-    sellerAddress: payload.sellerAddress,
-    serviceIdHash: payload.serviceIdHash,
-    tokenizerIdHash: payload.tokenizerIdHash,
-    inputUsdPerMillion: payload.inputUsdPerMillion,
-    cachedInputUsdPerMillion: payload.cachedInputUsdPerMillion,
-    outputUsdPerMillion: payload.outputUsdPerMillion,
-    serviceMode: payload.serviceMode,
-    termsHash: payload.termsHash,
-    validFrom: payload.validFrom,
-    validUntil: payload.validUntil,
-  };
-}
-
 function fromServiceUsagePayload(payload: ChannelUsageReportServiceUsageLeafPayload): ServiceUsageLeaf {
   return {
     channelId: payload.channelId,
+    provider: payload.provider,
+    service: payload.service,
     serviceIdHash: payload.serviceIdHash,
-    catalogLeafHash: payload.catalogLeafHash,
+    inputUsdPerMillion: payload.inputUsdPerMillion,
+    cachedInputUsdPerMillion: payload.cachedInputUsdPerMillion,
+    outputUsdPerMillion: payload.outputUsdPerMillion,
     serviceMode: payload.serviceMode,
     cumulativeFreshInputTokens: payload.cumulativeFreshInputTokens,
     cumulativeCachedInputTokens: payload.cumulativeCachedInputTokens,
     cumulativeOutputTokens: payload.cumulativeOutputTokens,
     cumulativeRequestCount: payload.cumulativeRequestCount,
     cumulativeAmountPaid: payload.cumulativeAmountPaid,
-  };
-}
-
-function fromReceiptPayload(payload: ChannelUsageReportReceiptLeafPayload): ReceiptLeaf {
-  return {
-    channelId: payload.channelId,
-    requestIndex: payload.requestIndex,
-    requestIdHash: payload.requestIdHash,
-    requestHash: payload.requestHash,
-    responseHash: payload.responseHash,
-    serviceIdHash: payload.serviceIdHash,
-    catalogLeafHash: payload.catalogLeafHash,
-    freshInputTokens: payload.freshInputTokens,
-    cachedInputTokens: payload.cachedInputTokens,
-    outputTokens: payload.outputTokens,
-    costUsdc: payload.costUsdc,
-    cumulativeAmountAfterRequest: payload.cumulativeAmountAfterRequest,
   };
 }
 
@@ -616,33 +511,21 @@ function validateReportFields(
   validateBytes32('metadataHash', report.metadataHash, addIssue);
   validateBytes32('selectionBeacon', report.selectionBeacon, addIssue);
   validateUintNumber('verifierCount', report.verifierCount, addIssue);
-  validateBytes32('catalogRoot', report.catalogRoot, addIssue);
-  validateSignature('sellerCatalogSig', report.sellerCatalogSig, addIssue);
+  validateBytes32('pricingSnapshotHash', report.pricingSnapshotHash, addIssue);
   if (report.buyerSpendingAuthSig !== undefined) {
     validateSignature('buyerSpendingAuthSig', report.buyerSpendingAuthSig, addIssue);
   }
   validateUintNumber('reportedAt', report.reportedAt, addIssue);
 
-  report.serviceCatalogLeaves.forEach((leaf, index) => {
-    const prefix = `serviceCatalogLeaves[${index}]`;
-    validateUintString(`${prefix}.sellerAgentId`, leaf.sellerAgentId, addIssue);
-    validateAddress(`${prefix}.sellerAddress`, leaf.sellerAddress, addIssue);
-    validateBytes32(`${prefix}.serviceIdHash`, leaf.serviceIdHash, addIssue);
-    validateBytes32(`${prefix}.tokenizerIdHash`, leaf.tokenizerIdHash, addIssue);
-    validateUintString(`${prefix}.inputUsdPerMillion`, leaf.inputUsdPerMillion, addIssue);
-    validateUintString(`${prefix}.cachedInputUsdPerMillion`, leaf.cachedInputUsdPerMillion, addIssue);
-    validateUintString(`${prefix}.outputUsdPerMillion`, leaf.outputUsdPerMillion, addIssue);
-    validateUintString(`${prefix}.serviceMode`, leaf.serviceMode, addIssue);
-    validateBytes32(`${prefix}.termsHash`, leaf.termsHash, addIssue);
-    validateUintString(`${prefix}.validFrom`, leaf.validFrom, addIssue);
-    validateUintString(`${prefix}.validUntil`, leaf.validUntil, addIssue);
-  });
-
   report.serviceUsageLeaves.forEach((leaf, index) => {
     const prefix = `serviceUsageLeaves[${index}]`;
     validateBytes32(`${prefix}.channelId`, leaf.channelId, addIssue);
+    validateNonEmptyString(`${prefix}.provider`, leaf.provider, addIssue);
+    validateNonEmptyString(`${prefix}.service`, leaf.service, addIssue);
     validateBytes32(`${prefix}.serviceIdHash`, leaf.serviceIdHash, addIssue);
-    validateBytes32(`${prefix}.catalogLeafHash`, leaf.catalogLeafHash, addIssue);
+    validateUintString(`${prefix}.inputUsdPerMillion`, leaf.inputUsdPerMillion, addIssue);
+    validateUintString(`${prefix}.cachedInputUsdPerMillion`, leaf.cachedInputUsdPerMillion, addIssue);
+    validateUintString(`${prefix}.outputUsdPerMillion`, leaf.outputUsdPerMillion, addIssue);
     validateUintString(`${prefix}.serviceMode`, leaf.serviceMode, addIssue);
     validateUintString(`${prefix}.cumulativeFreshInputTokens`, leaf.cumulativeFreshInputTokens, addIssue);
     validateUintString(`${prefix}.cumulativeCachedInputTokens`, leaf.cumulativeCachedInputTokens, addIssue);
@@ -650,32 +533,66 @@ function validateReportFields(
     validateUintString(`${prefix}.cumulativeRequestCount`, leaf.cumulativeRequestCount, addIssue);
     validateUintString(`${prefix}.cumulativeAmountPaid`, leaf.cumulativeAmountPaid, addIssue);
   });
+}
 
-  report.receiptLeavesOrProofs.forEach((leaf, index) => {
-    const prefix = `receiptLeavesOrProofs[${index}]`;
-    validateBytes32(`${prefix}.channelId`, leaf.channelId, addIssue);
-    validateUintString(`${prefix}.requestIndex`, leaf.requestIndex, addIssue);
-    validateBytes32(`${prefix}.requestIdHash`, leaf.requestIdHash, addIssue);
-    validateBytes32(`${prefix}.requestHash`, leaf.requestHash, addIssue);
-    validateBytes32(`${prefix}.responseHash`, leaf.responseHash, addIssue);
-    validateBytes32(`${prefix}.serviceIdHash`, leaf.serviceIdHash, addIssue);
-    validateBytes32(`${prefix}.catalogLeafHash`, leaf.catalogLeafHash, addIssue);
-    validateUintString(`${prefix}.freshInputTokens`, leaf.freshInputTokens, addIssue);
-    validateUintString(`${prefix}.cachedInputTokens`, leaf.cachedInputTokens, addIssue);
-    validateUintString(`${prefix}.outputTokens`, leaf.outputTokens, addIssue);
-    validateUintString(`${prefix}.costUsdc`, leaf.costUsdc, addIssue);
-    validateUintString(`${prefix}.cumulativeAmountAfterRequest`, leaf.cumulativeAmountAfterRequest, addIssue);
-  });
+export function serviceIdHash(provider: string, service: string): string {
+  return hashUtf8(`${provider.trim().toLowerCase()}:${service.trim()}`);
+}
 
-  for (const [leafHash, proof] of Object.entries(report.catalogMerkleProofs)) {
-    validateBytes32(`catalogMerkleProofs key ${leafHash}`, leafHash, addIssue);
-    proof.forEach((entry, index) => validateBytes32(`catalogMerkleProofs[${leafHash}][${index}]`, entry, addIssue));
+export function derivePricingSnapshotHash(metadata: PeerMetadata): string {
+  const providers = metadata.providers
+    .map((provider) => ({
+      provider: provider.provider,
+      services: [...provider.services].sort().map((service) => ({
+        service,
+        pricing: provider.servicePricing?.[service] ?? provider.defaultPricing,
+      })),
+    }))
+    .sort((a, b) => a.provider.localeCompare(b.provider));
+  return keccak256(toUtf8Bytes(JSON.stringify({
+    version: 1,
+    peerId: metadata.peerId.toLowerCase(),
+    sellerContract: metadata.sellerContract?.toLowerCase() ?? null,
+    providers,
+  })));
+}
+
+function verifySellerMetadataSignature(metadata: PeerMetadata): boolean {
+  try {
+    return verifySignature(
+      metadata.peerId,
+      hexToBytes(metadata.signature),
+      encodeMetadataForSigning(metadata),
+    );
+  } catch {
+    return false;
   }
+}
+
+function getAnnouncedServicePricing(
+  metadata: PeerMetadata,
+  providerName: string,
+  serviceName: string,
+): TokenPricingUsdPerMillion | null {
+  const provider = metadata.providers.find((entry) => entry.provider === providerName);
+  if (!provider || !provider.services.includes(serviceName)) return null;
+  return provider.servicePricing?.[serviceName] ?? provider.defaultPricing;
+}
+
+function isFreePricing(pricing: TokenPricingUsdPerMillion): boolean {
+  const cached = pricing.cachedInputUsdPerMillion ?? pricing.inputUsdPerMillion;
+  return pricing.inputUsdPerMillion === 0 && cached === 0 && pricing.outputUsdPerMillion === 0;
 }
 
 function validateAddress(field: string, value: string, addIssue: (code: string, message: string) => void): void {
   if (!isAddress(value)) {
     addIssue('invalid-report-field', `${field} must be an EVM address`);
+  }
+}
+
+function validateNonEmptyString(field: string, value: string, addIssue: (code: string, message: string) => void): void {
+  if (typeof value !== 'string' || value.length === 0) {
+    addIssue('invalid-report-field', `${field} must be a non-empty string`);
   }
 }
 

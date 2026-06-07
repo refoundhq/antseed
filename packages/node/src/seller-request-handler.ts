@@ -15,6 +15,7 @@ import type {
 } from './types/http.js';
 import { parseResponseUsage } from './utils/response-usage.js';
 import { computeCostUsdc, estimateTokensFromBytes, type ServicePricing } from './payments/pricing.js';
+import { derivePricingSnapshotHash } from './payments/usage-report-verifier.js';
 import { debugLog, debugWarn } from './utils/debug.js';
 import { PAYMENT_CODE_CHANNEL_EXHAUSTED, type NeedAuthUsageReportMetadataPayload } from './types/protocol.js';
 
@@ -404,14 +405,21 @@ export class SellerRequestHandler {
             const accepted = spm.getAcceptedCumulative(session.sessionId);
             const requiredAmount = cumulativeSpend;
             const service = this._extractRequestedService(request) ?? 'unknown';
+            const sellerMetadata = this._deps.announcer?.getLatestMetadata();
+            const pricingSnapshotHash = sellerMetadata ? derivePricingSnapshotHash(sellerMetadata) : null;
             let usageReportMetadata: NeedAuthUsageReportMetadataPayload | null | undefined;
             try {
+              if (!pricingSnapshotHash) {
+                throw new Error('seller metadata unavailable');
+              }
               usageReportMetadata = await spm.recordUsageReportEvidence({
                 channelId: session.sessionId,
                 requestId: request.requestId,
                 requestBody: request.body,
                 responseBody,
+                provider: provider.name,
                 service,
+                pricingSnapshotHash,
                 pricing: requestPricing,
                 freshInputTokens: BigInt(usage.freshInputTokens),
                 cachedInputTokens: BigInt(usage.cachedInputTokens),

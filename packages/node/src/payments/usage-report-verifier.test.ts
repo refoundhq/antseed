@@ -1,32 +1,30 @@
 import { Wallet } from 'ethers';
 import { describe, expect, it } from 'vitest';
+import type { PeerMetadata } from '../discovery/peer-metadata.js';
+import { encodeMetadataForSigning } from '../discovery/metadata-codec.js';
+import { signData } from '../p2p/identity.js';
+import type { PeerId } from '../types/peer.js';
 import type { ChannelUsageReportPayload } from '../types/protocol.js';
+import { bytesToHex } from '../utils/hex.js';
 import { computeCostUsdc } from './pricing.js';
 import {
   computeEncodedMetadataHash,
-  computeMerkleProof,
   computeMerkleRoot,
   encodeMetadataV2,
-  hashReceiptLeaf,
-  hashServiceCatalogLeaf,
   hashServiceUsageLeaf,
-  hashUtf8,
   makeChannelsDomain,
-  SERVICE_MODE_FREE,
   SERVICE_MODE_PAID,
   signSpendingAuth,
   ZERO_BYTES32,
-  type ReceiptLeaf,
-  type ServiceCatalogLeaf,
   type ServiceUsageLeaf,
 } from './evm/signatures.js';
-import { signUtf8 } from '../p2p/identity.js';
 import {
   computeUsageReportVerifierSelectionSeed,
   createUsageReportAck,
-  encodeSellerCatalogForSigning,
+  derivePricingSnapshotHash,
   getUsageReportVerifierAssignment,
   selectUsageReportVerifiers,
+  serviceIdHash,
   shouldVerifyUsageReport,
   verifyChannelReportAttestation,
   verifyChannelUsageReport,
@@ -42,97 +40,14 @@ const selectionBeacon = `0x${'99'.repeat(32)}`;
 const verifierCount = 3;
 
 describe('usage-report-verifier', () => {
-  it('verifies V2 report leaves, roots, pricing, and buyer SpendingAuth', async () => {
-    const buyer = Wallet.createRandom();
-    const domain = makeChannelsDomain(8453, channelsAddress);
-    const serviceIdHash = hashUtf8('openai:gpt-4.1');
-    const catalogLeaf: ServiceCatalogLeaf = {
-      sellerAgentId,
-      sellerAddress: seller,
-      serviceIdHash,
-      tokenizerIdHash: hashUtf8('cl100k_base'),
-      inputUsdPerMillion: 1_000_000n,
-      cachedInputUsdPerMillion: 500_000n,
-      outputUsdPerMillion: 2_000_000n,
-      serviceMode: SERVICE_MODE_PAID,
-      termsHash: hashUtf8('paid terms'),
-      validFrom: 1_700_000_000n,
-      validUntil: 1_800_000_000n,
-    };
-    const catalogLeafHash = hashServiceCatalogLeaf(catalogLeaf);
-    const catalogRoot = computeMerkleRoot([catalogLeafHash]);
-    const costUsdc = computeCostUsdc(100, 10, {
-      inputUsdPerMillion: 1_000_000,
-      cachedInputUsdPerMillion: 500_000,
-      outputUsdPerMillion: 2_000_000,
-    }, 20);
+  it('verifies cumulative service rows against announced metadata pricing and buyer SpendingAuth', async () => {
+    const { report, domain, costUsdc, sellerMetadata } = await createValidPaidReport();
 
-    const usageLeaf: ServiceUsageLeaf = {
-      channelId,
-      serviceIdHash,
-      catalogLeafHash,
-      serviceMode: SERVICE_MODE_PAID,
-      cumulativeFreshInputTokens: 100n,
-      cumulativeCachedInputTokens: 20n,
-      cumulativeOutputTokens: 10n,
-      cumulativeRequestCount: 1n,
-      cumulativeAmountPaid: costUsdc,
-    };
-    const receiptLeaf: ReceiptLeaf = {
-      channelId,
-      requestIndex: 1n,
-      requestIdHash: hashUtf8('request-1'),
-      requestHash: `0x${'33'.repeat(32)}`,
-      responseHash: `0x${'44'.repeat(32)}`,
-      serviceIdHash,
-      catalogLeafHash,
-      freshInputTokens: 100n,
-      cachedInputTokens: 20n,
-      outputTokens: 10n,
-      costUsdc,
-      cumulativeAmountAfterRequest: costUsdc,
-    };
-    const metadata = {
-      catalogRoot,
-      usageByServiceRoot: computeMerkleRoot([hashServiceUsageLeaf(usageLeaf)]),
-      receiptRoot: computeMerkleRoot([hashReceiptLeaf(receiptLeaf)]),
-      cumulativeFreshInputTokens: 100n,
-      cumulativeCachedInputTokens: 20n,
-      cumulativeOutputTokens: 10n,
-      cumulativeRequestCount: 1n,
-      cumulativeAmountPaid: costUsdc,
-    };
-    const encodedMetadata = encodeMetadataV2(metadata);
-    const metadataHash = computeEncodedMetadataHash(encodedMetadata);
-    const spendingAuthSig = await signSpendingAuth(buyer, domain, {
-      channelId,
-      cumulativeAmount: costUsdc,
-      metadataHash,
+    const result = verifyChannelUsageReport(report, {
+      spendingAuthDomain: domain,
+      settledCumulativeAmount: costUsdc,
+      sellerMetadata,
     });
-
-    const report: ChannelUsageReportPayload = {
-      channelId,
-      buyer: buyer.address,
-      seller,
-      sellerAgentId,
-      cumulativeAmount: costUsdc.toString(),
-      metadata: encodedMetadata,
-      metadataHash,
-      selectionBeacon,
-      verifierCount,
-      buyerSpendingAuthSig: spendingAuthSig,
-      catalogRoot,
-      sellerCatalogSig: signSellerCatalog(catalogRoot),
-      serviceCatalogLeaves: [toCatalogPayload(catalogLeaf)],
-      catalogMerkleProofs: {
-        [catalogLeafHash]: computeMerkleProof([catalogLeafHash], catalogLeafHash),
-      },
-      serviceUsageLeaves: [toUsagePayload(usageLeaf)],
-      receiptLeavesOrProofs: [toReceiptPayload(receiptLeaf)],
-      reportedAt,
-    };
-
-    const result = verifyChannelUsageReport(report, { spendingAuthDomain: domain, settledCumulativeAmount: costUsdc });
     expect(result.ok).toBe(true);
     expect(result.issues).toEqual([]);
     expect(result.reportHash).toMatch(/^0x[0-9a-f]{64}$/);
@@ -146,144 +61,81 @@ describe('usage-report-verifier', () => {
 
     expect(ack.accepted).toBe(true);
     expect(ack.attestation?.verifier).toBe(verifier.address.slice(2).toLowerCase());
+    expect(ack.attestation?.pricingSnapshotHash).toBe(report.pricingSnapshotHash);
     expect(ack.attestation ? verifyChannelReportAttestation(ack.attestation) : false).toBe(true);
   });
 
   it('returns verification issues instead of throwing for malformed peer report fields', async () => {
-    const { report, domain, costUsdc } = await createValidPaidReport();
+    const { report, domain, costUsdc, sellerMetadata } = await createValidPaidReport();
 
     const result = verifyChannelUsageReport({
       ...report,
       sellerAgentId: 'x',
-    }, { spendingAuthDomain: domain, settledCumulativeAmount: costUsdc });
+    }, { spendingAuthDomain: domain, settledCumulativeAmount: costUsdc, sellerMetadata });
 
     expect(result.ok).toBe(false);
     expect(result.reportHash).toBe(ZERO_BYTES32);
     expect(result.issues.map((issue) => issue.code)).toContain('invalid-report-field');
   });
 
-  it('rejects reports whose catalog root was not signed by the seller', async () => {
-    const { report, domain, costUsdc } = await createValidPaidReport();
-    const forgedSigner = Wallet.createRandom();
+  it('rejects service rows whose paid amount does not match announced pricing', async () => {
+    const { report, domain, costUsdc, sellerMetadata } = await createValidPaidReport();
 
     const result = verifyChannelUsageReport({
       ...report,
-      sellerCatalogSig: signUtf8(forgedSigner, encodeSellerCatalogForSigning(report)),
-    }, { spendingAuthDomain: domain, settledCumulativeAmount: costUsdc });
+      serviceUsageLeaves: [{
+        ...report.serviceUsageLeaves[0]!,
+        cumulativeAmountPaid: (costUsdc + 1n).toString(),
+      }],
+    }, { spendingAuthDomain: domain, settledCumulativeAmount: costUsdc + 1n, sellerMetadata });
 
     expect(result.ok).toBe(false);
-    expect(result.issues.map((issue) => issue.code)).toContain('invalid-seller-catalog-signature');
+    expect(result.issues.map((issue) => issue.code)).toContain('usage-root-or-total-mismatch');
+    expect(result.issues.map((issue) => issue.code)).toContain('announced-pricing-cost-mismatch');
   });
 
-  it('rejects free service reports with nonzero receipt cost', () => {
-    const serviceIdHash = hashUtf8('local:free-demo');
-    const catalogLeaf: ServiceCatalogLeaf = {
-      sellerAgentId,
-      sellerAddress: seller,
-      serviceIdHash,
-      tokenizerIdHash: hashUtf8('demo-tokenizer'),
-      inputUsdPerMillion: 0n,
-      cachedInputUsdPerMillion: 0n,
-      outputUsdPerMillion: 0n,
-      serviceMode: SERVICE_MODE_FREE,
-      termsHash: hashUtf8('free terms'),
-      validFrom: 1_700_000_000n,
-      validUntil: 1_800_000_000n,
-    };
-    const catalogLeafHash = hashServiceCatalogLeaf(catalogLeaf);
-    const usageLeaf: ServiceUsageLeaf = {
-      channelId,
-      serviceIdHash,
-      catalogLeafHash,
-      serviceMode: SERVICE_MODE_FREE,
-      cumulativeFreshInputTokens: 5n,
-      cumulativeCachedInputTokens: 0n,
-      cumulativeOutputTokens: 2n,
-      cumulativeRequestCount: 1n,
-      cumulativeAmountPaid: 1n,
-    };
-    const receiptLeaf: ReceiptLeaf = {
-      channelId,
-      requestIndex: 1n,
-      requestIdHash: hashUtf8('free-request'),
-      requestHash: `0x${'66'.repeat(32)}`,
-      responseHash: `0x${'77'.repeat(32)}`,
-      serviceIdHash,
-      catalogLeafHash,
-      freshInputTokens: 5n,
-      cachedInputTokens: 0n,
-      outputTokens: 2n,
-      costUsdc: 1n,
-      cumulativeAmountAfterRequest: 1n,
-    };
-    const catalogRoot = computeMerkleRoot([catalogLeafHash]);
-    const encodedMetadata = encodeMetadataV2({
-      catalogRoot,
-      usageByServiceRoot: computeMerkleRoot([hashServiceUsageLeaf(usageLeaf)]),
-      receiptRoot: computeMerkleRoot([hashReceiptLeaf(receiptLeaf)]),
-      cumulativeFreshInputTokens: 5n,
-      cumulativeCachedInputTokens: 0n,
-      cumulativeOutputTokens: 2n,
-      cumulativeRequestCount: 1n,
-      cumulativeAmountPaid: 1n,
-    });
-    const metadataHash = computeEncodedMetadataHash(encodedMetadata);
+  it('rejects service rows whose on-chain pricing does not match announced metadata pricing', async () => {
+    const { report, domain, costUsdc, sellerMetadata } = await createValidPaidReport();
 
     const result = verifyChannelUsageReport({
-      channelId,
-      buyer: `0x${'11'.repeat(20)}`,
-      seller,
-      sellerAgentId,
-      cumulativeAmount: '1',
-      metadata: encodedMetadata,
-      metadataHash,
-      selectionBeacon,
-      verifierCount,
-      catalogRoot,
-      sellerCatalogSig: signSellerCatalog(catalogRoot),
-      serviceCatalogLeaves: [toCatalogPayload(catalogLeaf)],
-      catalogMerkleProofs: {
-        [catalogLeafHash]: computeMerkleProof([catalogLeafHash], catalogLeafHash),
-      },
-      serviceUsageLeaves: [toUsagePayload(usageLeaf)],
-      receiptLeavesOrProofs: [toReceiptPayload(receiptLeaf)],
-      reportedAt,
+      ...report,
+      serviceUsageLeaves: [{
+        ...report.serviceUsageLeaves[0]!,
+        inputUsdPerMillion: '999999',
+      }],
+    }, { spendingAuthDomain: domain, settledCumulativeAmount: costUsdc, sellerMetadata });
+
+    expect(result.ok).toBe(false);
+    expect(result.issues.map((issue) => issue.code)).toContain('usage-root-or-total-mismatch');
+    expect(result.issues.map((issue) => issue.code)).toContain('usage-pricing-mismatch');
+  });
+
+  it('rejects reports when the seller metadata pricing snapshot is unavailable', async () => {
+    const { report, domain, costUsdc } = await createValidPaidReport();
+
+    const result = verifyChannelUsageReport(report, {
+      spendingAuthDomain: domain,
+      settledCumulativeAmount: costUsdc,
     });
 
     expect(result.ok).toBe(false);
-    expect(result.issues.map((issue) => issue.code)).toContain('free-usage-paid-amount');
-    expect(result.issues.map((issue) => issue.code)).toContain('free-receipt-cost');
-
-    const verifier = Wallet.createRandom();
-    const ack = createUsageReportAck({
-      channelId,
-      buyer: `0x${'11'.repeat(20)}`,
-      seller,
-      sellerAgentId,
-      cumulativeAmount: '1',
-      metadata: encodedMetadata,
-      metadataHash,
-      selectionBeacon,
-      verifierCount,
-      catalogRoot,
-      sellerCatalogSig: signSellerCatalog(catalogRoot),
-      serviceCatalogLeaves: [toCatalogPayload(catalogLeaf)],
-      catalogMerkleProofs: {
-        [catalogLeafHash]: computeMerkleProof([catalogLeafHash], catalogLeafHash),
-      },
-      serviceUsageLeaves: [toUsagePayload(usageLeaf)],
-      receiptLeavesOrProofs: [toReceiptPayload(receiptLeaf)],
-      reportedAt,
-    }, result, {
-      verifier: verifier.address,
-      verifierAgentId: '77',
-      wallet: verifier,
-    });
-    expect(ack.accepted).toBe(false);
-    expect(ack.attestation).toBeUndefined();
+    expect(result.issues.map((issue) => issue.code)).toContain('missing-seller-metadata');
   });
 
-  it('selects verifier sellers deterministically from eligible candidates', () => {
+  it('rejects reports when seller metadata is not signed by the seller peer', async () => {
+    const { report, domain, costUsdc, sellerMetadata } = await createValidPaidReport();
+
+    const result = verifyChannelUsageReport(report, {
+      spendingAuthDomain: domain,
+      settledCumulativeAmount: costUsdc,
+      sellerMetadata: { ...sellerMetadata, signature: '00'.repeat(65) },
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.issues.map((issue) => issue.code)).toContain('invalid-seller-metadata-signature');
+  });
+
+  it('selects deterministic eligible verifiers', () => {
     const report = {
       channelId,
       metadataHash: `0x${'88'.repeat(32)}`,
@@ -291,7 +143,7 @@ describe('usage-report-verifier', () => {
       seller,
       sellerAgentId,
       selectionBeacon,
-      verifierCount,
+      verifierCount: 3,
     };
     const candidates = [
       { peerId: report.buyer, agentId: '1', staked: true, stakeWeight: 100n, firstSeenAt: 1_000, verificationCountForSeller: 0 },
@@ -328,14 +180,6 @@ describe('usage-report-verifier', () => {
 
     const seed = computeUsageReportVerifierSelectionSeed(report, selectionBeacon);
     expect(selected.every((candidate) => candidate.selectionSeed === seed)).toBe(true);
-
-    const differentMetadataSeed = computeUsageReportVerifierSelectionSeed({
-      ...report,
-      metadataHash: `0x${'89'.repeat(32)}`,
-    }, selectionBeacon);
-    const differentBeaconSeed = computeUsageReportVerifierSelectionSeed(report, `0x${'98'.repeat(32)}`);
-    expect(differentMetadataSeed).not.toBe(seed);
-    expect(differentBeaconSeed).not.toBe(seed);
   });
 
   it('lets a seller determine whether it should verify a received report', () => {
@@ -384,88 +228,16 @@ describe('usage-report-verifier', () => {
   });
 });
 
-function toCatalogPayload(leaf: ServiceCatalogLeaf) {
-  return {
-    sellerAgentId: leaf.sellerAgentId.toString(),
-    sellerAddress: leaf.sellerAddress,
-    serviceIdHash: leaf.serviceIdHash,
-    tokenizerIdHash: leaf.tokenizerIdHash,
-    inputUsdPerMillion: leaf.inputUsdPerMillion.toString(),
-    cachedInputUsdPerMillion: leaf.cachedInputUsdPerMillion.toString(),
-    outputUsdPerMillion: leaf.outputUsdPerMillion.toString(),
-    serviceMode: leaf.serviceMode.toString(),
-    termsHash: leaf.termsHash,
-    validFrom: leaf.validFrom.toString(),
-    validUntil: leaf.validUntil.toString(),
-  };
-}
-
-function toUsagePayload(leaf: ServiceUsageLeaf) {
-  return {
-    channelId: leaf.channelId,
-    serviceIdHash: leaf.serviceIdHash,
-    catalogLeafHash: leaf.catalogLeafHash,
-    serviceMode: leaf.serviceMode.toString(),
-    cumulativeFreshInputTokens: leaf.cumulativeFreshInputTokens.toString(),
-    cumulativeCachedInputTokens: leaf.cumulativeCachedInputTokens.toString(),
-    cumulativeOutputTokens: leaf.cumulativeOutputTokens.toString(),
-    cumulativeRequestCount: leaf.cumulativeRequestCount.toString(),
-    cumulativeAmountPaid: leaf.cumulativeAmountPaid.toString(),
-  };
-}
-
-function toReceiptPayload(leaf: ReceiptLeaf) {
-  return {
-    channelId: leaf.channelId,
-    requestIndex: leaf.requestIndex.toString(),
-    requestIdHash: leaf.requestIdHash,
-    requestHash: leaf.requestHash,
-    responseHash: leaf.responseHash,
-    serviceIdHash: leaf.serviceIdHash,
-    catalogLeafHash: leaf.catalogLeafHash,
-    freshInputTokens: leaf.freshInputTokens.toString(),
-    cachedInputTokens: leaf.cachedInputTokens.toString(),
-    outputTokens: leaf.outputTokens.toString(),
-    costUsdc: leaf.costUsdc.toString(),
-    cumulativeAmountAfterRequest: leaf.cumulativeAmountAfterRequest.toString(),
-  };
-}
-
-function address(n: number): string {
-  return `0x${n.toString(16).padStart(40, '0')}`;
-}
-
-function signSellerCatalog(catalogRoot: string): string {
-  return signUtf8(sellerWallet, encodeSellerCatalogForSigning({
-    seller,
-    sellerAgentId,
-    catalogRoot,
-  }));
-}
-
 async function createValidPaidReport(): Promise<{
   report: ChannelUsageReportPayload;
+  sellerMetadata: PeerMetadata;
   domain: ReturnType<typeof makeChannelsDomain>;
   costUsdc: bigint;
 }> {
   const buyer = Wallet.createRandom();
   const domain = makeChannelsDomain(8453, channelsAddress);
-  const serviceIdHash = hashUtf8('openai:gpt-4.1');
-  const catalogLeaf: ServiceCatalogLeaf = {
-    sellerAgentId,
-    sellerAddress: seller,
-    serviceIdHash,
-    tokenizerIdHash: hashUtf8('cl100k_base'),
-    inputUsdPerMillion: 1_000_000n,
-    cachedInputUsdPerMillion: 500_000n,
-    outputUsdPerMillion: 2_000_000n,
-    serviceMode: SERVICE_MODE_PAID,
-    termsHash: hashUtf8('paid terms'),
-    validFrom: 1_700_000_000n,
-    validUntil: 1_800_000_000n,
-  };
-  const catalogLeafHash = hashServiceCatalogLeaf(catalogLeaf);
-  const catalogRoot = computeMerkleRoot([catalogLeafHash]);
+  const sellerMetadata = createSellerMetadata();
+  const pricingSnapshotHash = derivePricingSnapshotHash(sellerMetadata);
   const costUsdc = computeCostUsdc(100, 10, {
     inputUsdPerMillion: 1_000_000,
     cachedInputUsdPerMillion: 500_000,
@@ -473,8 +245,12 @@ async function createValidPaidReport(): Promise<{
   }, 20);
   const usageLeaf: ServiceUsageLeaf = {
     channelId,
-    serviceIdHash,
-    catalogLeafHash,
+    provider: 'openai',
+    service: 'gpt-4.1',
+    serviceIdHash: serviceIdHash('openai', 'gpt-4.1'),
+    inputUsdPerMillion: 1_000_000n,
+    cachedInputUsdPerMillion: 500_000n,
+    outputUsdPerMillion: 2_000_000n,
     serviceMode: SERVICE_MODE_PAID,
     cumulativeFreshInputTokens: 100n,
     cumulativeCachedInputTokens: 20n,
@@ -482,32 +258,19 @@ async function createValidPaidReport(): Promise<{
     cumulativeRequestCount: 1n,
     cumulativeAmountPaid: costUsdc,
   };
-  const receiptLeaf: ReceiptLeaf = {
-    channelId,
-    requestIndex: 1n,
-    requestIdHash: hashUtf8('request-1'),
-    requestHash: `0x${'33'.repeat(32)}`,
-    responseHash: `0x${'44'.repeat(32)}`,
-    serviceIdHash,
-    catalogLeafHash,
-    freshInputTokens: 100n,
-    cachedInputTokens: 20n,
-    outputTokens: 10n,
-    costUsdc,
-    cumulativeAmountAfterRequest: costUsdc,
-  };
-  const encodedMetadata = encodeMetadataV2({
-    catalogRoot,
+  const metadata = {
+    pricingSnapshotHash,
     usageByServiceRoot: computeMerkleRoot([hashServiceUsageLeaf(usageLeaf)]),
-    receiptRoot: computeMerkleRoot([hashReceiptLeaf(receiptLeaf)]),
+    receiptRoot: ZERO_BYTES32,
     cumulativeFreshInputTokens: 100n,
     cumulativeCachedInputTokens: 20n,
     cumulativeOutputTokens: 10n,
     cumulativeRequestCount: 1n,
     cumulativeAmountPaid: costUsdc,
-  });
+  };
+  const encodedMetadata = encodeMetadataV2(metadata);
   const metadataHash = computeEncodedMetadataHash(encodedMetadata);
-  const buyerSpendingAuthSig = await signSpendingAuth(buyer, domain, {
+  const spendingAuthSig = await signSpendingAuth(buyer, domain, {
     channelId,
     cumulativeAmount: costUsdc,
     metadataHash,
@@ -515,6 +278,7 @@ async function createValidPaidReport(): Promise<{
 
   return {
     domain,
+    sellerMetadata,
     costUsdc,
     report: {
       channelId,
@@ -526,16 +290,55 @@ async function createValidPaidReport(): Promise<{
       metadataHash,
       selectionBeacon,
       verifierCount,
-      buyerSpendingAuthSig,
-      catalogRoot,
-      sellerCatalogSig: signSellerCatalog(catalogRoot),
-      serviceCatalogLeaves: [toCatalogPayload(catalogLeaf)],
-      catalogMerkleProofs: {
-        [catalogLeafHash]: computeMerkleProof([catalogLeafHash], catalogLeafHash),
-      },
+      buyerSpendingAuthSig: spendingAuthSig,
+      pricingSnapshotHash,
       serviceUsageLeaves: [toUsagePayload(usageLeaf)],
-      receiptLeavesOrProofs: [toReceiptPayload(receiptLeaf)],
       reportedAt,
     },
   };
+}
+
+function createSellerMetadata(): PeerMetadata {
+  const metadata: PeerMetadata = {
+    peerId: seller.slice(2).toLowerCase() as PeerId,
+    version: 8,
+    providers: [{
+      provider: 'openai',
+      services: ['gpt-4.1'],
+      defaultPricing: {
+        inputUsdPerMillion: 1_000_000,
+        cachedInputUsdPerMillion: 500_000,
+        outputUsdPerMillion: 2_000_000,
+      },
+      maxConcurrency: 5,
+      currentLoad: 0,
+    }],
+    region: 'test',
+    timestamp: reportedAt * 1000,
+    signature: '',
+  };
+  metadata.signature = bytesToHex(signData(sellerWallet, encodeMetadataForSigning(metadata)));
+  return metadata;
+}
+
+function toUsagePayload(leaf: ServiceUsageLeaf) {
+  return {
+    channelId: leaf.channelId,
+    provider: leaf.provider,
+    service: leaf.service,
+    serviceIdHash: leaf.serviceIdHash,
+    inputUsdPerMillion: leaf.inputUsdPerMillion.toString(),
+    cachedInputUsdPerMillion: leaf.cachedInputUsdPerMillion.toString(),
+    outputUsdPerMillion: leaf.outputUsdPerMillion.toString(),
+    serviceMode: leaf.serviceMode.toString(),
+    cumulativeFreshInputTokens: leaf.cumulativeFreshInputTokens.toString(),
+    cumulativeCachedInputTokens: leaf.cumulativeCachedInputTokens.toString(),
+    cumulativeOutputTokens: leaf.cumulativeOutputTokens.toString(),
+    cumulativeRequestCount: leaf.cumulativeRequestCount.toString(),
+    cumulativeAmountPaid: leaf.cumulativeAmountPaid.toString(),
+  };
+}
+
+function address(n: number): string {
+  return `0x${n.toString(16).padStart(40, '0')}`;
 }

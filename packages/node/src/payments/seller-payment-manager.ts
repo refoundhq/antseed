@@ -1,11 +1,8 @@
-import { type AbstractSigner, hexlify, keccak256, verifyTypedData } from 'ethers';
+import { type AbstractSigner, keccak256, verifyTypedData } from 'ethers';
 import type { Identity } from '../p2p/identity.js';
-import { signUtf8 } from '../p2p/identity.js';
 import type { PaymentMux } from '../p2p/payment-mux.js';
 import type {
-  ChannelUsageReportCatalogLeafPayload,
   ChannelUsageReportPayload,
-  ChannelUsageReportReceiptLeafPayload,
   ChannelUsageReportServiceUsageLeafPayload,
   NeedAuthUsageReportMetadataPayload,
   SpendingAuthPayload,
@@ -19,16 +16,13 @@ import {
   encodeMetadata,
   encodeMetadataV2,
   computeEncodedMetadataHash,
-  computeMerkleProof,
   computeMerkleRoot,
-  hashReceiptLeaf,
-  hashServiceCatalogLeaf,
   hashServiceUsageLeaf,
-  hashUtf8,
   SERVICE_MODE_PAID,
+  ZERO_BYTES32,
   ZERO_METADATA,
 } from './evm/signatures.js';
-import { encodeSellerCatalogForSigning } from './usage-report-verifier.js';
+import { serviceIdHash } from './usage-report-verifier.js';
 import { debugLog, debugWarn } from '../utils/debug.js';
 import { peerIdToAddress } from '../types/peer.js';
 import { ChannelStore, type StoredChannel } from './channel-store.js';
@@ -84,7 +78,9 @@ interface RecordUsageReportEvidenceParams {
   requestId: string;
   requestBody: Uint8Array;
   responseBody: Uint8Array;
+  provider: string;
   service: string;
+  pricingSnapshotHash: string;
   pricing: {
     inputUsdPerMillion: number;
     cachedInputUsdPerMillion?: number;
@@ -100,12 +96,8 @@ interface RecordUsageReportEvidenceParams {
 interface UsageReportDraft {
   metadata: NeedAuthUsageReportMetadataPayload;
   metadataHash: string;
-  catalogRoot: string;
-  sellerCatalogSig: string;
+  pricingSnapshotHash: string;
   serviceUsageLeaves: ChannelUsageReportServiceUsageLeafPayload[];
-  serviceCatalogLeaves: ChannelUsageReportCatalogLeafPayload[];
-  catalogMerkleProofs: Record<string, string[]>;
-  receiptLeavesOrProofs: ChannelUsageReportReceiptLeafPayload[];
 }
 
 /**
@@ -116,7 +108,6 @@ interface UsageReportDraft {
  */
 export class SellerPaymentManager {
   private readonly _signer: AbstractSigner;
-  private readonly _wallet: Identity['wallet'];
   private readonly _sellerAddress: string;
   private readonly _sellerAgentId: string | null;
   private readonly _usageReportVerifierCount: number;
@@ -200,7 +191,6 @@ export class SellerPaymentManager {
   constructor(identity: Identity, config: SellerPaymentConfig, channelStore: ChannelStore) {
     this._config = config;
     this._signer = identity.wallet;
-    this._wallet = identity.wallet;
     this._sellerAddress = identity.wallet.address;
     this._sellerAgentId = config.sellerAgentId ?? null;
     this._usageReportVerifierCount = config.usageReportVerifierCount ?? 3;
@@ -1107,12 +1097,8 @@ export class SellerPaymentManager {
       selectionBeacon: keccak256(auth.spendingAuthSig),
       verifierCount: this._usageReportVerifierCount,
       buyerSpendingAuthSig: auth.spendingAuthSig,
-      catalogRoot: draft.catalogRoot,
-      sellerCatalogSig: draft.sellerCatalogSig,
+      pricingSnapshotHash: draft.pricingSnapshotHash,
       serviceUsageLeaves: draft.serviceUsageLeaves,
-      serviceCatalogLeaves: draft.serviceCatalogLeaves,
-      catalogMerkleProofs: draft.catalogMerkleProofs,
-      receiptLeavesOrProofs: draft.receiptLeavesOrProofs,
       reportedAt: Math.floor(Date.now() / 1000),
     };
     void Promise.resolve(this._onUsageReportReady(report)).catch((err) => {
@@ -1124,39 +1110,21 @@ export class SellerPaymentManager {
     if (!this._sellerAgentId) return null;
     if (!this._spent.has(params.channelId)) return null;
 
-    const serviceIdHash = hashUtf8(params.service);
-    const catalogLeaf: ChannelUsageReportCatalogLeafPayload = {
-      sellerAgentId: this._sellerAgentId,
-      sellerAddress: this._sellerAddress,
-      serviceIdHash,
-      tokenizerIdHash: hashUtf8('unknown'),
-      inputUsdPerMillion: String(params.pricing.inputUsdPerMillion),
-      cachedInputUsdPerMillion: String(params.pricing.cachedInputUsdPerMillion ?? 0),
-      outputUsdPerMillion: String(params.pricing.outputUsdPerMillion),
-      serviceMode: SERVICE_MODE_PAID.toString(),
-      termsHash: hashUtf8('antseed-payment-v1'),
-      validFrom: '0',
-      validUntil: '340282366920938463463374607431768211455',
-    };
-    const catalogLeafHash = hashServiceCatalogLeaf(catalogLeaf);
-
     const previous = this._usageReportDrafts.get(params.channelId);
-    const catalogLeavesByHash = new Map<string, ChannelUsageReportCatalogLeafPayload>();
-    for (const leaf of previous?.serviceCatalogLeaves ?? []) {
-      catalogLeavesByHash.set(hashServiceCatalogLeaf(leaf).toLowerCase(), leaf);
-    }
-    catalogLeavesByHash.set(catalogLeafHash.toLowerCase(), catalogLeaf);
-
     const usageLeavesByKey = new Map<string, ChannelUsageReportServiceUsageLeafPayload>();
     for (const leaf of previous?.serviceUsageLeaves ?? []) {
-      usageLeavesByKey.set(`${leaf.catalogLeafHash.toLowerCase()}:${leaf.serviceIdHash.toLowerCase()}`, leaf);
+      usageLeavesByKey.set(`${leaf.provider}:${leaf.service}`, leaf);
     }
-    const usageKey = `${catalogLeafHash.toLowerCase()}:${serviceIdHash.toLowerCase()}`;
+    const usageKey = `${params.provider}:${params.service}`;
     const prevUsage = usageLeavesByKey.get(usageKey);
     usageLeavesByKey.set(usageKey, {
       channelId: params.channelId,
-      serviceIdHash,
-      catalogLeafHash,
+      provider: params.provider,
+      service: params.service,
+      serviceIdHash: serviceIdHash(params.provider, params.service),
+      inputUsdPerMillion: params.pricing.inputUsdPerMillion.toString(),
+      cachedInputUsdPerMillion: (params.pricing.cachedInputUsdPerMillion ?? params.pricing.inputUsdPerMillion).toString(),
+      outputUsdPerMillion: params.pricing.outputUsdPerMillion.toString(),
       serviceMode: SERVICE_MODE_PAID.toString(),
       cumulativeFreshInputTokens: (BigInt(prevUsage?.cumulativeFreshInputTokens ?? '0') + params.freshInputTokens).toString(),
       cumulativeCachedInputTokens: (BigInt(prevUsage?.cumulativeCachedInputTokens ?? '0') + params.cachedInputTokens).toString(),
@@ -1165,28 +1133,8 @@ export class SellerPaymentManager {
       cumulativeAmountPaid: (BigInt(prevUsage?.cumulativeAmountPaid ?? '0') + params.costUsdc).toString(),
     });
 
-    const receiptLeaves = [...(previous?.receiptLeavesOrProofs ?? [])];
-    receiptLeaves.push({
-      channelId: params.channelId,
-      requestIndex: String(receiptLeaves.length),
-      requestIdHash: hashUtf8(params.requestId),
-      requestHash: keccak256(hexlify(params.requestBody)),
-      responseHash: keccak256(hexlify(params.responseBody)),
-      serviceIdHash,
-      catalogLeafHash,
-      freshInputTokens: params.freshInputTokens.toString(),
-      cachedInputTokens: params.cachedInputTokens.toString(),
-      outputTokens: params.outputTokens.toString(),
-      costUsdc: params.costUsdc.toString(),
-      cumulativeAmountAfterRequest: params.cumulativeAmountAfterRequest.toString(),
-    });
-
-    const serviceCatalogLeaves = [...catalogLeavesByHash.values()];
     const serviceUsageLeaves = [...usageLeavesByKey.values()];
-    const catalogLeafHashes = serviceCatalogLeaves.map((leaf) => hashServiceCatalogLeaf(leaf));
-    const catalogRoot = computeMerkleRoot(catalogLeafHashes);
     const usageByServiceRoot = computeMerkleRoot(serviceUsageLeaves.map((leaf) => hashServiceUsageLeaf(leaf)));
-    const receiptRoot = computeMerkleRoot(receiptLeaves.map((leaf) => hashReceiptLeaf(leaf)));
     const totals = serviceUsageLeaves.reduce(
       (acc, leaf) => ({
         fresh: acc.fresh + BigInt(leaf.cumulativeFreshInputTokens),
@@ -1198,9 +1146,9 @@ export class SellerPaymentManager {
       { fresh: 0n, cached: 0n, output: 0n, requests: 0n, paid: 0n },
     );
     const metadata: NeedAuthUsageReportMetadataPayload = {
-      catalogRoot,
+      pricingSnapshotHash: params.pricingSnapshotHash,
       usageByServiceRoot,
-      receiptRoot,
+      receiptRoot: ZERO_BYTES32,
       cumulativeFreshInputTokens: totals.fresh.toString(),
       cumulativeCachedInputTokens: totals.cached.toString(),
       cumulativeOutputTokens: totals.output.toString(),
@@ -1208,7 +1156,7 @@ export class SellerPaymentManager {
       cumulativeAmountPaid: totals.paid.toString(),
     };
     const encodedMetadata = encodeMetadataV2({
-      catalogRoot: metadata.catalogRoot,
+      pricingSnapshotHash: metadata.pricingSnapshotHash,
       usageByServiceRoot: metadata.usageByServiceRoot,
       receiptRoot: metadata.receiptRoot,
       cumulativeFreshInputTokens: BigInt(metadata.cumulativeFreshInputTokens),
@@ -1217,27 +1165,11 @@ export class SellerPaymentManager {
       cumulativeRequestCount: BigInt(metadata.cumulativeRequestCount),
       cumulativeAmountPaid: BigInt(metadata.cumulativeAmountPaid),
     });
-    const sellerCatalogSig = signUtf8(
-      this._wallet,
-      encodeSellerCatalogForSigning({
-        seller: this._sellerAddress,
-        sellerAgentId: this._sellerAgentId,
-        catalogRoot,
-      }),
-    );
-    const catalogMerkleProofs: Record<string, string[]> = {};
-    for (const leafHash of catalogLeafHashes) {
-      catalogMerkleProofs[leafHash] = computeMerkleProof(catalogLeafHashes, leafHash);
-    }
     this._usageReportDrafts.set(params.channelId, {
       metadata,
       metadataHash: computeEncodedMetadataHash(encodedMetadata),
-      catalogRoot,
-      sellerCatalogSig,
+      pricingSnapshotHash: params.pricingSnapshotHash,
       serviceUsageLeaves,
-      serviceCatalogLeaves,
-      catalogMerkleProofs,
-      receiptLeavesOrProofs: receiptLeaves,
     });
     debugLog(`[SellerPayment] Usage report draft updated: channel=${params.channelId.slice(0, 18)}... paid=${metadata.cumulativeAmountPaid}`);
     return metadata;

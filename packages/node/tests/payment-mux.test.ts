@@ -165,12 +165,8 @@ describe('PaymentMux', () => {
         metadataHash: '0x' + 'cc'.repeat(32),
         selectionBeacon: '0x' + '99'.repeat(32),
         verifierCount: 3,
-        catalogRoot: '0x' + 'bb'.repeat(32),
-        sellerCatalogSig: '0x' + 'ee'.repeat(65),
+        pricingSnapshotHash: '0x' + 'bb'.repeat(32),
         serviceUsageLeaves: [],
-        serviceCatalogLeaves: [],
-        catalogMerkleProofs: {},
-        receiptLeavesOrProofs: [],
         reportedAt: 1700000000,
       };
       const reportFrame: FramedMessage = {

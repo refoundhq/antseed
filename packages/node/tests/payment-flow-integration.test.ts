@@ -8,11 +8,13 @@ import { SellerPaymentManager, type SellerPaymentConfig } from '../src/payments/
 import { ChannelStore } from '../src/payments/channel-store.js';
 import type { PaymentMux } from '../src/p2p/payment-mux.js';
 import type { SpendingAuthPayload, AuthAckPayload, ChannelUsageReportPayload } from '../src/types/protocol.js';
-import type { Identity } from '../src/p2p/identity.js';
+import type { PeerMetadata } from '../src/discovery/peer-metadata.js';
+import { signData, type Identity } from '../src/p2p/identity.js';
+import { encodeMetadataForSigning } from '../src/discovery/metadata-codec.js';
 import { bytesToHex } from '../src/utils/hex.js';
 import { toPeerId } from '../src/types/peer.js';
 import { AbiCoder, Wallet } from 'ethers';
-import { createUsageReportAck, verifyChannelReportAttestation, verifyChannelUsageReport } from '../src/payments/usage-report-verifier.js';
+import { createUsageReportAck, derivePricingSnapshotHash, verifyChannelReportAttestation, verifyChannelUsageReport } from '../src/payments/usage-report-verifier.js';
 import { computeCostUsdc } from '../src/payments/pricing.js';
 import { makeChannelsDomain } from '../src/payments/evm/signatures.js';
 
@@ -443,6 +445,22 @@ describe('Full Payment Flow Integration', () => {
       cachedInputUsdPerMillion: 1,
       outputUsdPerMillion: 15,
     };
+    const sellerMetadata: PeerMetadata = {
+      peerId: toPeerId(sellerIdentity.wallet.address.slice(2).toLowerCase()),
+      version: 8,
+      providers: [{
+        provider: 'anthropic',
+        services: ['claude-sonnet-4-5-20250929'],
+        defaultPricing: pricing,
+        maxConcurrency: 5,
+        currentLoad: 0,
+      }],
+      region: 'test',
+      timestamp: Date.now(),
+      signature: '',
+    };
+    sellerMetadata.signature = bytesToHex(signData(sellerIdentity.wallet, encodeMetadataForSigning(sellerMetadata)));
+    const pricingSnapshotHash = derivePricingSnapshotHash(sellerMetadata);
     const freshInputTokens = 120n;
     const cachedInputTokens = 10n;
     const outputTokens = 30n;
@@ -459,7 +477,9 @@ describe('Full Payment Flow Integration', () => {
       requestId: 'req-peer-report-1',
       requestBody,
       responseBody,
+      provider: 'anthropic',
       service: 'claude-sonnet-4-5-20250929',
+      pricingSnapshotHash,
       pricing,
       freshInputTokens,
       cachedInputTokens,
@@ -496,12 +516,16 @@ describe('Full Payment Flow Integration', () => {
     expect(report.cumulativeAmount).toBe(costUsdc.toString());
     expect(report.metadataHash).toBe(buyerAcceptedReportAuth.metadataHash);
     expect(report.serviceUsageLeaves).toHaveLength(1);
+    expect(report.serviceUsageLeaves[0]!.inputUsdPerMillion).toBe(String(pricing.inputUsdPerMillion));
+    expect(report.serviceUsageLeaves[0]!.cachedInputUsdPerMillion).toBe(String(pricing.cachedInputUsdPerMillion));
+    expect(report.serviceUsageLeaves[0]!.outputUsdPerMillion).toBe(String(pricing.outputUsdPerMillion));
     expect(report.serviceUsageLeaves[0]!.cumulativeRequestCount).toBe('1');
     expect(report.serviceUsageLeaves[0]!.cumulativeAmountPaid).toBe(costUsdc.toString());
 
     const verification = verifyChannelUsageReport(report, {
       spendingAuthDomain: makeChannelsDomain(CHAIN_ID, SESSIONS_CONTRACT),
       settledCumulativeAmount: costUsdc,
+      sellerMetadata,
     });
     expect(verification.ok).toBe(true);
 

@@ -34,7 +34,7 @@ export interface DecodedUsageReportVerificationRecorded {
   verifier: string;
   channelId: string;
   metadataHash: string;
-  catalogRoot: string;
+  pricingSnapshotHash: string;
   usageByServiceRoot: string;
   cumulativeAmount: bigint;
   accepted: boolean;
@@ -48,7 +48,9 @@ export interface DecodedUsageReportServiceUsageRecorded {
   sellerAgentId: bigint;
   serviceIdHash: string;
   channelId: string;
-  catalogLeafHash: string;
+  inputUsdPerMillion: bigint;
+  cachedInputUsdPerMillion: bigint;
+  outputUsdPerMillion: bigint;
   serviceMode: bigint;
   cumulativeFreshInputTokens: bigint;
   cumulativeCachedInputTokens: bigint;
@@ -59,10 +61,10 @@ export interface DecodedUsageReportServiceUsageRecorded {
 
 const STATS_ABI = [
   'event MetadataRecorded(uint256 indexed agentId, address indexed buyer, bytes32 indexed channelId, bytes32 metadataHash, uint256 inputTokens, uint256 outputTokens, uint256 requestCount)',
-  'event UsageReportVerificationRecorded(bytes32 indexed reportHash, uint256 indexed sellerAgentId, uint256 indexed verifierAgentId, address seller, address buyer, address verifier, bytes32 channelId, bytes32 metadataHash, bytes32 catalogRoot, bytes32 usageByServiceRoot, uint256 cumulativeAmount, bool accepted)',
-  'event UsageReportServiceUsageRecorded(bytes32 indexed reportHash, uint256 indexed sellerAgentId, bytes32 indexed serviceIdHash, bytes32 channelId, bytes32 catalogLeafHash, uint256 serviceMode, uint256 cumulativeFreshInputTokens, uint256 cumulativeCachedInputTokens, uint256 cumulativeOutputTokens, uint256 cumulativeRequestCount, uint256 cumulativeAmountPaid)',
-  'function recordUsageReportVerification(bytes32 reportHash, bytes32 channelId, address seller, address buyer, uint256 sellerAgentId, uint256 verifierAgentId, uint256 cumulativeAmount, bytes32 metadataHash, bytes32 catalogRoot, bytes32 usageByServiceRoot, bool accepted) external',
-  'function recordUsageReportVerificationWithServiceUsage(bytes32 reportHash, bytes32 channelId, address seller, address buyer, uint256 sellerAgentId, uint256 verifierAgentId, uint256 cumulativeAmount, bytes32 metadataHash, bytes32 catalogRoot, bytes32 usageByServiceRoot, bool accepted, (bytes32 channelId, bytes32 serviceIdHash, bytes32 catalogLeafHash, uint256 serviceMode, uint256 cumulativeFreshInputTokens, uint256 cumulativeCachedInputTokens, uint256 cumulativeOutputTokens, uint256 cumulativeRequestCount, uint256 cumulativeAmountPaid)[] serviceUsageLeaves) external',
+  'event UsageReportVerificationRecorded(bytes32 indexed reportHash, uint256 indexed sellerAgentId, uint256 indexed verifierAgentId, address seller, address buyer, address verifier, bytes32 channelId, bytes32 metadataHash, bytes32 pricingSnapshotHash, bytes32 usageByServiceRoot, uint256 cumulativeAmount, bool accepted)',
+  'event UsageReportServiceUsageRecorded(bytes32 indexed reportHash, uint256 indexed sellerAgentId, bytes32 indexed serviceIdHash, bytes32 channelId, uint256 inputUsdPerMillion, uint256 cachedInputUsdPerMillion, uint256 outputUsdPerMillion, uint256 serviceMode, uint256 cumulativeFreshInputTokens, uint256 cumulativeCachedInputTokens, uint256 cumulativeOutputTokens, uint256 cumulativeRequestCount, uint256 cumulativeAmountPaid)',
+  'function recordUsageReportVerification(bytes32 reportHash, bytes32 channelId, address seller, address buyer, uint256 sellerAgentId, uint256 verifierAgentId, uint256 cumulativeAmount, bytes32 metadataHash, bytes32 pricingSnapshotHash, bytes32 usageByServiceRoot, bool accepted) external',
+  'function recordUsageReportVerificationWithServiceUsage(bytes32 reportHash, bytes32 channelId, address seller, address buyer, uint256 sellerAgentId, uint256 verifierAgentId, uint256 cumulativeAmount, bytes32 metadataHash, bytes32 pricingSnapshotHash, bytes32 usageByServiceRoot, bool accepted, (bytes32 channelId, bytes32 serviceIdHash, uint256 inputUsdPerMillion, uint256 cachedInputUsdPerMillion, uint256 outputUsdPerMillion, uint256 serviceMode, uint256 cumulativeFreshInputTokens, uint256 cumulativeCachedInputTokens, uint256 cumulativeOutputTokens, uint256 cumulativeRequestCount, uint256 cumulativeAmountPaid)[] serviceUsageLeaves) external',
 ] as const;
 
 export class StatsClient extends BaseEvmClient {
@@ -141,7 +143,7 @@ export class StatsClient extends BaseEvmClient {
         verifier: (parsed.args[5] as string).toLowerCase(),
         channelId: parsed.args[6] as string,
         metadataHash: parsed.args[7] as string,
-        catalogRoot: parsed.args[8] as string,
+        pricingSnapshotHash: parsed.args[8] as string,
         usageByServiceRoot: parsed.args[9] as string,
         cumulativeAmount: parsed.args[10] as bigint,
         accepted: parsed.args[11] as boolean,
@@ -179,13 +181,15 @@ export class StatsClient extends BaseEvmClient {
         sellerAgentId: parsed.args[1] as bigint,
         serviceIdHash: parsed.args[2] as string,
         channelId: parsed.args[3] as string,
-        catalogLeafHash: parsed.args[4] as string,
-        serviceMode: parsed.args[5] as bigint,
-        cumulativeFreshInputTokens: parsed.args[6] as bigint,
-        cumulativeCachedInputTokens: parsed.args[7] as bigint,
-        cumulativeOutputTokens: parsed.args[8] as bigint,
-        cumulativeRequestCount: parsed.args[9] as bigint,
-        cumulativeAmountPaid: parsed.args[10] as bigint,
+        inputUsdPerMillion: parsed.args[4] as bigint,
+        cachedInputUsdPerMillion: parsed.args[5] as bigint,
+        outputUsdPerMillion: parsed.args[6] as bigint,
+        serviceMode: parsed.args[7] as bigint,
+        cumulativeFreshInputTokens: parsed.args[8] as bigint,
+        cumulativeCachedInputTokens: parsed.args[9] as bigint,
+        cumulativeOutputTokens: parsed.args[10] as bigint,
+        cumulativeRequestCount: parsed.args[11] as bigint,
+        cumulativeAmountPaid: parsed.args[12] as bigint,
       });
     }
     out.sort((a, b) =>
@@ -209,7 +213,7 @@ export class StatsClient extends BaseEvmClient {
       BigInt(attestation.verifierAgentId),
       BigInt(attestation.cumulativeAmount),
       attestation.metadataHash,
-      attestation.catalogRoot,
+      attestation.pricingSnapshotHash,
       attestation.usageByServiceRoot,
       accepted,
     ] as const;
@@ -223,7 +227,9 @@ export class StatsClient extends BaseEvmClient {
         serviceUsageLeaves.map((leaf) => ({
           channelId: leaf.channelId,
           serviceIdHash: leaf.serviceIdHash,
-          catalogLeafHash: leaf.catalogLeafHash,
+          inputUsdPerMillion: BigInt(leaf.inputUsdPerMillion),
+          cachedInputUsdPerMillion: BigInt(leaf.cachedInputUsdPerMillion),
+          outputUsdPerMillion: BigInt(leaf.outputUsdPerMillion),
           serviceMode: BigInt(leaf.serviceMode),
           cumulativeFreshInputTokens: BigInt(leaf.cumulativeFreshInputTokens),
           cumulativeCachedInputTokens: BigInt(leaf.cumulativeCachedInputTokens),

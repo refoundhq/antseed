@@ -110,16 +110,16 @@ export type { BuyerPaymentConfig, PerRequestAuthResult } from './buyer-payment-m
 export {
   createChannelReportAttestation,
   createUsageReportAck,
+  derivePricingSnapshotHash,
   encodeAttestationForSigning,
-  encodeSellerCatalogForSigning,
   computeChannelUsageReportHash,
   computeUsageReportVerifierSelectionSeed,
   getUsageReportVerifierAssignment,
   selectUsageReportVerifiers,
+  serviceIdHash,
   shouldVerifyUsageReport,
   verifyChannelUsageReport,
   verifyChannelReportAttestation,
-  verifySellerCatalogSignature,
 } from './usage-report-verifier.js';
 export type {
   SelectedUsageReportVerifier,

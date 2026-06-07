@@ -100,16 +100,16 @@ export type { BuyerPaymentConfig } from './payments/buyer-payment-manager.js';
 export {
   createChannelReportAttestation,
   createUsageReportAck,
+  derivePricingSnapshotHash,
   encodeAttestationForSigning,
-  encodeSellerCatalogForSigning,
   computeChannelUsageReportHash,
   computeUsageReportVerifierSelectionSeed,
   getUsageReportVerifierAssignment,
   selectUsageReportVerifiers,
+  serviceIdHash,
   shouldVerifyUsageReport,
   verifyChannelUsageReport,
   verifyChannelReportAttestation,
-  verifySellerCatalogSignature,
 } from './payments/usage-report-verifier.js';
 export type {
   SelectedUsageReportVerifier,

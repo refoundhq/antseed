@@ -6,8 +6,6 @@ import {
   type NeedAuthPayload,
   type ChannelUsageReportPayload,
   type ChannelUsageReportServiceUsageLeafPayload,
-  type ChannelUsageReportCatalogLeafPayload,
-  type ChannelUsageReportReceiptLeafPayload,
   type UsageReportAckPayload,
 } from '../types/protocol.js';
 
@@ -129,7 +127,7 @@ export function decodeNeedAuth(data: Uint8Array): NeedAuthPayload {
   ) {
     const metadata = obj.usageReportMetadata as Record<string, unknown>;
     result.usageReportMetadata = {
-      catalogRoot: requireString(metadata, 'catalogRoot'),
+      pricingSnapshotHash: requireString(metadata, 'pricingSnapshotHash'),
       usageByServiceRoot: requireString(metadata, 'usageByServiceRoot'),
       receiptRoot: requireString(metadata, 'receiptRoot'),
       cumulativeFreshInputTokens: requireString(metadata, 'cumulativeFreshInputTokens'),
@@ -154,12 +152,8 @@ export function decodePeerReport(data: Uint8Array): ChannelUsageReportPayload {
     metadataHash: requireString(obj, 'metadataHash'),
     selectionBeacon: requireString(obj, 'selectionBeacon'),
     verifierCount: requireNumber(obj, 'verifierCount'),
-    catalogRoot: requireString(obj, 'catalogRoot'),
-    sellerCatalogSig: requireString(obj, 'sellerCatalogSig'),
+    pricingSnapshotHash: requireString(obj, 'pricingSnapshotHash'),
     serviceUsageLeaves: parseArray(obj, 'serviceUsageLeaves', parseServiceUsageLeaf),
-    serviceCatalogLeaves: parseArray(obj, 'serviceCatalogLeaves', parseCatalogLeaf),
-    catalogMerkleProofs: parseProofMap(obj.catalogMerkleProofs),
-    receiptLeavesOrProofs: parseArray(obj, 'receiptLeavesOrProofs', parseReceiptLeaf),
     reportedAt: requireNumber(obj, 'reportedAt'),
   };
   if (typeof obj.buyerSpendingAuthSig === 'string') result.buyerSpendingAuthSig = obj.buyerSpendingAuthSig;
@@ -185,7 +179,7 @@ export function decodeReportAck(data: Uint8Array): UsageReportAckPayload {
       buyer: requireString(attestation, 'buyer'),
       cumulativeAmount: requireString(attestation, 'cumulativeAmount'),
       metadataHash: requireString(attestation, 'metadataHash'),
-      catalogRoot: requireString(attestation, 'catalogRoot'),
+      pricingSnapshotHash: requireString(attestation, 'pricingSnapshotHash'),
       usageByServiceRoot: requireString(attestation, 'usageByServiceRoot'),
       verifier: requireString(attestation, 'verifier'),
       verifierAgentId: requireString(attestation, 'verifierAgentId'),
@@ -229,63 +223,20 @@ function parseArray<T>(
   });
 }
 
-function parseProofMap(val: unknown): Record<string, string[]> {
-  if (typeof val !== 'object' || val === null || Array.isArray(val)) {
-    throw new Error('Missing or invalid proof map field: catalogMerkleProofs');
-  }
-  const out: Record<string, string[]> = {};
-  for (const [key, proof] of Object.entries(val)) {
-    if (!Array.isArray(proof) || proof.some((entry) => typeof entry !== 'string')) {
-      throw new Error(`Invalid Merkle proof for catalog leaf ${key}`);
-    }
-    out[key] = proof as string[];
-  }
-  return out;
-}
-
 function parseServiceUsageLeaf(obj: Record<string, unknown>): ChannelUsageReportServiceUsageLeafPayload {
   return {
     channelId: requireString(obj, 'channelId'),
+    provider: requireString(obj, 'provider'),
+    service: requireString(obj, 'service'),
     serviceIdHash: requireString(obj, 'serviceIdHash'),
-    catalogLeafHash: requireString(obj, 'catalogLeafHash'),
+    inputUsdPerMillion: requireString(obj, 'inputUsdPerMillion'),
+    cachedInputUsdPerMillion: requireString(obj, 'cachedInputUsdPerMillion'),
+    outputUsdPerMillion: requireString(obj, 'outputUsdPerMillion'),
     serviceMode: requireString(obj, 'serviceMode'),
     cumulativeFreshInputTokens: requireString(obj, 'cumulativeFreshInputTokens'),
     cumulativeCachedInputTokens: requireString(obj, 'cumulativeCachedInputTokens'),
     cumulativeOutputTokens: requireString(obj, 'cumulativeOutputTokens'),
     cumulativeRequestCount: requireString(obj, 'cumulativeRequestCount'),
     cumulativeAmountPaid: requireString(obj, 'cumulativeAmountPaid'),
-  };
-}
-
-function parseCatalogLeaf(obj: Record<string, unknown>): ChannelUsageReportCatalogLeafPayload {
-  return {
-    sellerAgentId: requireString(obj, 'sellerAgentId'),
-    sellerAddress: requireString(obj, 'sellerAddress'),
-    serviceIdHash: requireString(obj, 'serviceIdHash'),
-    tokenizerIdHash: requireString(obj, 'tokenizerIdHash'),
-    inputUsdPerMillion: requireString(obj, 'inputUsdPerMillion'),
-    cachedInputUsdPerMillion: requireString(obj, 'cachedInputUsdPerMillion'),
-    outputUsdPerMillion: requireString(obj, 'outputUsdPerMillion'),
-    serviceMode: requireString(obj, 'serviceMode'),
-    termsHash: requireString(obj, 'termsHash'),
-    validFrom: requireString(obj, 'validFrom'),
-    validUntil: requireString(obj, 'validUntil'),
-  };
-}
-
-function parseReceiptLeaf(obj: Record<string, unknown>): ChannelUsageReportReceiptLeafPayload {
-  return {
-    channelId: requireString(obj, 'channelId'),
-    requestIndex: requireString(obj, 'requestIndex'),
-    requestIdHash: requireString(obj, 'requestIdHash'),
-    requestHash: requireString(obj, 'requestHash'),
-    responseHash: requireString(obj, 'responseHash'),
-    serviceIdHash: requireString(obj, 'serviceIdHash'),
-    catalogLeafHash: requireString(obj, 'catalogLeafHash'),
-    freshInputTokens: requireString(obj, 'freshInputTokens'),
-    cachedInputTokens: requireString(obj, 'cachedInputTokens'),
-    outputTokens: requireString(obj, 'outputTokens'),
-    costUsdc: requireString(obj, 'costUsdc'),
-    cumulativeAmountAfterRequest: requireString(obj, 'cumulativeAmountAfterRequest'),
   };
 }

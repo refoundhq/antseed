@@ -61,7 +61,7 @@ export interface SpendingAuthMetadata {
 }
 
 export interface SpendingAuthMetadataV2 {
-  catalogRoot: string;
+  pricingSnapshotHash: string;
   usageByServiceRoot: string;
   receiptRoot: string;
   cumulativeFreshInputTokens: bigint;
@@ -91,8 +91,12 @@ export interface ServiceCatalogLeaf {
 
 export interface ServiceUsageLeaf {
   channelId: string;
+  provider: string;
+  service: string;
   serviceIdHash: string;
-  catalogLeafHash: string;
+  inputUsdPerMillion: Uintish;
+  cachedInputUsdPerMillion: Uintish;
+  outputUsdPerMillion: Uintish;
   serviceMode: Uintish;
   cumulativeFreshInputTokens: Uintish;
   cumulativeCachedInputTokens: Uintish;
@@ -137,7 +141,7 @@ export function encodeMetadataV2(metadata: SpendingAuthMetadataV2): string {
     ['uint256', 'bytes32', 'bytes32', 'bytes32', 'uint256', 'uint256', 'uint256', 'uint256', 'uint256'],
     [
       METADATA_V2_VERSION,
-      metadata.catalogRoot,
+      metadata.pricingSnapshotHash,
       metadata.usageByServiceRoot,
       metadata.receiptRoot,
       metadata.cumulativeFreshInputTokens,
@@ -150,7 +154,7 @@ export function encodeMetadataV2(metadata: SpendingAuthMetadataV2): string {
 }
 
 export function computeMetadataHash(metadata: SpendingAuthMetadata | SpendingAuthMetadataV2): string {
-  if ('catalogRoot' in metadata) {
+  if ('pricingSnapshotHash' in metadata) {
     return computeEncodedMetadataHash(encodeMetadataV2(metadata));
   }
   return keccak256(encodeMetadata(metadata));
@@ -166,7 +170,7 @@ export function decodeMetadata(encodedMetadata: string): DecodedSpendingAuthMeta
   if (version === METADATA_V2_VERSION) {
     const [
       ,
-      catalogRoot,
+      pricingSnapshotHash,
       usageByServiceRoot,
       receiptRoot,
       cumulativeFreshInputTokens,
@@ -181,7 +185,7 @@ export function decodeMetadata(encodedMetadata: string): DecodedSpendingAuthMeta
 
     return {
       version: METADATA_V2_VERSION,
-      catalogRoot,
+      pricingSnapshotHash,
       usageByServiceRoot,
       receiptRoot,
       cumulativeFreshInputTokens,
@@ -233,11 +237,13 @@ export function hashServiceCatalogLeaf(leaf: ServiceCatalogLeaf): string {
 export function hashServiceUsageLeaf(leaf: ServiceUsageLeaf): string {
   const coder = AbiCoder.defaultAbiCoder();
   return keccak256(coder.encode(
-    ['bytes32', 'bytes32', 'bytes32', 'uint256', 'uint256', 'uint256', 'uint256', 'uint256', 'uint256'],
+    ['bytes32', 'bytes32', 'uint256', 'uint256', 'uint256', 'uint256', 'uint256', 'uint256', 'uint256', 'uint256', 'uint256'],
     [
       leaf.channelId,
       leaf.serviceIdHash,
-      leaf.catalogLeafHash,
+      toBigInt(leaf.inputUsdPerMillion),
+      toBigInt(leaf.cachedInputUsdPerMillion),
+      toBigInt(leaf.outputUsdPerMillion),
       toBigInt(leaf.serviceMode),
       toBigInt(leaf.cumulativeFreshInputTokens),
       toBigInt(leaf.cumulativeCachedInputTokens),
@@ -314,7 +320,7 @@ export function verifyMerkleProof(leaf: string, proof: readonly string[], expect
   return root.toLowerCase() === expectedRoot.toLowerCase();
 }
 
-export function sumServiceUsageLeaves(leaves: readonly ServiceUsageLeaf[]): Omit<SpendingAuthMetadataV2, 'catalogRoot' | 'usageByServiceRoot' | 'receiptRoot'> {
+export function sumServiceUsageLeaves(leaves: readonly ServiceUsageLeaf[]): Omit<SpendingAuthMetadataV2, 'pricingSnapshotHash' | 'usageByServiceRoot' | 'receiptRoot'> {
   return leaves.reduce(
     (acc, leaf) => ({
       cumulativeFreshInputTokens: acc.cumulativeFreshInputTokens + toBigInt(leaf.cumulativeFreshInputTokens),

@@ -32,7 +32,7 @@ contract AntseedStatsV2 is IAntseedStats, Ownable {
 
     struct DecodedMetadata {
         uint256 version;
-        bytes32 catalogRoot;
+        bytes32 pricingSnapshotHash;
         bytes32 usageByServiceRoot;
         bytes32 receiptRoot;
         uint256 freshInputTokens;
@@ -50,7 +50,7 @@ contract AntseedStatsV2 is IAntseedStats, Ownable {
         uint256 cumulativeAmount;
         bytes32 channelId;
         bytes32 metadataHash;
-        bytes32 catalogRoot;
+        bytes32 pricingSnapshotHash;
         bytes32 usageByServiceRoot;
         bool accepted;
         uint64 verifiedAt;
@@ -59,7 +59,9 @@ contract AntseedStatsV2 is IAntseedStats, Ownable {
     struct ServiceUsageLeaf {
         bytes32 channelId;
         bytes32 serviceIdHash;
-        bytes32 catalogLeafHash;
+        uint256 inputUsdPerMillion;
+        uint256 cachedInputUsdPerMillion;
+        uint256 outputUsdPerMillion;
         uint256 serviceMode;
         uint256 cumulativeFreshInputTokens;
         uint256 cumulativeCachedInputTokens;
@@ -111,7 +113,7 @@ contract AntseedStatsV2 is IAntseedStats, Ownable {
         uint256 indexed agentId,
         address indexed buyer,
         bytes32 indexed channelId,
-        bytes32 catalogRoot,
+        bytes32 pricingSnapshotHash,
         bytes32 usageByServiceRoot,
         bytes32 receiptRoot,
         uint256 freshInputTokens,
@@ -139,7 +141,7 @@ contract AntseedStatsV2 is IAntseedStats, Ownable {
         address verifier,
         bytes32 channelId,
         bytes32 metadataHash,
-        bytes32 catalogRoot,
+        bytes32 pricingSnapshotHash,
         bytes32 usageByServiceRoot,
         uint256 cumulativeAmount,
         bool accepted
@@ -149,7 +151,9 @@ contract AntseedStatsV2 is IAntseedStats, Ownable {
         uint256 indexed sellerAgentId,
         bytes32 indexed serviceIdHash,
         bytes32 channelId,
-        bytes32 catalogLeafHash,
+        uint256 inputUsdPerMillion,
+        uint256 cachedInputUsdPerMillion,
+        uint256 outputUsdPerMillion,
         uint256 serviceMode,
         uint256 cumulativeFreshInputTokens,
         uint256 cumulativeCachedInputTokens,
@@ -255,7 +259,7 @@ contract AntseedStatsV2 is IAntseedStats, Ownable {
                 agentId,
                 buyer,
                 channelId,
-                decoded.catalogRoot,
+                decoded.pricingSnapshotHash,
                 decoded.usageByServiceRoot,
                 decoded.receiptRoot,
                 decoded.freshInputTokens,
@@ -278,7 +282,7 @@ contract AntseedStatsV2 is IAntseedStats, Ownable {
         uint256 verifierAgentId,
         uint256 cumulativeAmount,
         bytes32 metadataHash,
-        bytes32 catalogRoot,
+        bytes32 pricingSnapshotHash,
         bytes32 usageByServiceRoot,
         bool accepted
     ) external {
@@ -291,7 +295,7 @@ contract AntseedStatsV2 is IAntseedStats, Ownable {
             verifierAgentId,
             cumulativeAmount,
             metadataHash,
-            catalogRoot,
+            pricingSnapshotHash,
             usageByServiceRoot,
             accepted
         );
@@ -306,7 +310,7 @@ contract AntseedStatsV2 is IAntseedStats, Ownable {
         uint256 verifierAgentId,
         uint256 cumulativeAmount,
         bytes32 metadataHash,
-        bytes32 catalogRoot,
+        bytes32 pricingSnapshotHash,
         bytes32 usageByServiceRoot,
         bool accepted,
         ServiceUsageLeaf[] calldata serviceUsageLeaves
@@ -320,7 +324,7 @@ contract AntseedStatsV2 is IAntseedStats, Ownable {
             verifierAgentId,
             cumulativeAmount,
             metadataHash,
-            catalogRoot,
+            pricingSnapshotHash,
             usageByServiceRoot,
             accepted
         );
@@ -339,7 +343,7 @@ contract AntseedStatsV2 is IAntseedStats, Ownable {
         uint256 verifierAgentId,
         uint256 cumulativeAmount,
         bytes32 metadataHash,
-        bytes32 catalogRoot,
+        bytes32 pricingSnapshotHash,
         bytes32 usageByServiceRoot,
         bool accepted
     ) internal {
@@ -373,7 +377,7 @@ contract AntseedStatsV2 is IAntseedStats, Ownable {
         existing.cumulativeAmount = cumulativeAmount;
         existing.channelId = channelId;
         existing.metadataHash = metadataHash;
-        existing.catalogRoot = catalogRoot;
+        existing.pricingSnapshotHash = pricingSnapshotHash;
         existing.usageByServiceRoot = usageByServiceRoot;
         existing.accepted = accepted;
         existing.verifiedAt = uint64(block.timestamp);
@@ -400,7 +404,7 @@ contract AntseedStatsV2 is IAntseedStats, Ownable {
             msg.sender,
             channelId,
             metadataHash,
-            catalogRoot,
+            pricingSnapshotHash,
             usageByServiceRoot,
             cumulativeAmount,
             accepted
@@ -426,7 +430,9 @@ contract AntseedStatsV2 is IAntseedStats, Ownable {
                 sellerAgentId,
                 leaf.serviceIdHash,
                 leaf.channelId,
-                leaf.catalogLeafHash,
+                leaf.inputUsdPerMillion,
+                leaf.cachedInputUsdPerMillion,
+                leaf.outputUsdPerMillion,
                 leaf.serviceMode,
                 leaf.cumulativeFreshInputTokens,
                 leaf.cumulativeCachedInputTokens,
@@ -446,7 +452,9 @@ contract AntseedStatsV2 is IAntseedStats, Ownable {
             level[i] = keccak256(abi.encode(
                 leaf.channelId,
                 leaf.serviceIdHash,
-                leaf.catalogLeafHash,
+                leaf.inputUsdPerMillion,
+                leaf.cachedInputUsdPerMillion,
+                leaf.outputUsdPerMillion,
                 leaf.serviceMode,
                 leaf.cumulativeFreshInputTokens,
                 leaf.cumulativeCachedInputTokens,
@@ -522,7 +530,7 @@ contract AntseedStatsV2 is IAntseedStats, Ownable {
         if (version == 2) {
             (
                 ,
-                decoded.catalogRoot,
+                decoded.pricingSnapshotHash,
                 decoded.usageByServiceRoot,
                 decoded.receiptRoot,
                 decoded.freshInputTokens,

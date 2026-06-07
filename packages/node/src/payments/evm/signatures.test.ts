@@ -42,7 +42,7 @@ describe('spending auth metadata helpers', () => {
 
   it('encodes and decodes V2 metadata with roots and split input totals', () => {
     const metadata: SpendingAuthMetadataV2 = {
-      catalogRoot: `0x${'aa'.repeat(32)}`,
+      pricingSnapshotHash: `0x${'aa'.repeat(32)}`,
       usageByServiceRoot: `0x${'bb'.repeat(32)}`,
       receiptRoot: `0x${'cc'.repeat(32)}`,
       cumulativeFreshInputTokens: 100n,
@@ -96,8 +96,12 @@ describe('spending auth metadata helpers', () => {
     const usageLeaves: ServiceUsageLeaf[] = [
       {
         channelId,
+        provider: 'openai',
+        service: 'gpt-4.1',
         serviceIdHash,
-        catalogLeafHash,
+        inputUsdPerMillion: 2_000_000n,
+        cachedInputUsdPerMillion: 500_000n,
+        outputUsdPerMillion: 8_000_000n,
         serviceMode: SERVICE_MODE_PAID,
         cumulativeFreshInputTokens: 120n,
         cumulativeCachedInputTokens: 20n,
@@ -107,8 +111,12 @@ describe('spending auth metadata helpers', () => {
       },
       {
         channelId,
+        provider: 'local',
+        service: 'free-demo',
         serviceIdHash: hashUtf8('local:free-demo'),
-        catalogLeafHash: freeCatalogLeafHash,
+        inputUsdPerMillion: 0n,
+        cachedInputUsdPerMillion: 0n,
+        outputUsdPerMillion: 0n,
         serviceMode: SERVICE_MODE_FREE,
         cumulativeFreshInputTokens: 10n,
         cumulativeCachedInputTokens: 0n,
@@ -119,7 +127,7 @@ describe('spending auth metadata helpers', () => {
     ];
 
     const metadata: SpendingAuthMetadataV2 = {
-      catalogRoot,
+      pricingSnapshotHash: catalogRoot,
       usageByServiceRoot: computeMerkleRoot(usageLeaves.map(hashServiceUsageLeaf)),
       receiptRoot: computeMerkleRoot([
         hashReceiptLeaf({
