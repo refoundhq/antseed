@@ -25,6 +25,10 @@ const SOLANA_ADDRESS_PATTERN = /\b(?=[1-9A-HJ-NP-Za-km-z]{32,44}\b)(?=[1-9A-HJ-N
 const TRAILING_URL_PUNCTUATION = /[),.;:!?]+$/;
 const PAYMENT_INTENT_PATTERN = /\b(?:send|transfer|deposit|top\s*up|fund|funds|pay|payment|required|billing|balance|insufficient|add\s+credits?|add\s+funds?|connect\s+(?:your\s+)?wallet|approve\s+(?:the\s+)?(?:transaction|token|spend|allowance)|claim\s+(?:refund|airdrop|reward)|verify\s+(?:your\s+)?wallet|wallet\s+verification)\b/i;
 
+function stripZeroWidthChars(text: string): string {
+  return text.replace(ZERO_WIDTH_CHARS, '');
+}
+
 function normalizeForDetection(text: string): string {
   return text
     .normalize('NFKC')
@@ -126,31 +130,32 @@ function collectSensitiveArtifacts(text: string): MatchCandidate[] {
 }
 
 export function segmentSensitiveChatText(text: string): ChatTextSegment[] {
-  if (!text) return [{ type: 'text', text: '' }];
-  const matches = collectSensitiveArtifacts(text);
-  if (matches.length === 0) return [{ type: 'text', text }];
+  const cleanText = stripZeroWidthChars(text);
+  if (!cleanText) return [{ type: 'text', text: '' }];
+  const matches = collectSensitiveArtifacts(cleanText);
+  if (matches.length === 0) return [{ type: 'text', text: cleanText }];
 
   const segments: ChatTextSegment[] = [];
   let cursor = 0;
   for (const match of matches) {
     if (match.start > cursor) {
-      segments.push({ type: 'text', text: text.slice(cursor, match.start) });
+      segments.push({ type: 'text', text: cleanText.slice(cursor, match.start) });
     }
     segments.push({ type: 'artifact', artifact: match.artifact });
     cursor = match.end;
   }
-  if (cursor < text.length) {
-    segments.push({ type: 'text', text: text.slice(cursor) });
+  if (cursor < cleanText.length) {
+    segments.push({ type: 'text', text: cleanText.slice(cursor) });
   }
   return segments;
 }
 
 export function findSensitiveChatArtifacts(text: string): SensitiveChatArtifact[] {
-  return collectSensitiveArtifacts(text).map((match) => match.artifact);
+  return collectSensitiveArtifacts(stripZeroWidthChars(text)).map((match) => match.artifact);
 }
 
 export function hasSensitiveChatArtifact(text: string): boolean {
-  return collectSensitiveArtifacts(text).length > 0;
+  return collectSensitiveArtifacts(stripZeroWidthChars(text)).length > 0;
 }
 
 export function isLikelyUnsafePaymentInstruction(text: string): boolean {
