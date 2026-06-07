@@ -114,6 +114,8 @@ export type ToolApprovalRequest = {
   conversationId: string;
   toolCallId: string;
   toolName: string;
+  permissionKey: string;
+  permissionLabel: string;
   input: Record<string, unknown>;
   workspacePath: string;
   peerId: string | null;
@@ -191,6 +193,8 @@ export type DesktopBridge = {
   attachmentDownload?: (conversationId: string, attachmentId: string, suggestedName: string) => Promise<{ ok: boolean; path?: string; error?: string }>;
   chatAiSend?: (conversationId: string, message: string, service?: string, provider?: string, attachments?: PreparedChatAttachment[], peerId?: string, permissionMode?: ChatPermissionMode) => Promise<{ ok: boolean; error?: string }>;
   chatAiSendStream?: (conversationId: string, message: string, service?: string, provider?: string, attachments?: PreparedChatAttachment[], peerId?: string, permissionMode?: ChatPermissionMode) => Promise<{ ok: boolean; error?: string; stopReason?: ChatAiStreamStopReason }>;
+  chatPeerPermissionModeGet?: (peerId: string) => Promise<{ ok: boolean; mode?: ChatPermissionMode; error?: string }>;
+  chatPeerPermissionModeSet?: (peerId: string, mode: ChatPermissionMode) => Promise<{ ok: boolean; mode?: ChatPermissionMode; error?: string }>;
   chatToolApprovalDecision?: (id: string, decision: ToolApprovalDecision) => Promise<{ ok: boolean; error?: string }>;
   chatAiAbort?: (conversationId?: string) => Promise<{ ok: boolean }>;
   chatAiSelectPeer?: (payload: { conversationId?: string | null; peerId?: string | null }) => Promise<{ ok: boolean; error?: string }>;

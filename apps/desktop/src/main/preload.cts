@@ -118,6 +118,8 @@ type ToolApprovalRequest = {
   conversationId: string;
   toolCallId: string;
   toolName: string;
+  permissionKey: string;
+  permissionLabel: string;
   input: Record<string, unknown>;
   workspacePath: string;
   peerId: string | null;
@@ -253,6 +255,12 @@ const api = {
   },
   chatAiSendStream(conversationId: string, message: string, service?: string, provider?: string, attachments?: PreparedChatAttachment[], peerId?: string, permissionMode?: ChatPermissionMode): Promise<{ ok: boolean; error?: string; stopReason?: ChatAiStreamStopReason }> {
     return ipcRenderer.invoke('chat:ai-send-stream', conversationId, message, service, provider, attachments, peerId, permissionMode);
+  },
+  chatPeerPermissionModeGet(peerId: string): Promise<{ ok: boolean; mode?: ChatPermissionMode; error?: string }> {
+    return ipcRenderer.invoke('chat:peer-permission-mode-get', peerId);
+  },
+  chatPeerPermissionModeSet(peerId: string, mode: ChatPermissionMode): Promise<{ ok: boolean; mode?: ChatPermissionMode; error?: string }> {
+    return ipcRenderer.invoke('chat:peer-permission-mode-set', { peerId, mode });
   },
   chatToolApprovalDecision(id: string, decision: ToolApprovalDecision): Promise<{ ok: boolean; error?: string }> {
     return ipcRenderer.invoke('chat:tool-approval-decision', { id, decision });

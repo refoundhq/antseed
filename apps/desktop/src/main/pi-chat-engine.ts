@@ -36,21 +36,21 @@ import { fetchNetworkStats } from './fetch-network-stats.js';
 import { buildAntstationSystemPrompt } from './chat-system-prompt.js';
 import {
   allowToolForPeer,
+  CHAT_DATA_DIR,
+  CHAT_WORKSPACE_DIR,
   describeToolApproval,
+  getCurrentChatWorkspaceDir,
+  getPeerPermissionMode,
+  getWorkspaceGitStatus,
   isToolAllowedForPeer,
+  loadChatWorkspaceDir,
   normalizePermissionMode,
+  persistChatWorkspaceDir,
   requiresToolApproval,
+  setPeerPermissionMode,
   type ChatPermissionMode,
   type ToolApprovalDecision,
   type ToolApprovalRequest,
-} from './chat-tool-permissions.js';
-import {
-  CHAT_DATA_DIR,
-  CHAT_WORKSPACE_DIR,
-  getCurrentChatWorkspaceDir,
-  getWorkspaceGitStatus,
-  loadChatWorkspaceDir,
-  persistChatWorkspaceDir,
 } from './chat-workspace.js';
 import { DEFAULT_BUYER_STATE_PATH, LOCALHOST, LOCALHOST_URL } from './constants.js';
 import { PROXY_PROVIDER_ID, normalizeProviderId, sanitizeProviderHint } from './chat-provider-hint.js';
@@ -1778,6 +1778,26 @@ export function registerPiChatHandlers({
     }
   };
 
+  ipcMain.handle('chat:peer-permission-mode-get', async (_event, peerId: unknown) => {
+    try {
+      const mode = await getPeerPermissionMode(typeof peerId === 'string' ? peerId : null);
+      return { ok: true, mode };
+    } catch (error) {
+      return { ok: false, error: asErrorMessage(error) };
+    }
+  });
+
+  ipcMain.handle('chat:peer-permission-mode-set', async (_event, payload: { peerId?: unknown; mode?: unknown }) => {
+    try {
+      const peerId = typeof payload?.peerId === 'string' ? payload.peerId : null;
+      const mode = normalizePermissionMode(payload?.mode);
+      await setPeerPermissionMode(peerId, mode);
+      return { ok: true, mode };
+    } catch (error) {
+      return { ok: false, error: asErrorMessage(error) };
+    }
+  });
+
   ipcMain.handle('chat:tool-approval-decision', async (_event, payload: { id?: unknown; decision?: unknown }) => {
     const id = typeof payload?.id === 'string' ? payload.id : '';
     const decision = payload?.decision === 'allow_once' || payload?.decision === 'always_allow_peer'
@@ -1891,7 +1911,7 @@ export function registerPiChatHandlers({
     permissionModeInput?: unknown,
   ): Promise<{ ok: boolean; error?: string; stopReason?: ChatStreamStopReason }> => {
     const trimmedMessage = userMessage.trim();
-    const permissionMode: ChatPermissionMode = normalizePermissionMode(permissionModeInput);
+    const requestedPermissionMode: ChatPermissionMode = normalizePermissionMode(permissionModeInput);
     const attachmentPromptText = buildAttachmentPromptText(attachments);
     const attachmentImages = extractAttachmentImages(attachments);
     if (trimmedMessage.length === 0 && attachmentPromptText.length === 0 && attachmentImages.length === 0) {
@@ -1945,6 +1965,9 @@ export function registerPiChatHandlers({
     const persistedPeer = extractPeerFromEntries(sessionManager);
     const peerOverrideId = normalizePeerId(peerOverride) ?? null;
     const preferredPeerId = peerOverrideId ?? preferredPeerByConversationId.get(conversationId) ?? persistedPeer?.peerId ?? null;
+    const permissionMode: ChatPermissionMode = preferredPeerId
+      ? await getPeerPermissionMode(preferredPeerId)
+      : requestedPermissionMode;
     if (preferredPeerId) {
       preferredPeerByConversationId.set(conversationId, preferredPeerId);
       if (peerOverrideId && persistedPeer?.peerId !== peerOverrideId) {
@@ -2022,17 +2045,17 @@ export function registerPiChatHandlers({
         if (!requiresToolApproval(permissionMode, event.toolName)) {
           return undefined;
         }
-        if (await isToolAllowedForPeer(preferredPeerId, event.toolName)) {
-          return undefined;
-        }
-
         const input = event.input && typeof event.input === 'object'
           ? event.input as Record<string, unknown>
           : {};
+        const description = describeToolApproval(event.toolName, input, preferredPeerId);
+        if (await isToolAllowedForPeer(preferredPeerId, description.permissionKey)) {
+          return undefined;
+        }
+
         const peerName = preferredPeerId
           ? lastServiceCatalogEntries.find((entry) => entry.peerId === preferredPeerId)?.peerLabel ?? null
           : null;
-        const description = describeToolApproval(event.toolName, input, preferredPeerId);
         const decision = await requestToolApproval({
           id: randomUUID(),
           conversationId,
@@ -2047,7 +2070,7 @@ export function registerPiChatHandlers({
 
         if (decision === 'always_allow_peer') {
           try {
-            await allowToolForPeer(preferredPeerId, event.toolName);
+            await allowToolForPeer(preferredPeerId, description.permissionKey);
           } catch (error) {
             appendSystemLog(`Failed to save peer-scoped tool approval rule: ${asErrorMessage(error)}`);
           }

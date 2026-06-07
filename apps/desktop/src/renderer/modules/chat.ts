@@ -89,7 +89,7 @@ export type ChatModuleApi = {
   handleServiceBlur: () => void;
   clearPinnedPeer: () => void;
   setChatPermissionMode: (mode: ChatPermissionMode) => void;
-  decideToolApproval: (decision: ToolApprovalDecision) => void;
+  decideToolApproval: (decision: ToolApprovalDecision, requestId?: string) => void;
   handleLogLineForThinkingPhase: (line: string) => void;
 };
 
@@ -120,6 +120,7 @@ export function initChatModule({
   const PAYMENT_AUTO_RETRY_DELAY_MS = 7_000;
   const PAYMENT_AUTO_RETRY_MAX_ATTEMPTS = 2;
   const CHAT_PERMISSION_MODE_KEY = 'antseed:chatPermissionMode';
+  const CHAT_PEER_PERMISSION_MODES_KEY = 'antseed:chatPeerPermissionModes';
 
   type NormalizedChatServiceEntry = Required<
     Pick<ChatServiceCatalogEntry, 'id' | 'label' | 'provider' | 'protocol' | 'count'>
@@ -170,14 +171,70 @@ export function initChatModule({
     value === 'full' ? 'full' : 'manual'
   );
 
-  if (typeof window !== 'undefined') {
-    uiState.chatPermissionMode = normalizePermissionMode(window.localStorage.getItem(CHAT_PERMISSION_MODE_KEY));
+  function loadPeerPermissionModeFallback(peerId: string): ChatPermissionMode {
+    if (typeof window === 'undefined') return 'manual';
+    try {
+      const raw = window.localStorage.getItem(CHAT_PEER_PERMISSION_MODES_KEY);
+      const parsed = raw ? JSON.parse(raw) as Record<string, unknown> : {};
+      return normalizePermissionMode(parsed[peerId]);
+    } catch {
+      return normalizePermissionMode(window.localStorage.getItem(CHAT_PERMISSION_MODE_KEY));
+    }
   }
 
+  function savePeerPermissionModeFallback(peerId: string, mode: ChatPermissionMode): void {
+    if (typeof window === 'undefined') return;
+    try {
+      const raw = window.localStorage.getItem(CHAT_PEER_PERMISSION_MODES_KEY);
+      const parsed = raw ? JSON.parse(raw) as Record<string, unknown> : {};
+      parsed[peerId] = normalizePermissionMode(mode);
+      window.localStorage.setItem(CHAT_PEER_PERMISSION_MODES_KEY, JSON.stringify(parsed));
+    } catch {
+      window.localStorage.setItem(CHAT_PERMISSION_MODE_KEY, normalizePermissionMode(mode));
+    }
+  }
+
+  function getActivePermissionPeerId(): string {
+    const conversationPeerId = activeConversation?.peerId?.trim() ?? '';
+    if (conversationPeerId) return conversationPeerId;
+    if (uiState.chatSelectedPeerId) return uiState.chatSelectedPeerId;
+    const selected = decodeChatServiceSelection(uiState.chatSelectedServiceValue);
+    return selected.peerId?.trim() ?? '';
+  }
+
+  async function refreshChatPermissionModeForPeer(peerId = getActivePermissionPeerId()): Promise<void> {
+    const normalizedPeerId = peerId.trim();
+    if (!normalizedPeerId) {
+      uiState.chatPermissionMode = 'manual';
+      notifyUiStateChanged();
+      return;
+    }
+    const fallback = loadPeerPermissionModeFallback(normalizedPeerId);
+    uiState.chatPermissionMode = fallback;
+    notifyUiStateChanged();
+    try {
+      const result = await bridge?.chatPeerPermissionModeGet?.(normalizedPeerId);
+      if (result?.ok && result.mode) {
+        uiState.chatPermissionMode = normalizePermissionMode(result.mode);
+        savePeerPermissionModeFallback(normalizedPeerId, uiState.chatPermissionMode);
+        notifyUiStateChanged();
+      }
+    } catch {
+      // Keep local fallback.
+    }
+  }
+
+  void refreshChatPermissionModeForPeer();
+
   function setChatPermissionMode(mode: ChatPermissionMode): void {
-    uiState.chatPermissionMode = normalizePermissionMode(mode);
-    if (typeof window !== 'undefined') {
-      window.localStorage.setItem(CHAT_PERMISSION_MODE_KEY, uiState.chatPermissionMode);
+    const nextMode = normalizePermissionMode(mode);
+    const peerId = getActivePermissionPeerId();
+    uiState.chatPermissionMode = nextMode;
+    if (peerId) {
+      savePeerPermissionModeFallback(peerId, nextMode);
+      void bridge?.chatPeerPermissionModeSet?.(peerId, nextMode).catch(() => undefined);
+    } else if (typeof window !== 'undefined') {
+      window.localStorage.setItem(CHAT_PERMISSION_MODE_KEY, nextMode);
     }
     notifyUiStateChanged();
   }
@@ -187,8 +244,10 @@ export function initChatModule({
     uiState.chatToolApprovalRequest = requests[0] ?? null;
   }
 
-  function decideToolApproval(decision: ToolApprovalDecision): void {
-    const request = uiState.chatToolApprovalRequest;
+  function decideToolApproval(decision: ToolApprovalDecision, requestId?: string): void {
+    const request = requestId
+      ? uiState.chatToolApprovalRequests.find((entry) => entry.id === requestId) ?? null
+      : uiState.chatToolApprovalRequest;
     if (!request) return;
     setToolApprovalRequests(uiState.chatToolApprovalRequests.filter((entry) => entry.id !== request.id));
     notifyUiStateChanged();
@@ -1590,6 +1649,7 @@ export function initChatModule({
         setLocalConversationMessages(convId, uiState.chatMessages as ChatMessage[]);
         updateThreadMeta(activeConversation);
         clearTransientChatNotices();
+        void refreshChatPermissionModeForPeer(resolveConversationPeerId(activeConversation));
         notifyUiStateChanged();
 
         const convWorkspacePath = conv.workspacePath;
@@ -1628,6 +1688,7 @@ export function initChatModule({
     // render the WalkingAnt inside the empty new-chat screen.
     syncActiveConversationSendingState();
     updateThreadMeta(null);
+    void refreshChatPermissionModeForPeer();
     notifyUiStateChanged();
   }
 
@@ -2319,6 +2380,7 @@ export function initChatModule({
         peerId: peerId || null,
       }).catch(() => undefined);
     }
+    void refreshChatPermissionModeForPeer(peerId);
 
     notifyUiStateChanged();
   }
@@ -2350,6 +2412,7 @@ export function initChatModule({
         peerId: null,
       }).catch(() => undefined);
     }
+    void refreshChatPermissionModeForPeer('');
     notifyUiStateChanged();
   }
 
