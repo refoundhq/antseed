@@ -417,6 +417,7 @@ export function registerSellerStartCommand(sellerCmd: Command): void {
           channelsContractAddress: config.payments.crypto?.channelsContractAddress,
           stakingContractAddress: config.payments.crypto?.stakingContractAddress,
           statsContractAddress: config.payments.crypto?.statsContractAddress,
+          usageReportStatsContractAddress: config.payments.crypto?.usageReportStatsContractAddress,
           usdcContractAddress: config.payments.crypto?.usdcContractAddress,
           identityRegistryAddress: config.payments.crypto?.identityRegistryAddress,
           emissionsContractAddress: config.payments.crypto?.emissionsContractAddress,
@@ -433,6 +434,7 @@ export function registerSellerStartCommand(sellerCmd: Command): void {
           depositsContractAddress: cc.depositsContractAddress,
           channelsContractAddress: cc.channelsContractAddress,
           ...(cc.statsContractAddress ? { statsContractAddress: cc.statsContractAddress } : {}),
+          ...(cc.usageReportStatsContractAddress ? { usageReportStatsContractAddress: cc.usageReportStatsContractAddress } : {}),
           usdcAddress: cc.usdcContractAddress,
           defaultLockAmountUSDC: defaultLockAmountUSDCBaseUnits,
         }
@@ -576,6 +578,9 @@ export function registerSellerStartCommand(sellerCmd: Command): void {
             stakingAddress: resolveChainConfig({ chainId: paymentConfig.crypto.chainId }).stakingContractAddress,
             ...(paymentConfig.crypto.statsContractAddress
               ? { statsAddress: paymentConfig.crypto.statsContractAddress }
+              : {}),
+            ...(paymentConfig.crypto.usageReportStatsContractAddress
+              ? { usageReportStatsAddress: paymentConfig.crypto.usageReportStatsContractAddress }
               : {}),
             chainId: resolveChainConfig({ chainId: paymentConfig.crypto.chainId }).evmChainId,
           } : {}),

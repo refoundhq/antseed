@@ -24,6 +24,8 @@ export interface ChainConfig {
   channelsDeployBlock?: number;
   /** AntseedStats contract address. Populated only where an indexer aggregates it. */
   statsContractAddress?: string;
+  /** AntseedStatsV2-compatible address used for usage-report verifier writes. */
+  usageReportStatsContractAddress?: string;
   /** Deployment block of AntseedStats for cold-start indexer backfill. */
   statsDeployBlock?: number;
   /** Public URL of the @antseed/network-stats aggregator that indexes the stats contract for this chain. */
@@ -108,6 +110,7 @@ export function resolveChainConfig(overrides?: {
   channelsContractAddress?: string;
   stakingContractAddress?: string;
   statsContractAddress?: string;
+  usageReportStatsContractAddress?: string;
   usdcContractAddress?: string;
   identityRegistryAddress?: string;
   emissionsContractAddress?: string;
@@ -130,6 +133,7 @@ export function resolveChainConfig(overrides?: {
     ...(overrides?.channelsContractAddress ? { channelsContractAddress: overrides.channelsContractAddress } : {}),
     ...(overrides?.stakingContractAddress ? { stakingContractAddress: overrides.stakingContractAddress } : {}),
     ...(overrides?.statsContractAddress ? { statsContractAddress: overrides.statsContractAddress } : {}),
+    ...(overrides?.usageReportStatsContractAddress ? { usageReportStatsContractAddress: overrides.usageReportStatsContractAddress } : {}),
     ...(overrides?.usdcContractAddress ? { usdcContractAddress: overrides.usdcContractAddress } : {}),
     ...(overrides?.identityRegistryAddress ? { identityRegistryAddress: overrides.identityRegistryAddress } : {}),
     ...(overrides?.emissionsContractAddress ? { emissionsContractAddress: overrides.emissionsContractAddress } : {}),

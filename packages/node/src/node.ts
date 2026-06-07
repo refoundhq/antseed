@@ -132,8 +132,10 @@ export interface NodePaymentsConfig {
   identityRegistryAddress?: string;
   /** AntseedStaking contract address */
   stakingAddress?: string;
-  /** AntseedStats contract address for verifier attestation recording */
+  /** AntseedStats contract address for legacy read-side stats/indexers. */
   statsAddress?: string;
+  /** AntseedStatsV2-compatible address for verifier usage-report attestation recording. */
+  usageReportStatsAddress?: string;
   /** Chain ID for EIP-712 domain. Default: 8453 (Base) */
   chainId?: number;
   /** Default maximum USDC per spending auth. Default: 500000 ($0.50) */
@@ -1606,15 +1608,17 @@ export class AntseedNode extends EventEmitter {
       debugLog(`[Node] StakingClient initialized (contract=${payments.stakingAddress.slice(0, 10)}...)`);
     }
 
-    // Initialize StatsClient for verifier usage-report attestation recording.
-    if (payments.rpcUrl && payments.statsAddress) {
+    // Initialize StatsClient only for the V2 usage-report recorder. The legacy
+    // statsAddress can point at AntseedStats, which does not implement the
+    // service-usage recording method used by this flow.
+    if (payments.rpcUrl && payments.usageReportStatsAddress) {
       this._statsClient = new StatsClient({
         rpcUrl: payments.rpcUrl,
         ...(fallbackRpcUrls ? { fallbackRpcUrls } : {}),
-        contractAddress: payments.statsAddress,
+        contractAddress: payments.usageReportStatsAddress,
         ...(payments.chainId ? { evmChainId: payments.chainId } : {}),
       });
-      debugLog(`[Node] StatsClient initialized (contract=${payments.statsAddress.slice(0, 10)}...)`);
+      debugLog(`[Node] UsageReport StatsClient initialized (contract=${payments.usageReportStatsAddress.slice(0, 10)}...)`);
     }
 
     // Initialize IdentityClient (ERC-8004 IdentityRegistry)
