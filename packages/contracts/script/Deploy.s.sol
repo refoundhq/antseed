@@ -4,7 +4,16 @@ pragma solidity ^0.8.24;
 import "forge-std/Script.sol";
 
 import {ISetRegistry, ISetWriter} from "../interfaces/IAntseedWiring.sol";
+import {ANTSToken} from "../ANTSToken.sol";
+import {AntseedChannels} from "../AntseedChannels.sol";
+import {AntseedDeposits} from "../AntseedDeposits.sol";
+import {AntseedEmissions} from "../AntseedEmissions.sol";
 import {AntseedRegistry} from "../AntseedRegistry.sol";
+import {AntseedStaking} from "../AntseedStaking.sol";
+import {AntseedStatsV2} from "../AntseedStatsV2.sol";
+import {AntseedSubPool} from "../AntseedSubPool.sol";
+import {MockERC8004Registry} from "../MockERC8004Registry.sol";
+import {MockUSDC} from "../MockUSDC.sol";
 
 /**
  * @title Deploy
@@ -25,127 +34,103 @@ contract Deploy is Script {
         address protocolReserve = vm.envOr("PROTOCOL_RESERVE", vm.addr(deployerPrivateKey));
         address legacyStats = vm.envOr("LEGACY_STATS", address(0));
 
-        // Read bytecodes from compiled artifacts
-        bytes memory usdcBytecode = vm.getCode("MockUSDC.sol:MockUSDC");
-        bytes memory tokenBytecode = vm.getCode("ANTSToken.sol:ANTSToken");
-
-        vm.startBroadcast(deployerPrivateKey);
-
         // 1. MockUSDC
-        address usdc;
-        assembly { usdc := create(0, add(usdcBytecode, 0x20), mload(usdcBytecode)) }
-        require(usdc != address(0), "MockUSDC deploy failed");
+        vm.broadcast(deployerPrivateKey);
+        address usdc = address(new MockUSDC());
         console.log("MockUSDC:             ", usdc);
 
         // 2. MockERC8004Registry (local testing; on mainnet use 0x8004A169...)
-        bytes memory registryBytecode = vm.getCode("MockERC8004Registry.sol:MockERC8004Registry");
-        address identityRegistry;
-        assembly { identityRegistry := create(0, add(registryBytecode, 0x20), mload(registryBytecode)) }
-        require(identityRegistry != address(0), "MockERC8004Registry deploy failed");
+        vm.broadcast(deployerPrivateKey);
+        address identityRegistry = address(new MockERC8004Registry());
         console.log("MockERC8004Registry:  ", identityRegistry);
 
         // 3. ANTSToken
-        address antsToken;
-        assembly { antsToken := create(0, add(tokenBytecode, 0x20), mload(tokenBytecode)) }
-        require(antsToken != address(0), "ANTSToken deploy failed");
+        vm.broadcast(deployerPrivateKey);
+        address antsToken = address(new ANTSToken());
         console.log("ANTSToken:            ", antsToken);
 
         // 4. AntseedRegistry (central address book)
+        vm.broadcast(deployerPrivateKey);
         AntseedRegistry antseedRegistry = new AntseedRegistry();
         console.log("AntseedRegistry:      ", address(antseedRegistry));
 
         // 5. AntseedStaking(usdc, registry)
-        bytes memory stakingBytecode = abi.encodePacked(
-            vm.getCode("AntseedStaking.sol:AntseedStaking"),
-            abi.encode(usdc, address(antseedRegistry))
-        );
-        address staking;
-        assembly { staking := create(0, add(stakingBytecode, 0x20), mload(stakingBytecode)) }
-        require(staking != address(0), "Staking deploy failed");
+        vm.broadcast(deployerPrivateKey);
+        address staking = address(new AntseedStaking(usdc, address(antseedRegistry)));
         console.log("AntseedStaking:       ", staking);
 
         // 6. AntseedDeposits(usdc)
-        bytes memory depositsBytecode = abi.encodePacked(
-            vm.getCode("AntseedDeposits.sol:AntseedDeposits"),
-            abi.encode(usdc)
-        );
-        address deposits;
-        assembly { deposits := create(0, add(depositsBytecode, 0x20), mload(depositsBytecode)) }
-        require(deposits != address(0), "Deposits deploy failed");
+        vm.broadcast(deployerPrivateKey);
+        address deposits = address(new AntseedDeposits(usdc));
         console.log("AntseedDeposits:      ", deposits);
 
         // 7. AntseedChannels(registry)
-        bytes memory channelsBytecode = abi.encodePacked(
-            vm.getCode("AntseedChannels.sol:AntseedChannels"),
-            abi.encode(address(antseedRegistry))
-        );
-        address channels;
-        assembly { channels := create(0, add(channelsBytecode, 0x20), mload(channelsBytecode)) }
-        require(channels != address(0), "Channels deploy failed");
+        vm.broadcast(deployerPrivateKey);
+        address channels = address(new AntseedChannels(address(antseedRegistry)));
         console.log("AntseedChannels:      ", channels);
 
         // 8. AntseedStatsV2(legacyStats)
-        bytes memory statsBytecode = abi.encodePacked(
-            vm.getCode("AntseedStatsV2.sol:AntseedStatsV2"),
-            abi.encode(legacyStats)
-        );
-        address stats;
-        assembly { stats := create(0, add(statsBytecode, 0x20), mload(statsBytecode)) }
-        require(stats != address(0), "Stats deploy failed");
+        vm.broadcast(deployerPrivateKey);
+        address stats = address(new AntseedStatsV2(legacyStats));
         console.log("AntseedStatsV2:       ", stats);
 
         // 9. AntseedEmissions(registry, initialEmission, epochDuration)
-        bytes memory emissionsBytecode = abi.encodePacked(
-            vm.getCode("AntseedEmissions.sol:AntseedEmissions"),
-            abi.encode(address(antseedRegistry), uint256(5_000_000e18), uint256(7 days))
-        );
-        address emissions;
-        assembly { emissions := create(0, add(emissionsBytecode, 0x20), mload(emissionsBytecode)) }
-        require(emissions != address(0), "Emissions deploy failed");
+        vm.broadcast(deployerPrivateKey);
+        address emissions = address(new AntseedEmissions(address(antseedRegistry), 5_000_000e18, 7 days));
         console.log("AntseedEmissions:     ", emissions);
 
         // 10. AntseedSubPool(usdc, registry)
-        bytes memory subPoolBytecode = abi.encodePacked(
-            vm.getCode("AntseedSubPool.sol:AntseedSubPool"),
-            abi.encode(usdc, address(antseedRegistry))
-        );
-        address subPool;
-        assembly { subPool := create(0, add(subPoolBytecode, 0x20), mload(subPoolBytecode)) }
-        require(subPool != address(0), "SubPool deploy failed");
+        vm.broadcast(deployerPrivateKey);
+        address subPool = address(new AntseedSubPool(usdc, address(antseedRegistry)));
         console.log("AntseedSubPool:       ", subPool);
 
         // ---- Wire registry ----
+        vm.broadcast(deployerPrivateKey);
         antseedRegistry.setChannels(channels);
+        vm.broadcast(deployerPrivateKey);
         antseedRegistry.setStats(stats);
+        vm.broadcast(deployerPrivateKey);
         antseedRegistry.setDeposits(deposits);
+        vm.broadcast(deployerPrivateKey);
         antseedRegistry.setStaking(staking);
+        vm.broadcast(deployerPrivateKey);
         antseedRegistry.setEmissions(emissions);
+        vm.broadcast(deployerPrivateKey);
         antseedRegistry.setAntsToken(antsToken);
+        vm.broadcast(deployerPrivateKey);
         antseedRegistry.setIdentityRegistry(identityRegistry);
+        vm.broadcast(deployerPrivateKey);
         antseedRegistry.setProtocolReserve(protocolReserve);
 
         // ---- Point each contract at the registry ----
         // Channels and Staking already received the registry in their constructors,
         // but we include them here for uniformity so the pattern is obvious in upgrades.
+        vm.broadcast(deployerPrivateKey);
         ISetRegistry(channels).setRegistry(address(antseedRegistry));
+        vm.broadcast(deployerPrivateKey);
         ISetRegistry(stats).setRegistry(address(antseedRegistry));
+        vm.broadcast(deployerPrivateKey);
         ISetRegistry(deposits).setRegistry(address(antseedRegistry));
+        vm.broadcast(deployerPrivateKey);
         ISetRegistry(staking).setRegistry(address(antseedRegistry));
+        vm.broadcast(deployerPrivateKey);
         ISetRegistry(emissions).setRegistry(address(antseedRegistry));
+        vm.broadcast(deployerPrivateKey);
         ISetRegistry(antsToken).setRegistry(address(antseedRegistry));
+        vm.broadcast(deployerPrivateKey);
         ISetRegistry(subPool).setRegistry(address(antseedRegistry));
 
         // ---- Authorize Channels as Stats writer ----
+        vm.broadcast(deployerPrivateKey);
         ISetWriter(stats).setWriter(channels, true);
         if (legacyStats != address(0)) {
+            vm.broadcast(deployerPrivateKey);
             try ISetWriter(legacyStats).setWriter(stats, true) {
                 console.log("Legacy stats writer:  ", stats);
             } catch {
                 console.log("Legacy stats writer authorization skipped");
             }
         }
-
-        vm.stopBroadcast();
 
         console.log("");
         console.log("--- Protocol fully deployed and wired ---");
