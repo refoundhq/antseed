@@ -1,520 +1,697 @@
-/* ────────────────────────────────────────────────
-   DepositView — amount-first focused flow
-   Token-only: no raw hex / px except 1px/2px idioms
-   ──────────────────────────────────────────────── */
-
-.dv {
-  display: flex;
-  flex-direction: column;
-}
-
-/* ── Form layout ── */
-.dv-form {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-4);
-}
-
-/* ── Amount block ── */
-.dv-amount-block {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-2);
-}
-
-.dv-amount-label {
-  display: block;
-  font-size: 0.75rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
+.deposit-loading {
+  font-size: 13px;
   color: var(--text-muted);
-  margin-bottom: var(--sp-1);
+  padding: 12px 0;
 }
 
-.dv-amount-field {
+.deposit-methods {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 18px;
+}
+
+.deposit-method {
   display: flex;
+  flex-direction: column;
   align-items: center;
+  gap: 5px;
+  padding: 16px 12px;
   background: var(--input-bg);
-  border: 1px solid var(--input-border);
-  border-radius: var(--radius-lg);
-  padding: var(--sp-3) var(--sp-4);
-  transition: border-color 0.14s;
-
-  &:focus-within {
-    border-color: var(--accent-border);
-    box-shadow: 0 0 0 3px var(--accent-dim);
-  }
-
-  &--error {
-    border-color: var(--danger-border);
-    &:focus-within { box-shadow: 0 0 0 3px var(--danger-dim); }
-  }
-}
-
-.dv-amount-cur {
-  font-size: 1.5rem;
-  font-weight: 600;
-  color: var(--text-faint);
-  margin-right: var(--sp-1);
-  line-height: 1;
-  flex-shrink: 0;
-}
-
-.dv-amount-input {
-  flex: 1;
-  border: none;
-  background: transparent;
-  font-size: 1.75rem;
-  font-weight: 700;
-  color: var(--text-primary);
-  font-family: var(--font-sans);
-  outline: none;
-  min-width: 0;
-  line-height: 1;
-
-  /* Hide number spin arrows */
-  &::-webkit-outer-spin-button,
-  &::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
-  -moz-appearance: textfield;
-
-  &:disabled { opacity: 0.6; }
-
-  &::placeholder { color: var(--text-faint); }
-}
-
-.dv-amount-unit {
-  font-size: 0.75rem;
-  font-weight: 600;
-  color: var(--text-muted);
-  flex-shrink: 0;
-  margin-left: var(--sp-2);
-}
-
-/* ── Quick chips ── */
-.dv-chips {
-  display: flex;
-  gap: var(--sp-2);
-  flex-wrap: wrap;
-}
-
-.dv-chip {
-  font-size: 0.75rem;
-  font-weight: 600;
-  color: var(--text-secondary);
-  background: transparent;
   border: 1px solid var(--card-border);
-  border-radius: var(--radius-sm);
-  padding: 0.4375rem 0.8125rem;
+  border-radius: 10px;
   cursor: pointer;
+  transition: all 0.15s;
   font-family: inherit;
-  transition: all 0.12s;
-  line-height: 1;
+  text-align: center;
 
-  &:hover:not(:disabled) {
-    border-color: var(--input-border);
-    color: var(--text-primary);
-  }
+  &:hover { border-color: var(--input-border); }
 
   &--active {
     border-color: var(--accent-border);
     background: var(--accent-dim);
-    color: var(--accent-text);
-  }
-
-  &--disabled,
-  &:disabled {
-    opacity: 0.38;
-    cursor: not-allowed;
-  }
-
-  &:focus-visible {
-    outline: 2px solid var(--accent);
-    outline-offset: 2px;
-    border-radius: var(--radius-sm);
   }
 }
 
-/* ── Wallet balance hint ── */
-.dv-wallet-hint {
-  font-size: 0.71875rem;
-  color: var(--text-secondary);
-  line-height: 1.45;
-  min-height: 1.1em;
-}
-
-.dv-wallet-hint-addr {
-  font-family: var(--font-mono);
+.deposit-method-icon {
   color: var(--text-muted);
+  .deposit-method--active & { color: var(--accent); }
 }
 
-.dv-wallet-hint-bal {
-  font-weight: 700;
+.deposit-method-label {
+  font-size: 13px;
+  font-weight: 600;
   color: var(--text-primary);
 }
 
-.dv-wallet-hint-loading {
-  color: var(--text-faint);
-  font-style: italic;
-}
-
-.dv-wallet-hint-limit {
+.deposit-method-desc {
+  font-size: 11px;
   color: var(--text-muted);
 }
 
-/* ── Optional target override ── */
-.dv-target {
+.deposit-form {
   display: flex;
   flex-direction: column;
-  gap: var(--sp-2);
+  gap: 12px;
 }
 
-.dv-target-toggle {
-  align-self: flex-start;
+.deposit-trust-card {
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 14px;
+  overflow: hidden;
+}
+
+.deposit-trust-toggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
   border: none;
   background: transparent;
-  padding: 0;
-  color: var(--accent-text);
+  color: inherit;
   font: inherit;
-  font-size: 0.75rem;
-  font-weight: 700;
+  text-align: left;
   cursor: pointer;
-  text-decoration: underline;
-  text-underline-offset: 2px;
 
-  &:disabled {
-    opacity: 0.45;
-    cursor: not-allowed;
+  &:hover { background: var(--card-hover); }
+  &:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
   }
 }
 
-.dv-target-panel {
+.deposit-trust-head-copy {
+  min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: var(--sp-2);
-  padding: var(--sp-3);
-  border: 1px solid var(--card-border);
-  border-radius: var(--radius-md);
-  background: var(--panel-bg);
+  gap: 1px;
+  flex: 1;
 }
 
-.dv-target-input {
-  width: 100%;
-  border: 1px solid var(--input-border);
-  border-radius: var(--radius-sm);
-  background: var(--input-bg);
-  color: var(--text-primary);
-  font: inherit;
-  font-family: var(--font-mono);
-  font-size: 0.75rem;
-  padding: 0.625rem 0.75rem;
-  outline: none;
-
-  &:focus {
-    border-color: var(--accent-border);
-    box-shadow: 0 0 0 3px var(--accent-dim);
-  }
-
-  &--error {
-    border-color: var(--danger-border);
-  }
-}
-
-.dv-target-note {
-  font-size: 0.71875rem;
-  line-height: 1.45;
-  color: var(--text-secondary);
-
-  &--error {
-    color: var(--danger);
-  }
-}
-
-/* ── Validation error ── */
-.dv-validation-error {
-  font-size: 0.75rem;
-  color: var(--danger);
-  line-height: 1.45;
-}
-
-/* ── Two-step stepper ── */
-.dv-steps {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-  padding: var(--sp-4) 0 var(--sp-3);
-  border-top: 1px solid var(--divider);
-}
-
-.dv-step {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--sp-3);
-  font-size: 0.75rem;
-  color: var(--text-muted);
-  padding: 0.4375rem 0;
-  line-height: 1.4;
-}
-
-.dv-step-dot {
-  width: 1.125rem;
-  height: 1.125rem;
-  border-radius: 50%;
-  border: 1px solid var(--border-2);
+.deposit-trust-shield {
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 0.625rem;
-  font-weight: 700;
-  color: var(--text-muted);
   flex-shrink: 0;
-  margin-top: 1px;
-  transition: background 0.15s, border-color 0.15s;
-
-  .dv-step--done & {
-    background: var(--accent);
-    border-color: var(--accent);
-    color: var(--accent-text);
-  }
-
-  .dv-step--active & {
-    background: var(--accent-dim);
-    border-color: var(--accent-border);
-    color: var(--accent-text);
-  }
-}
-
-.dv-step-label {
-  flex: 1;
-  min-width: 0;
-
-  .dv-step--done & { color: var(--text-primary); }
-  .dv-step--active & { color: var(--text-primary); font-weight: 500; }
-}
-
-/* ── Primary action button ── */
-.dv-btn-primary {
-  width: 100%;
-  padding: var(--sp-3) var(--sp-4);
   background: var(--accent);
-  color: var(--accent-text);
-  border: none;
-  border-radius: var(--radius-md);
-  font: inherit;
-  font-size: 0.9375rem;
-  font-weight: 700;
-  cursor: pointer;
-  transition: opacity 0.14s, transform 0.1s;
-  line-height: 1;
-
-  &:hover:not(:disabled) { opacity: 0.88; }
-  &:active:not(:disabled) { transform: scale(0.99); }
-  &:disabled { opacity: 0.42; cursor: not-allowed; }
-  &:focus-visible {
-    outline: 2px solid var(--accent-dark);
-    outline-offset: 2px;
-  }
-}
-
-/* ── Outline button (success) ── */
-.dv-btn-outline {
-  padding: var(--sp-2) var(--sp-4);
-  background: transparent;
-  color: var(--text-secondary);
-  border: 1px solid var(--card-border);
-  border-radius: var(--radius-md);
-  font: inherit;
-  font-size: 0.8125rem;
-  font-weight: 600;
-  cursor: pointer;
-  transition: border-color 0.14s, color 0.14s;
-
-  &:hover { border-color: var(--input-border); color: var(--text-primary); }
-  &:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-}
-
-/* ── Notes ── */
-.dv-approve-note,
-.dv-confirm-note {
-  font-size: 0.6875rem;
-  color: var(--text-muted);
-  text-align: center;
-  line-height: 1.45;
-  margin-top: calc(var(--sp-2) * -0.5);
-}
-
-.dv-approve-note {
-  color: var(--accent-text);
-  font-weight: 500;
-}
-
-.dv-help {
-  font-size: 0.6875rem;
-  color: var(--text-muted);
-  line-height: 1.5;
-}
-
-/* ── Chain warning ── */
-.dv-chain-warn {
-  padding: var(--sp-2) var(--sp-3);
-  background: var(--amber-dim);
-  border: 1px solid var(--amber-border);
-  border-radius: var(--radius-sm);
-  font-size: 0.75rem;
-  color: var(--amber);
-  line-height: 1.4;
-}
-
-/* ── Connect hint ── */
-.dv-connect-hint {
-  padding: var(--sp-3) var(--sp-4);
-  background: var(--accent-dim);
-  border: 1px solid var(--accent-border);
-  border-radius: var(--radius-md);
-  font-size: 0.75rem;
-  color: var(--text-secondary);
-  line-height: 1.5;
-  text-align: center;
-}
-
-/* ── Error block ── */
-.dv-error {
-  padding: var(--sp-3) var(--sp-3);
-  background: var(--danger-dim);
-  border: 1px solid var(--danger-border);
-  border-radius: var(--radius-md);
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-2);
-}
-
-.dv-error-summary {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--sp-3);
-  font-size: 0.75rem;
-  color: var(--danger);
-  font-weight: 600;
-  line-height: 1.4;
-}
-
-.dv-error-toggle {
-  flex-shrink: 0;
-  border: none;
-  background: none;
-  padding: 0;
-  font: inherit;
-  font-size: 0.6875rem;
-  font-weight: 600;
-  color: var(--text-muted);
-  cursor: pointer;
-  transition: color 0.12s;
-  text-decoration: underline;
-  text-underline-offset: 2px;
-
-  &:hover { color: var(--text-secondary); }
-  &:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
-}
-
-.dv-error-detail {
-  font-size: 0.6875rem;
-  color: var(--text-secondary);
-  font-family: var(--font-mono);
-  line-height: 1.5;
-  word-break: break-word;
-  white-space: pre-wrap;
-  padding: var(--sp-2) var(--sp-3);
-  background: var(--input-bg);
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--card-border);
-}
-
-.dv-error-hash {
-  font-size: 0.6875rem;
-  color: var(--text-muted);
-}
-
-.dv-error-hash-link {
-  color: var(--text-secondary);
-  text-decoration: underline;
-  text-underline-offset: 2px;
-
-  &:hover { color: var(--text-primary); }
-}
-
-.dv-error-hash-raw {
-  font-family: var(--font-mono);
-}
-
-/* ── Success state ── */
-.dv-success {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: var(--sp-3);
-  padding: var(--sp-6) var(--sp-4) var(--sp-5);
-  text-align: center;
-}
-
-.dv-success-icon {
-  width: 2.75rem;
-  height: 2.75rem;
-  border-radius: 50%;
-  background: var(--accent-dim);
-  border: 1px solid var(--accent-border);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 1.25rem;
-  color: var(--accent-text);
+  color: #06351d;
+  font-size: 14px;
   font-weight: 800;
-  margin-bottom: var(--sp-1);
+  box-shadow: 0 0 0 4px var(--accent-dim);
 }
 
-.dv-success-title {
-  font-size: 1.0625rem;
+.deposit-trust-title {
+  font-size: 13px;
   font-weight: 800;
   color: var(--text-primary);
   letter-spacing: -0.01em;
 }
 
-.dv-success-amount {
-  font-size: 1.5rem;
-  font-weight: 700;
-  color: var(--accent-text);
-  background: var(--accent-dim);
-  border: 1px solid var(--accent-border);
-  border-radius: var(--radius-md);
-  padding: var(--sp-2) var(--sp-4);
-  line-height: 1;
-}
-
-.dv-success-note {
-  font-size: 0.75rem;
+.deposit-trust-subtitle {
+  font-size: 12px;
   color: var(--text-secondary);
-  line-height: 1.5;
-  max-width: 22rem;
 }
 
-.dv-success-hash {
-  font-size: 0.75rem;
-  color: var(--text-muted);
-}
-
-.dv-success-hash-link {
+.deposit-trust-balance-summary {
   display: inline-flex;
-  align-items: center;
-  gap: var(--sp-1);
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 1px;
+  flex-shrink: 0;
+
+  span {
+    font-size: 9px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: var(--text-muted);
+  }
+
+  strong {
+    font-size: 13px;
+    font-weight: 850;
+    color: var(--text-primary);
+  }
+
+  em {
+    font-style: normal;
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--accent-text);
+  }
+}
+
+.deposit-trust-chevron {
+  display: inline-block;
+  color: var(--text-muted);
+  font-size: 18px;
+  line-height: 1;
+  transform: rotate(0deg);
+  transition: transform 0.15s ease;
+}
+
+
+.deposit-trust-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.deposit-trust-item {
+  padding: 9px 10px;
+  background: var(--input-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 9px;
+
+  span {
+    display: block;
+    margin-bottom: 2px;
+    font-size: 9px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: var(--text-muted);
+  }
+
+  strong {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: 12px;
+    font-weight: 700;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    color: var(--text-primary);
+  }
+
+  &--wide { grid-column: 1 / -1; }
+}
+
+.deposit-trust-foot {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--card-border);
+  font-size: 12px;
+  line-height: 1.45;
   color: var(--text-secondary);
-  text-decoration: underline;
-  text-underline-offset: 2px;
-  font-family: var(--font-mono);
+}
+
+.deposit-details-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+  background: rgba(0, 0, 0, 0.48);
+  backdrop-filter: blur(4px);
+}
+
+.deposit-details-modal {
+  width: min(720px, 100%);
+  max-height: min(680px, calc(100vh - 36px));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--modal-bg, var(--card-bg));
+  border: 1px solid var(--card-border);
+  border-radius: 18px;
+  box-shadow: 0 22px 70px rgba(0, 0, 0, 0.3);
+}
+
+.deposit-details-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 18px 18px 14px;
+  border-bottom: 1px solid var(--card-border);
+
+  h3 {
+    margin: 2px 0 4px;
+    font-size: 18px;
+    line-height: 1.2;
+    color: var(--text-primary);
+  }
+
+  p {
+    margin: 0;
+    font-size: 12px;
+    line-height: 1.45;
+    color: var(--text-secondary);
+  }
+}
+
+.deposit-details-eyebrow {
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--accent-text);
+}
+
+.deposit-details-close {
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--card-border);
+  border-radius: 999px;
+  background: var(--input-bg);
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
 
   &:hover { color: var(--text-primary); }
 }
 
-.dv-success-hash-arrow {
-  font-family: var(--font-sans);
-  font-size: 0.875rem;
+.deposit-details-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 18px 18px;
+  overflow-y: auto;
+}
+
+.deposit-details-balance-hero {
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--accent-dim);
+  border: 1px solid var(--accent-border);
+
+  span, small {
+    display: block;
+    font-size: 12px;
+    color: var(--text-secondary);
+  }
+
+  strong {
+    display: block;
+    margin: 2px 0;
+    font-size: 24px;
+    line-height: 1.1;
+    color: var(--text-primary);
+  }
+}
+
+.deposit-wizard {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  padding: 12px;
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 16px;
+}
+
+.deposit-wizard-track {
+  position: absolute;
+  top: 37px;
+  left: calc(25% + 28px);
+  right: calc(25% + 28px);
+  z-index: 0;
+  height: 3px;
+  background: var(--card-border);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.deposit-wizard-track-fill {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  border-radius: inherit;
+  transition: width 0.2s ease;
+}
+
+.deposit-wizard-step {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 8px;
+  padding: 8px 10px 10px;
+  border-radius: 13px;
+  border: 1px solid transparent;
+  color: var(--text-muted);
+
+  &--active {
+    background: var(--input-bg);
+    border-color: var(--card-border);
+  }
+
+  &--complete {
+    color: var(--text-secondary);
+  }
+
+  &--locked {
+    opacity: 0.72;
+  }
+}
+
+.deposit-wizard-number {
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--input-bg);
+  border: 1px solid var(--card-border);
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 900;
+
+  .deposit-wizard-step--active & {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #06351d;
+  }
+
+  .deposit-wizard-step--complete & {
+    background: var(--accent-dim);
+    border-color: var(--accent-border);
+    color: var(--accent-text);
+  }
+}
+
+.deposit-wizard-content { min-width: 0; }
+
+.deposit-wizard-kicker {
+  font-size: 9px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+
+.deposit-wizard-title {
+  margin-top: 1px;
+  font-size: 13px;
+  font-weight: 850;
+  color: var(--text-primary);
+}
+
+.deposit-wizard-copy {
+  margin-top: 4px;
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--text-muted);
+}
+
+.deposit-connect-explainer {
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--accent-dim);
+  border: 1px solid var(--accent-border);
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.45;
+  text-align: center;
+}
+
+.deposit-connect-wrapper {
+  display: flex;
+  justify-content: center;
+  padding: 4px 0;
+}
+
+.deposit-wrong-chain {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0;
+}
+
+.deposit-wrong-chain-text {
+  font-size: 13px;
+  color: var(--danger);
+  text-align: center;
+}
+
+.deposit-target-info {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 14px;
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 8px;
+  font-size: 12px;
+}
+
+.deposit-target-label {
+  color: var(--text-muted);
+}
+
+.deposit-target-addr {
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  color: var(--text-secondary);
+}
+
+.deposit-success {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 24px 16px;
+  gap: 6px;
+  text-align: center;
+}
+
+.deposit-success-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--accent-dim);
+  color: var(--accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  margin-bottom: 4px;
+}
+
+.deposit-success-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.deposit-success-hash {
+  font-size: 12px;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  color: var(--text-muted);
+}
+
+.deposit-success-note {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
+
+.deposit-pay-embed {
+  border-radius: var(--radius);
+  overflow: hidden;
+  border: 1px solid var(--card-border);
+
+  // Override thirdweb iframe sizing
+  iframe {
+    width: 100% !important;
+    min-height: 380px;
+  }
+}
+
+.deposit-card-coming {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 24px 16px;
+  gap: 6px;
+}
+
+.deposit-card-coming-icon { color: var(--text-faint); margin-bottom: 2px; }
+
+.deposit-card-coming-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.deposit-card-coming-desc {
+  font-size: 13px;
+  color: var(--text-muted);
+  max-width: 280px;
+  line-height: 1.5;
+}
+
+.deposit-balance-details {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 14px 12px;
+
+  &--embedded {
+    padding: 10px 0 0;
+    margin-top: 10px;
+    border-top: 1px solid var(--card-border);
+  }
+}
+
+.deposit-balance-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--text-muted);
+
+  strong {
+    font-size: 13px;
+    font-weight: 750;
+    color: var(--text-primary);
+  }
+}
+
+.deposit-balance-breakdown {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: -4px;
+
+  span {
+    padding: 3px 7px;
+    border-radius: 999px;
+    background: var(--input-bg);
+    border: 1px solid var(--card-border);
+    font-size: 10px;
+    font-weight: 650;
+    color: var(--text-muted);
+  }
+}
+
+.deposit-balance-cap {
+  margin-top: 2px;
+  padding-top: 9px;
+  border-top: 1px solid var(--card-border);
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-secondary);
+}
+
+.deposit-amount-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 5px;
+}
+
+.deposit-advanced {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: -4px;
+}
+
+.deposit-advanced-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  border: none;
+  background: none;
+  padding: 2px 0;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color 0.14s;
+
+  &:hover { color: var(--text-secondary); }
+  &:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+}
+
+.deposit-advanced-chevron {
+  display: inline-block;
+  font-size: 14px;
+  line-height: 1;
+  transition: transform 0.15s;
+  transform: rotate(0deg);
+
+  &--open { transform: rotate(90deg); }
+}
+
+.deposit-advanced-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  background: var(--input-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 8px;
+}
+
+.deposit-advanced-desc {
+  margin: 0 0 4px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.deposit-advanced-warn {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  background: var(--danger-dim, rgba(220, 80, 80, 0.08));
+  border: 1px solid var(--danger-border, rgba(220, 80, 80, 0.35));
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+
+.deposit-advanced-warn-icon {
+  flex-shrink: 0;
+  line-height: 1.4;
+  color: var(--danger);
+}
+
+.input-field--mono {
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 12px;
+}
+
+.hint--error { color: var(--danger); }
+.hint--warn { color: var(--accent-text); }
+
+.deposit-amount-max {
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--accent-text);
+  cursor: pointer;
+  transition: opacity 0.14s;
+
+  &:hover:not(:disabled) { opacity: 0.75; }
+  &:disabled { opacity: 0.4; cursor: default; }
 }

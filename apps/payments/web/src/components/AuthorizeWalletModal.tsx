@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useAccount } from 'wagmi';
+import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { ActionModal } from '../layout/ActionModal';
 import { useSetOperator } from '../hooks/useSetOperator';
 import type { PaymentConfig } from '../types';
 import { Button } from './Button';
-import { ConnectWalletAction } from './ConnectWalletAction';
 
 interface AuthorizeWalletModalProps {
   isOpen: boolean;
@@ -23,7 +23,6 @@ export function AuthorizeWalletModal({
   onAuthorized,
 }: AuthorizeWalletModalProps) {
   const { address, isConnected } = useAccount();
-  const walletConnected = isConnected && Boolean(address);
   const { run, running, success, error, reset } = useSetOperator(config);
 
   const whyRef = useRef<HTMLDivElement>(null);
@@ -92,20 +91,20 @@ export function AuthorizeWalletModal({
           document.body,
         )}
 
-        {!walletConnected ? (
+        {!isConnected ? (
           <div className="authorize-wallet-connect">
             <div className="authorize-wallet-step-label">Step 1 — Connect a wallet</div>
-            <ConnectWalletAction>
-              {({ openConnectModal, ready, connected }) => connected ? null : (
+            <ConnectButton.Custom>
+              {({ openConnectModal, mounted }) => (
                 <Button
                   fullWidth
                   onClick={openConnectModal}
-                  disabled={!ready}
+                  disabled={!mounted}
                 >
                   Connect wallet
                 </Button>
               )}
-            </ConnectWalletAction>
+            </ConnectButton.Custom>
           </div>
         ) : (
           <div className="authorize-wallet-connect">
@@ -118,7 +117,7 @@ export function AuthorizeWalletModal({
           <Button
             fullWidth
             onClick={() => void run()}
-            disabled={!walletConnected || running || !config}
+            disabled={!isConnected || running || !config}
           >
             {running ? 'Authorizing…' : 'Authorize this wallet'}
           </Button>
