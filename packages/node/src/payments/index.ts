@@ -32,6 +32,15 @@ export type { IdentityClientConfig } from './evm/identity-client.js';
 export { StakingClient } from './evm/staking-client.js';
 export type { StakingClientConfig } from './evm/staking-client.js';
 
+// Stats client (metadata and usage-report verification sink)
+export { StatsClient } from './evm/stats-client.js';
+export type {
+  StatsClientConfig,
+  DecodedMetadataRecorded,
+  DecodedUsageReportVerificationRecorded,
+  DecodedUsageReportServiceUsageRecorded,
+} from './evm/stats-client.js';
+
 export {
   signSpendingAuth,
   signReserveAuth,

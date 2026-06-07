@@ -100,6 +100,7 @@ type ResolvedCryptoConfig = NonNullable<AntseedConfig['payments']['crypto']> & {
   channelsContractAddress: string;
   usdcContractAddress: string;
   stakingContractAddress?: string;
+  statsContractAddress?: string;
   identityRegistryAddress?: string;
   emissionsContractAddress?: string;
   subPoolContractAddress?: string;
@@ -148,6 +149,7 @@ export function requireCryptoConfig(
     depositsContractAddress: crypto.depositsContractAddress || resolved.depositsContractAddress,
     channelsContractAddress: crypto.channelsContractAddress || resolved.channelsContractAddress,
     stakingContractAddress: crypto.stakingContractAddress || resolved.stakingContractAddress,
+    statsContractAddress: crypto.statsContractAddress || resolved.statsContractAddress,
     emissionsContractAddress: crypto.emissionsContractAddress || resolved.emissionsContractAddress,
     identityRegistryAddress: crypto.identityRegistryAddress || resolved.identityRegistryAddress,
     evmChainId: resolved.evmChainId,

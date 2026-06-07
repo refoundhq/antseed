@@ -47,6 +47,8 @@ export {
   StatsClient,
   type StatsClientConfig,
   type DecodedMetadataRecorded,
+  type DecodedUsageReportVerificationRecorded,
+  type DecodedUsageReportServiceUsageRecorded,
 } from './payments/evm/stats-client.js';
 export { signData, verifySignature, signUtf8, verifyUtf8 } from './p2p/identity.js';
 export {

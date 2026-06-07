@@ -56,6 +56,18 @@ contract AntseedStatsV2 is IAntseedStats, Ownable {
         uint64 verifiedAt;
     }
 
+    struct ServiceUsageLeaf {
+        bytes32 channelId;
+        bytes32 serviceIdHash;
+        bytes32 catalogLeafHash;
+        uint256 serviceMode;
+        uint256 cumulativeFreshInputTokens;
+        uint256 cumulativeCachedInputTokens;
+        uint256 cumulativeOutputTokens;
+        uint256 cumulativeRequestCount;
+        uint256 cumulativeAmountPaid;
+    }
+
     struct ReportVerificationStats {
         uint256 acceptedCount;
         uint256 rejectedCount;
@@ -77,9 +89,12 @@ contract AntseedStatsV2 is IAntseedStats, Ownable {
     mapping(bytes32 => mapping(uint256 => VerificationRecord)) private _verificationRecords;
     mapping(bytes32 => ReportVerificationStats) private _reportVerificationStats;
     mapping(uint256 => VerifierStats) private _verifierStats;
+    mapping(bytes32 => bool) public reportServiceUsageRecorded;
 
     IAntseedRegistry public registry;
     address public legacyStats;
+
+    uint256 public constant MAX_SERVICE_USAGE_LEAVES = 64;
 
     // ─── Events ─────────────────────────────────────────────────────
     event MetadataRecorded(
@@ -129,6 +144,19 @@ contract AntseedStatsV2 is IAntseedStats, Ownable {
         uint256 cumulativeAmount,
         bool accepted
     );
+    event UsageReportServiceUsageRecorded(
+        bytes32 indexed reportHash,
+        uint256 indexed sellerAgentId,
+        bytes32 indexed serviceIdHash,
+        bytes32 channelId,
+        bytes32 catalogLeafHash,
+        uint256 serviceMode,
+        uint256 cumulativeFreshInputTokens,
+        uint256 cumulativeCachedInputTokens,
+        uint256 cumulativeOutputTokens,
+        uint256 cumulativeRequestCount,
+        uint256 cumulativeAmountPaid
+    );
 
     // ─── Custom Errors ──────────────────────────────────────────────
     error InvalidAddress();
@@ -138,6 +166,8 @@ contract AntseedStatsV2 is IAntseedStats, Ownable {
     error SellerNotStaked();
     error VerifierNotStaked();
     error DuplicateVerification();
+    error TooManyServiceUsageLeaves();
+    error InvalidUsageByServiceRoot();
     error UnsupportedMetadataVersion(uint256 version);
 
     // ─── Constructor ────────────────────────────────────────────────
@@ -252,6 +282,67 @@ contract AntseedStatsV2 is IAntseedStats, Ownable {
         bytes32 usageByServiceRoot,
         bool accepted
     ) external {
+        _recordUsageReportVerification(
+            reportHash,
+            channelId,
+            seller,
+            buyer,
+            sellerAgentId,
+            verifierAgentId,
+            cumulativeAmount,
+            metadataHash,
+            catalogRoot,
+            usageByServiceRoot,
+            accepted
+        );
+    }
+
+    function recordUsageReportVerificationWithServiceUsage(
+        bytes32 reportHash,
+        bytes32 channelId,
+        address seller,
+        address buyer,
+        uint256 sellerAgentId,
+        uint256 verifierAgentId,
+        uint256 cumulativeAmount,
+        bytes32 metadataHash,
+        bytes32 catalogRoot,
+        bytes32 usageByServiceRoot,
+        bool accepted,
+        ServiceUsageLeaf[] calldata serviceUsageLeaves
+    ) external {
+        _recordUsageReportVerification(
+            reportHash,
+            channelId,
+            seller,
+            buyer,
+            sellerAgentId,
+            verifierAgentId,
+            cumulativeAmount,
+            metadataHash,
+            catalogRoot,
+            usageByServiceRoot,
+            accepted
+        );
+
+        if (accepted && !reportServiceUsageRecorded[reportHash]) {
+            _recordReportServiceUsage(reportHash, sellerAgentId, usageByServiceRoot, serviceUsageLeaves);
+        }
+    }
+
+    function _recordUsageReportVerification(
+        bytes32 reportHash,
+        bytes32 channelId,
+        address seller,
+        address buyer,
+        uint256 sellerAgentId,
+        uint256 verifierAgentId,
+        uint256 cumulativeAmount,
+        bytes32 metadataHash,
+        bytes32 catalogRoot,
+        bytes32 usageByServiceRoot,
+        bool accepted
+    ) internal {
         if (reportHash == bytes32(0) || channelId == bytes32(0) || seller == address(0) || buyer == address(0)) {
             revert InvalidAddress();
         }
@@ -314,6 +405,86 @@ contract AntseedStatsV2 is IAntseedStats, Ownable {
             cumulativeAmount,
             accepted
         );
+    }
+
+    function _recordReportServiceUsage(
+        bytes32 reportHash,
+        uint256 sellerAgentId,
+        bytes32 usageByServiceRoot,
+        ServiceUsageLeaf[] calldata serviceUsageLeaves
+    ) internal {
+        if (serviceUsageLeaves.length > MAX_SERVICE_USAGE_LEAVES) revert TooManyServiceUsageLeaves();
+        if (_computeServiceUsageRoot(serviceUsageLeaves) != usageByServiceRoot) {
+            revert InvalidUsageByServiceRoot();
+        }
+
+        reportServiceUsageRecorded[reportHash] = true;
+        for (uint256 i = 0; i < serviceUsageLeaves.length; i++) {
+            ServiceUsageLeaf calldata leaf = serviceUsageLeaves[i];
+            emit UsageReportServiceUsageRecorded(
+                reportHash,
+                sellerAgentId,
+                leaf.serviceIdHash,
+                leaf.channelId,
+                leaf.catalogLeafHash,
+                leaf.serviceMode,
+                leaf.cumulativeFreshInputTokens,
+                leaf.cumulativeCachedInputTokens,
+                leaf.cumulativeOutputTokens,
+                leaf.cumulativeRequestCount,
+                leaf.cumulativeAmountPaid
+            );
+        }
+    }
+
+    function _computeServiceUsageRoot(ServiceUsageLeaf[] calldata leaves) internal pure returns (bytes32) {
+        if (leaves.length == 0) return bytes32(0);
+
+        bytes32[] memory level = new bytes32[](leaves.length);
+        for (uint256 i = 0; i < leaves.length; i++) {
+            ServiceUsageLeaf calldata leaf = leaves[i];
+            level[i] = keccak256(abi.encode(
+                leaf.channelId,
+                leaf.serviceIdHash,
+                leaf.catalogLeafHash,
+                leaf.serviceMode,
+                leaf.cumulativeFreshInputTokens,
+                leaf.cumulativeCachedInputTokens,
+                leaf.cumulativeOutputTokens,
+                leaf.cumulativeRequestCount,
+                leaf.cumulativeAmountPaid
+            ));
+        }
+        _sortHashes(level);
+
+        uint256 levelLength = level.length;
+        while (levelLength > 1) {
+            uint256 nextLength = (levelLength + 1) / 2;
+            for (uint256 i = 0; i < nextLength; i++) {
+                bytes32 left = level[i * 2];
+                bytes32 rightIndexValue = (i * 2 + 1 < levelLength) ? level[i * 2 + 1] : left;
+                level[i] = _hashMerklePair(left, rightIndexValue);
+            }
+            levelLength = nextLength;
+        }
+
+        return level[0];
+    }
+
+    function _sortHashes(bytes32[] memory hashes) internal pure {
+        for (uint256 i = 1; i < hashes.length; i++) {
+            bytes32 key = hashes[i];
+            uint256 j = i;
+            while (j > 0 && hashes[j - 1] > key) {
+                hashes[j] = hashes[j - 1];
+                j--;
+            }
+            hashes[j] = key;
+        }
+    }
+
+    function _hashMerklePair(bytes32 a, bytes32 b) internal pure returns (bytes32) {
+        return a <= b ? keccak256(abi.encode(a, b)) : keccak256(abi.encode(b, a));
     }
 
     // ─── Admin Functions ────────────────────────────────────────────

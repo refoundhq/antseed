@@ -277,6 +277,7 @@ export function registerBuyerStartCommand(buyerCmd: Command): void {
         rpcUrl: cryptoOverrides?.rpcUrl,
         depositsContractAddress: cryptoOverrides?.depositsContractAddress,
         channelsContractAddress: cryptoOverrides?.channelsContractAddress,
+        statsContractAddress: cryptoOverrides?.statsContractAddress,
         usdcContractAddress: cryptoOverrides?.usdcContractAddress,
       })
       let settlementEnabled = settlementEnv ?? true
@@ -305,6 +306,7 @@ export function registerBuyerStartCommand(buyerCmd: Command): void {
           // `onChainLastSettledAtSec` never populate on PeerInfo (and end up
           // as `null` in buyer.state.json).
           ...(chainConfig.stakingContractAddress ? { stakingAddress: chainConfig.stakingContractAddress } : {}),
+          ...(chainConfig.statsContractAddress ? { statsAddress: chainConfig.statsContractAddress } : {}),
           ...(chainConfig.identityRegistryAddress ? { identityRegistryAddress: chainConfig.identityRegistryAddress } : {}),
           chainId: chainConfig.evmChainId,
           defaultDepositAmountUSDC: cryptoOverrides?.defaultLockAmountUSDC

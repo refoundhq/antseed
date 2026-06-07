@@ -136,9 +136,26 @@ export interface NeedAuthPayload {
   freshInputTokens?: string;
   /** Service/model name for service-specific pricing validation. */
   service?: string;
+  /**
+   * Seller-computed V2 usage-report metadata for the cumulative usage being
+   * authorized. Buyers that understand this sign the V2 metadataHash so other
+   * sellers can verify the report from the later PeerReport payload.
+   */
+  usageReportMetadata?: NeedAuthUsageReportMetadataPayload;
 }
 
 // ─── Peer-Verifiable Usage Reports (0x60-0x61) ─────────────────
+
+export interface NeedAuthUsageReportMetadataPayload {
+  catalogRoot: string;
+  usageByServiceRoot: string;
+  receiptRoot: string;
+  cumulativeFreshInputTokens: string;
+  cumulativeCachedInputTokens: string;
+  cumulativeOutputTokens: string;
+  cumulativeRequestCount: string;
+  cumulativeAmountPaid: string;
+}
 
 export interface ChannelUsageReportServiceUsageLeafPayload {
   channelId: string;
