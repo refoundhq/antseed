@@ -4,10 +4,12 @@ import {
   SERVICE_MODE_PAID,
   ZERO_BYTES32,
   computeEncodedMetadataHash,
-  computeServiceUsageHash,
+  computePricingCatalogRoot,
+  computeServiceUsageRoot,
   decodeMetadata,
   encodeMetadata,
   encodeMetadataV2,
+  hashServicePricing,
   hashUtf8,
   metadataV2MatchesServiceUsage,
   type ServiceUsageRow,
@@ -32,10 +34,10 @@ describe('spending auth metadata helpers', () => {
     });
   });
 
-  it('encodes and decodes V2 metadata with service usage hash and split input totals', () => {
+  it('encodes and decodes V2 metadata with service usage root and split input totals', () => {
     const metadata: SpendingAuthMetadataV2 = {
-      pricingSnapshotHash: `0x${'aa'.repeat(32)}`,
-      serviceUsageHash: `0x${'bb'.repeat(32)}`,
+      pricingCatalogRoot: `0x${'aa'.repeat(32)}`,
+      serviceUsageRoot: `0x${'bb'.repeat(32)}`,
       receiptRoot: ZERO_BYTES32,
       cumulativeFreshInputTokens: 100n,
       cumulativeCachedInputTokens: 25n,
@@ -49,17 +51,28 @@ describe('spending auth metadata helpers', () => {
     expect(decodeMetadata(encoded)).toEqual({ version: 2n, ...metadata });
   });
 
-  it('computes an order-independent service usage hash and validates totals', () => {
+  it('computes order-independent pricing catalog and service usage roots', () => {
+    const paidPricing = {
+      serviceIdHash: hashUtf8('openai:gpt-4.1'),
+      inputUsdPerMillion: 2_000_000n,
+      cachedInputUsdPerMillion: 500_000n,
+      outputUsdPerMillion: 8_000_000n,
+      serviceMode: SERVICE_MODE_PAID,
+    };
+    const freePricing = {
+      serviceIdHash: hashUtf8('local:free-demo'),
+      inputUsdPerMillion: 0n,
+      cachedInputUsdPerMillion: 0n,
+      outputUsdPerMillion: 0n,
+      serviceMode: SERVICE_MODE_FREE,
+    };
     const usageRows: ServiceUsageRow[] = [
       {
         channelId,
         provider: 'openai',
         service: 'gpt-4.1',
-        serviceIdHash: hashUtf8('openai:gpt-4.1'),
-        inputUsdPerMillion: 2_000_000n,
-        cachedInputUsdPerMillion: 500_000n,
-        outputUsdPerMillion: 8_000_000n,
-        serviceMode: SERVICE_MODE_PAID,
+        servicePricingHash: hashServicePricing(paidPricing),
+        ...paidPricing,
         cumulativeFreshInputTokens: 120n,
         cumulativeCachedInputTokens: 20n,
         cumulativeOutputTokens: 80n,
@@ -70,11 +83,8 @@ describe('spending auth metadata helpers', () => {
         channelId,
         provider: 'local',
         service: 'free-demo',
-        serviceIdHash: hashUtf8('local:free-demo'),
-        inputUsdPerMillion: 0n,
-        cachedInputUsdPerMillion: 0n,
-        outputUsdPerMillion: 0n,
-        serviceMode: SERVICE_MODE_FREE,
+        servicePricingHash: hashServicePricing(freePricing),
+        ...freePricing,
         cumulativeFreshInputTokens: 10n,
         cumulativeCachedInputTokens: 0n,
         cumulativeOutputTokens: 5n,
@@ -83,13 +93,17 @@ describe('spending auth metadata helpers', () => {
       },
     ];
 
-    expect(computeServiceUsageHash([])).toBe(ZERO_BYTES32);
-    expect(computeServiceUsageHash(usageRows)).toBe(computeServiceUsageHash([...usageRows].reverse()));
-    expect(computeServiceUsageHash(usageRows.slice(0, 1))).not.toBe(computeServiceUsageHash(usageRows));
+    expect(computePricingCatalogRoot([])).toBe(ZERO_BYTES32);
+    expect(computePricingCatalogRoot([paidPricing, freePricing]))
+      .toBe(computePricingCatalogRoot([freePricing, paidPricing]));
+    expect(computePricingCatalogRoot([paidPricing])).not.toBe(computePricingCatalogRoot([paidPricing, freePricing]));
+    expect(computeServiceUsageRoot([])).toBe(ZERO_BYTES32);
+    expect(computeServiceUsageRoot(usageRows)).toBe(computeServiceUsageRoot([...usageRows].reverse()));
+    expect(computeServiceUsageRoot(usageRows.slice(0, 1))).not.toBe(computeServiceUsageRoot(usageRows));
 
     const metadata: SpendingAuthMetadataV2 = {
-      pricingSnapshotHash: `0x${'aa'.repeat(32)}`,
-      serviceUsageHash: computeServiceUsageHash(usageRows),
+      pricingCatalogRoot: `0x${'aa'.repeat(32)}`,
+      serviceUsageRoot: computeServiceUsageRoot(usageRows),
       receiptRoot: ZERO_BYTES32,
       cumulativeFreshInputTokens: 130n,
       cumulativeCachedInputTokens: 20n,

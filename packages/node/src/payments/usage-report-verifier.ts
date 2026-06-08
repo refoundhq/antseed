@@ -1,4 +1,4 @@
-import { AbiCoder, isAddress, keccak256, toUtf8Bytes, type TypedDataDomain, verifyTypedData, type Wallet } from 'ethers';
+import { AbiCoder, isAddress, keccak256, type TypedDataDomain, verifyTypedData, type Wallet } from 'ethers';
 import type {
   ChannelReportAttestationPayload,
   ChannelUsageReportPayload,
@@ -12,8 +12,10 @@ import { signUtf8, verifySignature, verifyUtf8 } from '../p2p/identity.js';
 import { hexToBytes } from '../utils/hex.js';
 import {
   computeEncodedMetadataHash,
-  computeServiceUsageHash,
+  computePricingCatalogRoot,
+  computeServiceUsageRoot,
   decodeMetadata,
+  hashServicePricing,
   hashUtf8,
   metadataV2MatchesServiceUsage,
   SERVICE_MODE_FREE,
@@ -196,8 +198,8 @@ export function computeChannelUsageReportHash(report: ChannelUsageReportPayload)
       BigInt(report.sellerAgentId),
       BigInt(report.cumulativeAmount),
       report.metadataHash,
-      report.pricingSnapshotHash,
-      computeServiceUsageHash(report.serviceUsageRows.map(fromServiceUsageRowPayload)),
+      report.pricingCatalogRoot,
+      computeServiceUsageRoot(report.serviceUsageRows.map(fromServiceUsageRowPayload)),
       BigInt(report.reportedAt),
       report.selectionBeacon,
       BigInt(report.verifierCount),
@@ -254,11 +256,11 @@ export function verifyChannelUsageReport(
   const usageRows = report.serviceUsageRows.map(fromServiceUsageRowPayload);
 
   if (metadata) {
-    if (metadata.pricingSnapshotHash.toLowerCase() !== report.pricingSnapshotHash.toLowerCase()) {
-      addIssue('pricing-snapshot-mismatch', 'report pricingSnapshotHash does not match metadata pricing commitment');
+    if (metadata.pricingCatalogRoot.toLowerCase() !== report.pricingCatalogRoot.toLowerCase()) {
+      addIssue('pricing-catalog-mismatch', 'report pricingCatalogRoot does not match metadata pricing commitment');
     }
     if (!metadataV2MatchesServiceUsage(metadata, usageRows)) {
-      addIssue('service-usage-hash-or-total-mismatch', 'serviceUsageHash or usage totals do not match service usage rows');
+      addIssue('service-usage-root-or-total-mismatch', 'serviceUsageRoot or usage totals do not match service usage rows');
     }
     if (metadata.receiptRoot.toLowerCase() !== ZERO_BYTES32) {
       addIssue('unsupported-receipt-root', 'simplified usage reports require zero receiptRoot');
@@ -295,8 +297,8 @@ export function createChannelReportAttestation(
     buyer: report.buyer,
     cumulativeAmount: report.cumulativeAmount,
     metadataHash: report.metadataHash,
-    pricingSnapshotHash: report.pricingSnapshotHash,
-    serviceUsageHash: verification.metadata.serviceUsageHash,
+    pricingCatalogRoot: report.pricingCatalogRoot,
+    serviceUsageRoot: verification.metadata.serviceUsageRoot,
     verifier: normalizeAddress(verifierIdentity.verifier),
     verifierAgentId: verifierIdentity.verifierAgentId,
     timestamp,
@@ -349,8 +351,8 @@ export function encodeAttestationForSigning(attestation: Omit<ChannelReportAttes
     buyer: normalizeAddress(attestation.buyer),
     cumulativeAmount: attestation.cumulativeAmount,
     metadataHash: attestation.metadataHash,
-    pricingSnapshotHash: attestation.pricingSnapshotHash,
-    serviceUsageHash: attestation.serviceUsageHash,
+    pricingCatalogRoot: attestation.pricingCatalogRoot,
+    serviceUsageRoot: attestation.serviceUsageRoot,
     verifier: normalizeAddress(attestation.verifier),
     verifierAgentId: attestation.verifierAgentId,
     timestamp: attestation.timestamp,
@@ -370,6 +372,16 @@ function verifyUsageRows(
     if (row.serviceIdHash.toLowerCase() !== expectedServiceIdHash.toLowerCase()) {
       addIssue('usage-service-hash-mismatch', 'service usage row serviceIdHash does not match provider/service');
     }
+    const expectedServicePricingHash = hashServicePricing({
+      serviceIdHash: row.serviceIdHash,
+      inputUsdPerMillion: row.inputUsdPerMillion,
+      cachedInputUsdPerMillion: row.cachedInputUsdPerMillion,
+      outputUsdPerMillion: row.outputUsdPerMillion,
+      serviceMode: row.serviceMode,
+    });
+    if (row.servicePricingHash.toLowerCase() !== expectedServicePricingHash.toLowerCase()) {
+      addIssue('usage-service-pricing-hash-mismatch', 'service usage row servicePricingHash does not match row pricing fields');
+    }
     if (toBigInt(row.serviceMode) === SERVICE_MODE_FREE && toBigInt(row.cumulativeAmountPaid) !== 0n) {
       addIssue('free-usage-paid-amount', 'free service usage row has nonzero paid amount');
     }
@@ -387,9 +399,9 @@ function verifyAnnouncedPricing(
     return;
   }
 
-  const expectedPricingSnapshotHash = derivePricingSnapshotHash(metadata);
-  if (report.pricingSnapshotHash.toLowerCase() !== expectedPricingSnapshotHash.toLowerCase()) {
-    addIssue('pricing-snapshot-hash-mismatch', 'report pricingSnapshotHash does not match seller metadata pricing snapshot');
+  const expectedPricingCatalogRoot = derivePricingCatalogRoot(metadata);
+  if (report.pricingCatalogRoot.toLowerCase() !== expectedPricingCatalogRoot.toLowerCase()) {
+    addIssue('pricing-catalog-root-mismatch', 'report pricingCatalogRoot does not match seller metadata pricing catalog');
   }
 
   const metadataSeller = metadata.sellerContract
@@ -413,6 +425,16 @@ function verifyAnnouncedPricing(
       addIssue('usage-mode-pricing-mismatch', 'service usage mode does not match announced pricing');
     }
     const expectedCachedPrice = pricing.cachedInputUsdPerMillion ?? pricing.inputUsdPerMillion;
+    const expectedServicePricingHash = hashServicePricing({
+      serviceIdHash: row.serviceIdHash,
+      inputUsdPerMillion: pricing.inputUsdPerMillion,
+      cachedInputUsdPerMillion: expectedCachedPrice,
+      outputUsdPerMillion: pricing.outputUsdPerMillion,
+      serviceMode: expectedMode,
+    });
+    if (row.servicePricingHash.toLowerCase() !== expectedServicePricingHash.toLowerCase()) {
+      addIssue('usage-service-pricing-catalog-mismatch', 'service usage row servicePricingHash is not the announced service pricing hash');
+    }
     if (
       toBigInt(row.inputUsdPerMillion) !== BigInt(pricing.inputUsdPerMillion)
       || toBigInt(row.cachedInputUsdPerMillion) !== BigInt(expectedCachedPrice)
@@ -485,6 +507,7 @@ function fromServiceUsageRowPayload(payload: ChannelUsageReportServiceUsageRowPa
     provider: payload.provider,
     service: payload.service,
     serviceIdHash: payload.serviceIdHash,
+    servicePricingHash: payload.servicePricingHash,
     inputUsdPerMillion: payload.inputUsdPerMillion,
     cachedInputUsdPerMillion: payload.cachedInputUsdPerMillion,
     outputUsdPerMillion: payload.outputUsdPerMillion,
@@ -510,7 +533,7 @@ function validateReportFields(
   validateBytes32('metadataHash', report.metadataHash, addIssue);
   validateBytes32('selectionBeacon', report.selectionBeacon, addIssue);
   validateUintNumber('verifierCount', report.verifierCount, addIssue);
-  validateBytes32('pricingSnapshotHash', report.pricingSnapshotHash, addIssue);
+  validateBytes32('pricingCatalogRoot', report.pricingCatalogRoot, addIssue);
   if (report.buyerSpendingAuthSig !== undefined) {
     validateSignature('buyerSpendingAuthSig', report.buyerSpendingAuthSig, addIssue);
   }
@@ -522,6 +545,7 @@ function validateReportFields(
     validateNonEmptyString(`${prefix}.provider`, row.provider, addIssue);
     validateNonEmptyString(`${prefix}.service`, row.service, addIssue);
     validateBytes32(`${prefix}.serviceIdHash`, row.serviceIdHash, addIssue);
+    validateBytes32(`${prefix}.servicePricingHash`, row.servicePricingHash, addIssue);
     validateUintString(`${prefix}.inputUsdPerMillion`, row.inputUsdPerMillion, addIssue);
     validateUintString(`${prefix}.cachedInputUsdPerMillion`, row.cachedInputUsdPerMillion, addIssue);
     validateUintString(`${prefix}.outputUsdPerMillion`, row.outputUsdPerMillion, addIssue);
@@ -538,22 +562,20 @@ export function serviceIdHash(provider: string, service: string): string {
   return hashUtf8(`${provider.trim().toLowerCase()}:${service.trim()}`);
 }
 
-export function derivePricingSnapshotHash(metadata: PeerMetadata): string {
-  const providers = metadata.providers
-    .map((provider) => ({
-      provider: provider.provider,
-      services: [...provider.services].sort().map((service) => ({
-        service,
-        pricing: provider.servicePricing?.[service] ?? provider.defaultPricing,
-      })),
-    }))
-    .sort((a, b) => a.provider.localeCompare(b.provider));
-  return keccak256(toUtf8Bytes(JSON.stringify({
-    version: 1,
-    peerId: metadata.peerId.toLowerCase(),
-    sellerContract: metadata.sellerContract?.toLowerCase() ?? null,
-    providers,
-  })));
+export function derivePricingCatalogRoot(metadata: PeerMetadata): string {
+  return computePricingCatalogRoot(metadata.providers.flatMap((provider) =>
+    provider.services.map((service) => {
+      const pricing = provider.servicePricing?.[service] ?? provider.defaultPricing;
+      const cachedInputUsdPerMillion = pricing.cachedInputUsdPerMillion ?? pricing.inputUsdPerMillion;
+      return {
+        serviceIdHash: serviceIdHash(provider.provider, service),
+        inputUsdPerMillion: pricing.inputUsdPerMillion,
+        cachedInputUsdPerMillion,
+        outputUsdPerMillion: pricing.outputUsdPerMillion,
+        serviceMode: isFreePricing(pricing) ? SERVICE_MODE_FREE : SERVICE_MODE_PAID,
+      };
+    })
+  ));
 }
 
 function verifySellerMetadataSignature(metadata: PeerMetadata): boolean {

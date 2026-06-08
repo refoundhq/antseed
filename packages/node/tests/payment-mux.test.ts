@@ -165,7 +165,7 @@ describe('PaymentMux', () => {
         metadataHash: '0x' + 'cc'.repeat(32),
         selectionBeacon: '0x' + '99'.repeat(32),
         verifierCount: 3,
-        pricingSnapshotHash: '0x' + 'bb'.repeat(32),
+        pricingCatalogRoot: '0x' + 'bb'.repeat(32),
         serviceUsageRows: [],
         reportedAt: 1700000000,
       };

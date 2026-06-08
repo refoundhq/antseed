@@ -9,8 +9,9 @@ import { bytesToHex } from '../utils/hex.js';
 import { computeCostUsdc } from './pricing.js';
 import {
   computeEncodedMetadataHash,
-  computeServiceUsageHash,
+  computeServiceUsageRoot,
   encodeMetadataV2,
+  hashServicePricing,
   makeChannelsDomain,
   SERVICE_MODE_PAID,
   signSpendingAuth,
@@ -20,7 +21,7 @@ import {
 import {
   computeUsageReportVerifierSelectionSeed,
   createUsageReportAck,
-  derivePricingSnapshotHash,
+  derivePricingCatalogRoot,
   getUsageReportVerifierAssignment,
   selectUsageReportVerifiers,
   serviceIdHash,
@@ -60,7 +61,7 @@ describe('usage-report-verifier', () => {
 
     expect(ack.accepted).toBe(true);
     expect(ack.attestation?.verifier).toBe(verifier.address.slice(2).toLowerCase());
-    expect(ack.attestation?.pricingSnapshotHash).toBe(report.pricingSnapshotHash);
+    expect(ack.attestation?.pricingCatalogRoot).toBe(report.pricingCatalogRoot);
     expect(ack.attestation ? verifyChannelReportAttestation(ack.attestation) : false).toBe(true);
   });
 
@@ -89,7 +90,7 @@ describe('usage-report-verifier', () => {
     }, { spendingAuthDomain: domain, settledCumulativeAmount: costUsdc + 1n, sellerMetadata });
 
     expect(result.ok).toBe(false);
-    expect(result.issues.map((issue) => issue.code)).toContain('service-usage-hash-or-total-mismatch');
+    expect(result.issues.map((issue) => issue.code)).toContain('service-usage-root-or-total-mismatch');
     expect(result.issues.map((issue) => issue.code)).toContain('announced-pricing-cost-mismatch');
   });
 
@@ -105,11 +106,11 @@ describe('usage-report-verifier', () => {
     }, { spendingAuthDomain: domain, settledCumulativeAmount: costUsdc, sellerMetadata });
 
     expect(result.ok).toBe(false);
-    expect(result.issues.map((issue) => issue.code)).toContain('service-usage-hash-or-total-mismatch');
+    expect(result.issues.map((issue) => issue.code)).toContain('service-usage-root-or-total-mismatch');
     expect(result.issues.map((issue) => issue.code)).toContain('usage-pricing-mismatch');
   });
 
-  it('rejects reports when the seller metadata pricing snapshot is unavailable', async () => {
+  it('rejects reports when the seller metadata pricing catalog is unavailable', async () => {
     const { report, domain, costUsdc } = await createValidPaidReport();
 
     const result = verifyChannelUsageReport(report, {
@@ -236,7 +237,7 @@ async function createValidPaidReport(): Promise<{
   const buyer = Wallet.createRandom();
   const domain = makeChannelsDomain(8453, channelsAddress);
   const sellerMetadata = createSellerMetadata();
-  const pricingSnapshotHash = derivePricingSnapshotHash(sellerMetadata);
+  const pricingCatalogRoot = derivePricingCatalogRoot(sellerMetadata);
   const costUsdc = computeCostUsdc(100, 10, {
     inputUsdPerMillion: 1_000_000,
     cachedInputUsdPerMillion: 500_000,
@@ -247,6 +248,13 @@ async function createValidPaidReport(): Promise<{
     provider: 'openai',
     service: 'gpt-4.1',
     serviceIdHash: serviceIdHash('openai', 'gpt-4.1'),
+    servicePricingHash: hashServicePricing({
+      serviceIdHash: serviceIdHash('openai', 'gpt-4.1'),
+      inputUsdPerMillion: 1_000_000n,
+      cachedInputUsdPerMillion: 500_000n,
+      outputUsdPerMillion: 2_000_000n,
+      serviceMode: SERVICE_MODE_PAID,
+    }),
     inputUsdPerMillion: 1_000_000n,
     cachedInputUsdPerMillion: 500_000n,
     outputUsdPerMillion: 2_000_000n,
@@ -258,8 +266,8 @@ async function createValidPaidReport(): Promise<{
     cumulativeAmountPaid: costUsdc,
   };
   const metadata = {
-    pricingSnapshotHash,
-    serviceUsageHash: computeServiceUsageHash([usageRow]),
+    pricingCatalogRoot,
+    serviceUsageRoot: computeServiceUsageRoot([usageRow]),
     receiptRoot: ZERO_BYTES32,
     cumulativeFreshInputTokens: 100n,
     cumulativeCachedInputTokens: 20n,
@@ -290,7 +298,7 @@ async function createValidPaidReport(): Promise<{
       selectionBeacon,
       verifierCount,
       buyerSpendingAuthSig: spendingAuthSig,
-      pricingSnapshotHash,
+      pricingCatalogRoot,
       serviceUsageRows: [toUsagePayload(usageRow)],
       reportedAt,
     },
@@ -326,6 +334,7 @@ function toUsagePayload(row: ServiceUsageRow) {
     provider: row.provider,
     service: row.service,
     serviceIdHash: row.serviceIdHash,
+    servicePricingHash: row.servicePricingHash,
     inputUsdPerMillion: row.inputUsdPerMillion.toString(),
     cachedInputUsdPerMillion: row.cachedInputUsdPerMillion.toString(),
     outputUsdPerMillion: row.outputUsdPerMillion.toString(),

@@ -147,8 +147,8 @@ export interface NeedAuthPayload {
 // ─── Peer-Verifiable Usage Reports (0x60-0x61) ─────────────────
 
 export interface NeedAuthUsageReportMetadataPayload {
-  pricingSnapshotHash: string;
-  serviceUsageHash: string;
+  pricingCatalogRoot: string;
+  serviceUsageRoot: string;
   receiptRoot: string;
   cumulativeFreshInputTokens: string;
   cumulativeCachedInputTokens: string;
@@ -162,6 +162,7 @@ export interface ChannelUsageReportServiceUsageRowPayload {
   provider: string;
   service: string;
   serviceIdHash: string;
+  servicePricingHash: string;
   inputUsdPerMillion: string;
   cachedInputUsdPerMillion: string;
   outputUsdPerMillion: string;
@@ -187,8 +188,8 @@ export interface ChannelUsageReportPayload {
   verifierCount: number;
   /** Required for paid usage; omitted for free-only reports. */
   buyerSpendingAuthSig?: string;
-  /** Hash derived from the seller's existing signed /metadata pricing fields. */
-  pricingSnapshotHash: string;
+  /** Merkle root derived from the seller's existing signed /metadata pricing fields. */
+  pricingCatalogRoot: string;
   serviceUsageRows: ChannelUsageReportServiceUsageRowPayload[];
   reportedAt: number;
 }
@@ -201,8 +202,8 @@ export interface ChannelReportAttestationPayload {
   buyer: string;
   cumulativeAmount: string;
   metadataHash: string;
-  pricingSnapshotHash: string;
-  serviceUsageHash: string;
+  pricingCatalogRoot: string;
+  serviceUsageRoot: string;
   /**
    * Verifier seller peer address / peerId, 40 lowercase hex chars or an EVM
    * address. This is the identity that signed the attestation and can later be

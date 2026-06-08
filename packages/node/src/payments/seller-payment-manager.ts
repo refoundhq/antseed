@@ -16,7 +16,8 @@ import {
   encodeMetadata,
   encodeMetadataV2,
   computeEncodedMetadataHash,
-  computeServiceUsageHash,
+  computeServiceUsageRoot,
+  hashServicePricing,
   SERVICE_MODE_PAID,
   ZERO_BYTES32,
   ZERO_METADATA,
@@ -79,7 +80,7 @@ interface RecordUsageReportEvidenceParams {
   responseBody: Uint8Array;
   provider: string;
   service: string;
-  pricingSnapshotHash: string;
+  pricingCatalogRoot: string;
   pricing: {
     inputUsdPerMillion: number;
     cachedInputUsdPerMillion?: number;
@@ -95,7 +96,7 @@ interface RecordUsageReportEvidenceParams {
 interface UsageReportDraft {
   metadata: NeedAuthUsageReportMetadataPayload;
   metadataHash: string;
-  pricingSnapshotHash: string;
+  pricingCatalogRoot: string;
   serviceUsageRows: ChannelUsageReportServiceUsageRowPayload[];
 }
 
@@ -1095,7 +1096,7 @@ export class SellerPaymentManager {
       selectionBeacon: keccak256(auth.spendingAuthSig),
       verifierCount: this._usageReportVerifierCount,
       buyerSpendingAuthSig: auth.spendingAuthSig,
-      pricingSnapshotHash: draft.pricingSnapshotHash,
+      pricingCatalogRoot: draft.pricingCatalogRoot,
       serviceUsageRows: draft.serviceUsageRows,
       reportedAt: Math.floor(Date.now() / 1000),
     };
@@ -1111,15 +1112,24 @@ export class SellerPaymentManager {
     const previous = this._usageReportDrafts.get(params.channelId);
     const usageRowsByKey = new Map<string, ChannelUsageReportServiceUsageRowPayload>();
     for (const row of previous?.serviceUsageRows ?? []) {
-      usageRowsByKey.set(`${row.provider}:${row.service}`, row);
+      usageRowsByKey.set(`${row.provider}:${row.service}:${row.servicePricingHash}`, row);
     }
-    const usageKey = `${params.provider}:${params.service}`;
+    const currentServiceIdHash = serviceIdHash(params.provider, params.service);
+    const servicePricingHash = hashServicePricing({
+      serviceIdHash: currentServiceIdHash,
+      inputUsdPerMillion: params.pricing.inputUsdPerMillion,
+      cachedInputUsdPerMillion: params.pricing.cachedInputUsdPerMillion ?? params.pricing.inputUsdPerMillion,
+      outputUsdPerMillion: params.pricing.outputUsdPerMillion,
+      serviceMode: SERVICE_MODE_PAID,
+    });
+    const usageKey = `${params.provider}:${params.service}:${servicePricingHash}`;
     const prevUsage = usageRowsByKey.get(usageKey);
     usageRowsByKey.set(usageKey, {
       channelId: params.channelId,
       provider: params.provider,
       service: params.service,
-      serviceIdHash: serviceIdHash(params.provider, params.service),
+      serviceIdHash: currentServiceIdHash,
+      servicePricingHash,
       inputUsdPerMillion: params.pricing.inputUsdPerMillion.toString(),
       cachedInputUsdPerMillion: (params.pricing.cachedInputUsdPerMillion ?? params.pricing.inputUsdPerMillion).toString(),
       outputUsdPerMillion: params.pricing.outputUsdPerMillion.toString(),
@@ -1132,7 +1142,7 @@ export class SellerPaymentManager {
     });
 
     const serviceUsageRows = [...usageRowsByKey.values()];
-    const serviceUsageHash = computeServiceUsageHash(serviceUsageRows);
+    const serviceUsageRoot = computeServiceUsageRoot(serviceUsageRows);
     const totals = serviceUsageRows.reduce(
       (acc, row) => ({
         fresh: acc.fresh + BigInt(row.cumulativeFreshInputTokens),
@@ -1144,8 +1154,8 @@ export class SellerPaymentManager {
       { fresh: 0n, cached: 0n, output: 0n, requests: 0n, paid: 0n },
     );
     const metadata: NeedAuthUsageReportMetadataPayload = {
-      pricingSnapshotHash: params.pricingSnapshotHash,
-      serviceUsageHash,
+      pricingCatalogRoot: params.pricingCatalogRoot,
+      serviceUsageRoot,
       receiptRoot: ZERO_BYTES32,
       cumulativeFreshInputTokens: totals.fresh.toString(),
       cumulativeCachedInputTokens: totals.cached.toString(),
@@ -1154,8 +1164,8 @@ export class SellerPaymentManager {
       cumulativeAmountPaid: totals.paid.toString(),
     };
     const encodedMetadata = encodeMetadataV2({
-      pricingSnapshotHash: metadata.pricingSnapshotHash,
-      serviceUsageHash: metadata.serviceUsageHash,
+      pricingCatalogRoot: metadata.pricingCatalogRoot,
+      serviceUsageRoot: metadata.serviceUsageRoot,
       receiptRoot: metadata.receiptRoot,
       cumulativeFreshInputTokens: BigInt(metadata.cumulativeFreshInputTokens),
       cumulativeCachedInputTokens: BigInt(metadata.cumulativeCachedInputTokens),
@@ -1166,7 +1176,7 @@ export class SellerPaymentManager {
     this._usageReportDrafts.set(params.channelId, {
       metadata,
       metadataHash: computeEncodedMetadataHash(encodedMetadata),
-      pricingSnapshotHash: params.pricingSnapshotHash,
+      pricingCatalogRoot: params.pricingCatalogRoot,
       serviceUsageRows,
     });
     debugLog(`[SellerPayment] Usage report draft updated: channel=${params.channelId.slice(0, 18)}... paid=${metadata.cumulativeAmountPaid}`);

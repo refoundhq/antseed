@@ -127,8 +127,8 @@ export function decodeNeedAuth(data: Uint8Array): NeedAuthPayload {
   ) {
     const metadata = obj.usageReportMetadata as Record<string, unknown>;
     result.usageReportMetadata = {
-      pricingSnapshotHash: requireString(metadata, 'pricingSnapshotHash'),
-      serviceUsageHash: requireString(metadata, 'serviceUsageHash'),
+      pricingCatalogRoot: requireString(metadata, 'pricingCatalogRoot'),
+      serviceUsageRoot: requireString(metadata, 'serviceUsageRoot'),
       receiptRoot: requireString(metadata, 'receiptRoot'),
       cumulativeFreshInputTokens: requireString(metadata, 'cumulativeFreshInputTokens'),
       cumulativeCachedInputTokens: requireString(metadata, 'cumulativeCachedInputTokens'),
@@ -152,7 +152,7 @@ export function decodePeerReport(data: Uint8Array): ChannelUsageReportPayload {
     metadataHash: requireString(obj, 'metadataHash'),
     selectionBeacon: requireString(obj, 'selectionBeacon'),
     verifierCount: requireNumber(obj, 'verifierCount'),
-    pricingSnapshotHash: requireString(obj, 'pricingSnapshotHash'),
+    pricingCatalogRoot: requireString(obj, 'pricingCatalogRoot'),
     serviceUsageRows: parseArray(obj, 'serviceUsageRows', parseServiceUsageRow),
     reportedAt: requireNumber(obj, 'reportedAt'),
   };
@@ -179,8 +179,8 @@ export function decodeReportAck(data: Uint8Array): UsageReportAckPayload {
       buyer: requireString(attestation, 'buyer'),
       cumulativeAmount: requireString(attestation, 'cumulativeAmount'),
       metadataHash: requireString(attestation, 'metadataHash'),
-      pricingSnapshotHash: requireString(attestation, 'pricingSnapshotHash'),
-      serviceUsageHash: requireString(attestation, 'serviceUsageHash'),
+      pricingCatalogRoot: requireString(attestation, 'pricingCatalogRoot'),
+      serviceUsageRoot: requireString(attestation, 'serviceUsageRoot'),
       verifier: requireString(attestation, 'verifier'),
       verifierAgentId: requireString(attestation, 'verifierAgentId'),
       timestamp: requireNumber(attestation, 'timestamp'),
@@ -229,6 +229,7 @@ function parseServiceUsageRow(obj: Record<string, unknown>): ChannelUsageReportS
     provider: requireString(obj, 'provider'),
     service: requireString(obj, 'service'),
     serviceIdHash: requireString(obj, 'serviceIdHash'),
+    servicePricingHash: requireString(obj, 'servicePricingHash'),
     inputUsdPerMillion: requireString(obj, 'inputUsdPerMillion'),
     cachedInputUsdPerMillion: requireString(obj, 'cachedInputUsdPerMillion'),
     outputUsdPerMillion: requireString(obj, 'outputUsdPerMillion'),

@@ -32,8 +32,8 @@ contract AntseedStatsV2 is IAntseedStats, Ownable {
 
     struct DecodedMetadata {
         uint256 version;
-        bytes32 pricingSnapshotHash;
-        bytes32 serviceUsageHash;
+        bytes32 pricingCatalogRoot;
+        bytes32 serviceUsageRoot;
         bytes32 receiptRoot;
         uint256 freshInputTokens;
         uint256 cachedInputTokens;
@@ -50,8 +50,8 @@ contract AntseedStatsV2 is IAntseedStats, Ownable {
         uint256 cumulativeAmount;
         bytes32 channelId;
         bytes32 metadataHash;
-        bytes32 pricingSnapshotHash;
-        bytes32 serviceUsageHash;
+        bytes32 pricingCatalogRoot;
+        bytes32 serviceUsageRoot;
         bool accepted;
         uint64 verifiedAt;
     }
@@ -59,6 +59,7 @@ contract AntseedStatsV2 is IAntseedStats, Ownable {
     struct ServiceUsageRow {
         bytes32 channelId;
         bytes32 serviceIdHash;
+        bytes32 servicePricingHash;
         uint256 inputUsdPerMillion;
         uint256 cachedInputUsdPerMillion;
         uint256 outputUsdPerMillion;
@@ -113,8 +114,8 @@ contract AntseedStatsV2 is IAntseedStats, Ownable {
         uint256 indexed agentId,
         address indexed buyer,
         bytes32 indexed channelId,
-        bytes32 pricingSnapshotHash,
-        bytes32 serviceUsageHash,
+        bytes32 pricingCatalogRoot,
+        bytes32 serviceUsageRoot,
         bytes32 receiptRoot,
         uint256 freshInputTokens,
         uint256 cachedInputTokens,
@@ -141,8 +142,8 @@ contract AntseedStatsV2 is IAntseedStats, Ownable {
         address verifier,
         bytes32 channelId,
         bytes32 metadataHash,
-        bytes32 pricingSnapshotHash,
-        bytes32 serviceUsageHash,
+        bytes32 pricingCatalogRoot,
+        bytes32 serviceUsageRoot,
         uint256 cumulativeAmount,
         bool accepted
     );
@@ -150,6 +151,7 @@ contract AntseedStatsV2 is IAntseedStats, Ownable {
         bytes32 indexed reportHash,
         uint256 indexed sellerAgentId,
         bytes32 indexed serviceIdHash,
+        bytes32 servicePricingHash,
         bytes32 channelId,
         uint256 inputUsdPerMillion,
         uint256 cachedInputUsdPerMillion,
@@ -171,7 +173,7 @@ contract AntseedStatsV2 is IAntseedStats, Ownable {
     error VerifierNotStaked();
     error DuplicateVerification();
     error TooManyServiceUsageRows();
-    error InvalidServiceUsageHash();
+    error InvalidServiceUsageRoot();
     error UnsupportedMetadataVersion(uint256 version);
 
     // ─── Constructor ────────────────────────────────────────────────
@@ -259,8 +261,8 @@ contract AntseedStatsV2 is IAntseedStats, Ownable {
                 agentId,
                 buyer,
                 channelId,
-                decoded.pricingSnapshotHash,
-                decoded.serviceUsageHash,
+                decoded.pricingCatalogRoot,
+                decoded.serviceUsageRoot,
                 decoded.receiptRoot,
                 decoded.freshInputTokens,
                 decoded.cachedInputTokens,
@@ -282,8 +284,8 @@ contract AntseedStatsV2 is IAntseedStats, Ownable {
         uint256 verifierAgentId,
         uint256 cumulativeAmount,
         bytes32 metadataHash,
-        bytes32 pricingSnapshotHash,
-        bytes32 serviceUsageHash,
+        bytes32 pricingCatalogRoot,
+        bytes32 serviceUsageRoot,
         bool accepted
     ) external {
         _recordUsageReportVerification(
@@ -295,8 +297,8 @@ contract AntseedStatsV2 is IAntseedStats, Ownable {
             verifierAgentId,
             cumulativeAmount,
             metadataHash,
-            pricingSnapshotHash,
-            serviceUsageHash,
+            pricingCatalogRoot,
+            serviceUsageRoot,
             accepted
         );
     }
@@ -310,8 +312,8 @@ contract AntseedStatsV2 is IAntseedStats, Ownable {
         uint256 verifierAgentId,
         uint256 cumulativeAmount,
         bytes32 metadataHash,
-        bytes32 pricingSnapshotHash,
-        bytes32 serviceUsageHash,
+        bytes32 pricingCatalogRoot,
+        bytes32 serviceUsageRoot,
         bool accepted,
         ServiceUsageRow[] calldata serviceUsageRows
     ) external {
@@ -324,13 +326,13 @@ contract AntseedStatsV2 is IAntseedStats, Ownable {
             verifierAgentId,
             cumulativeAmount,
             metadataHash,
-            pricingSnapshotHash,
-            serviceUsageHash,
+            pricingCatalogRoot,
+            serviceUsageRoot,
             accepted
         );
 
         if (accepted && !reportServiceUsageRecorded[reportHash]) {
-            _recordReportServiceUsage(reportHash, sellerAgentId, serviceUsageHash, serviceUsageRows);
+            _recordReportServiceUsage(reportHash, sellerAgentId, serviceUsageRoot, serviceUsageRows);
         }
     }
 
@@ -343,8 +345,8 @@ contract AntseedStatsV2 is IAntseedStats, Ownable {
         uint256 verifierAgentId,
         uint256 cumulativeAmount,
         bytes32 metadataHash,
-        bytes32 pricingSnapshotHash,
-        bytes32 serviceUsageHash,
+        bytes32 pricingCatalogRoot,
+        bytes32 serviceUsageRoot,
         bool accepted
     ) internal {
         if (reportHash == bytes32(0) || channelId == bytes32(0) || seller == address(0) || buyer == address(0)) {
@@ -377,8 +379,8 @@ contract AntseedStatsV2 is IAntseedStats, Ownable {
         existing.cumulativeAmount = cumulativeAmount;
         existing.channelId = channelId;
         existing.metadataHash = metadataHash;
-        existing.pricingSnapshotHash = pricingSnapshotHash;
-        existing.serviceUsageHash = serviceUsageHash;
+        existing.pricingCatalogRoot = pricingCatalogRoot;
+        existing.serviceUsageRoot = serviceUsageRoot;
         existing.accepted = accepted;
         existing.verifiedAt = uint64(block.timestamp);
 
@@ -404,8 +406,8 @@ contract AntseedStatsV2 is IAntseedStats, Ownable {
             msg.sender,
             channelId,
             metadataHash,
-            pricingSnapshotHash,
-            serviceUsageHash,
+            pricingCatalogRoot,
+            serviceUsageRoot,
             cumulativeAmount,
             accepted
         );
@@ -414,12 +416,12 @@ contract AntseedStatsV2 is IAntseedStats, Ownable {
     function _recordReportServiceUsage(
         bytes32 reportHash,
         uint256 sellerAgentId,
-        bytes32 serviceUsageHash,
+        bytes32 serviceUsageRoot,
         ServiceUsageRow[] calldata serviceUsageRows
     ) internal {
         if (serviceUsageRows.length > MAX_SERVICE_USAGE_ROWS) revert TooManyServiceUsageRows();
-        if (_computeServiceUsageHash(serviceUsageRows) != serviceUsageHash) {
-            revert InvalidServiceUsageHash();
+        if (_computeServiceUsageRoot(serviceUsageRows) != serviceUsageRoot) {
+            revert InvalidServiceUsageRoot();
         }
 
         reportServiceUsageRecorded[reportHash] = true;
@@ -429,6 +431,7 @@ contract AntseedStatsV2 is IAntseedStats, Ownable {
                 reportHash,
                 sellerAgentId,
                 row.serviceIdHash,
+                row.servicePricingHash,
                 row.channelId,
                 row.inputUsdPerMillion,
                 row.cachedInputUsdPerMillion,
@@ -443,7 +446,7 @@ contract AntseedStatsV2 is IAntseedStats, Ownable {
         }
     }
 
-    function _computeServiceUsageHash(ServiceUsageRow[] calldata rows) internal pure returns (bytes32) {
+    function _computeServiceUsageRoot(ServiceUsageRow[] calldata rows) internal pure returns (bytes32) {
         if (rows.length == 0) return bytes32(0);
 
         bytes32[] memory rowHashes = new bytes32[](rows.length);
@@ -452,6 +455,7 @@ contract AntseedStatsV2 is IAntseedStats, Ownable {
             rowHashes[i] = keccak256(abi.encode(
                 row.channelId,
                 row.serviceIdHash,
+                row.servicePricingHash,
                 row.inputUsdPerMillion,
                 row.cachedInputUsdPerMillion,
                 row.outputUsdPerMillion,
@@ -463,9 +467,31 @@ contract AntseedStatsV2 is IAntseedStats, Ownable {
                 row.cumulativeAmountPaid
             ));
         }
-        _sortHashes(rowHashes);
+        return _computeMerkleRoot(rowHashes);
+    }
 
-        return keccak256(abi.encode(rowHashes));
+    function _computeMerkleRoot(bytes32[] memory leaves) internal pure returns (bytes32) {
+        _sortHashes(leaves);
+
+        uint256 length = leaves.length;
+        while (length > 1) {
+            uint256 nextLength = (length + 1) / 2;
+            bytes32[] memory nextLevel = new bytes32[](nextLength);
+            for (uint256 i = 0; i < length; i += 2) {
+                bytes32 left = leaves[i];
+                bytes32 right = i + 1 < length ? leaves[i + 1] : left;
+                nextLevel[i / 2] = _hashMerklePair(left, right);
+            }
+            _sortHashes(nextLevel);
+            leaves = nextLevel;
+            length = nextLength;
+        }
+
+        return leaves[0];
+    }
+
+    function _hashMerklePair(bytes32 a, bytes32 b) internal pure returns (bytes32) {
+        return a <= b ? keccak256(abi.encode(a, b)) : keccak256(abi.encode(b, a));
     }
 
     function _sortHashes(bytes32[] memory hashes) internal pure {
@@ -515,8 +541,8 @@ contract AntseedStatsV2 is IAntseedStats, Ownable {
         if (version == 2) {
             (
                 ,
-                decoded.pricingSnapshotHash,
-                decoded.serviceUsageHash,
+                decoded.pricingCatalogRoot,
+                decoded.serviceUsageRoot,
                 decoded.receiptRoot,
                 decoded.freshInputTokens,
                 decoded.cachedInputTokens,

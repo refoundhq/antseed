@@ -66,7 +66,9 @@ export {
   encodeMetadata,
   encodeMetadataV2,
   computeChannelId,
-  computeServiceUsageHash,
+  computePricingCatalogRoot,
+  computeServiceUsageRoot,
+  hashServicePricing,
   hashServiceUsageRow,
   hashUtf8,
   metadataV2MatchesServiceUsage,
@@ -81,6 +83,7 @@ export {
 } from './payments/evm/signatures.js';
 export type {
   DecodedSpendingAuthMetadata,
+  ServicePricingCommitment,
   ServiceUsageRow,
   SpendingAuthMessage,
   ReserveAuthMessage,
@@ -94,7 +97,7 @@ export type { BuyerPaymentConfig } from './payments/buyer-payment-manager.js';
 export {
   createChannelReportAttestation,
   createUsageReportAck,
-  derivePricingSnapshotHash,
+  derivePricingCatalogRoot,
   encodeAttestationForSigning,
   computeChannelUsageReportHash,
   computeUsageReportVerifierSelectionSeed,

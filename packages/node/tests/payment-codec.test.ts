@@ -110,8 +110,8 @@ describe('payment codec round-trips', () => {
       freshInputTokens: '5',
       service: 'model-a',
       usageReportMetadata: {
-        pricingSnapshotHash: '0x' + '22'.repeat(32),
-        serviceUsageHash: '0x' + '33'.repeat(32),
+        pricingCatalogRoot: '0x' + '22'.repeat(32),
+        serviceUsageRoot: '0x' + '33'.repeat(32),
         receiptRoot: '0x' + '44'.repeat(32),
         cumulativeFreshInputTokens: '5',
         cumulativeCachedInputTokens: '2',

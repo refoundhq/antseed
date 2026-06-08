@@ -61,14 +61,22 @@ export interface SpendingAuthMetadata {
 }
 
 export interface SpendingAuthMetadataV2 {
-  pricingSnapshotHash: string;
-  serviceUsageHash: string;
+  pricingCatalogRoot: string;
+  serviceUsageRoot: string;
   receiptRoot: string;
   cumulativeFreshInputTokens: bigint;
   cumulativeCachedInputTokens: bigint;
   cumulativeOutputTokens: bigint;
   cumulativeRequestCount: bigint;
   cumulativeAmountPaid: bigint;
+}
+
+export interface ServicePricingCommitment {
+  serviceIdHash: string;
+  inputUsdPerMillion: Uintish;
+  cachedInputUsdPerMillion: Uintish;
+  outputUsdPerMillion: Uintish;
+  serviceMode: Uintish;
 }
 
 export type DecodedSpendingAuthMetadata =
@@ -80,6 +88,7 @@ export interface ServiceUsageRow {
   provider: string;
   service: string;
   serviceIdHash: string;
+  servicePricingHash: string;
   inputUsdPerMillion: Uintish;
   cachedInputUsdPerMillion: Uintish;
   outputUsdPerMillion: Uintish;
@@ -112,8 +121,8 @@ export function encodeMetadataV2(metadata: SpendingAuthMetadataV2): string {
     ['uint256', 'bytes32', 'bytes32', 'bytes32', 'uint256', 'uint256', 'uint256', 'uint256', 'uint256'],
     [
       METADATA_V2_VERSION,
-      metadata.pricingSnapshotHash,
-      metadata.serviceUsageHash,
+      metadata.pricingCatalogRoot,
+      metadata.serviceUsageRoot,
       metadata.receiptRoot,
       metadata.cumulativeFreshInputTokens,
       metadata.cumulativeCachedInputTokens,
@@ -125,7 +134,7 @@ export function encodeMetadataV2(metadata: SpendingAuthMetadataV2): string {
 }
 
 export function computeMetadataHash(metadata: SpendingAuthMetadata | SpendingAuthMetadataV2): string {
-  if ('pricingSnapshotHash' in metadata) {
+  if ('pricingCatalogRoot' in metadata) {
     return computeEncodedMetadataHash(encodeMetadataV2(metadata));
   }
   return keccak256(encodeMetadata(metadata));
@@ -141,8 +150,8 @@ export function decodeMetadata(encodedMetadata: string): DecodedSpendingAuthMeta
   if (version === METADATA_V2_VERSION) {
     const [
       ,
-      pricingSnapshotHash,
-      serviceUsageHash,
+      pricingCatalogRoot,
+      serviceUsageRoot,
       receiptRoot,
       cumulativeFreshInputTokens,
       cumulativeCachedInputTokens,
@@ -156,8 +165,8 @@ export function decodeMetadata(encodedMetadata: string): DecodedSpendingAuthMeta
 
     return {
       version: METADATA_V2_VERSION,
-      pricingSnapshotHash,
-      serviceUsageHash,
+      pricingCatalogRoot,
+      serviceUsageRoot,
       receiptRoot,
       cumulativeFreshInputTokens,
       cumulativeCachedInputTokens,
@@ -185,13 +194,32 @@ export function hashUtf8(value: string): string {
   return id(value);
 }
 
+export function hashServicePricing(pricing: ServicePricingCommitment): string {
+  const coder = AbiCoder.defaultAbiCoder();
+  return keccak256(coder.encode(
+    ['bytes32', 'uint256', 'uint256', 'uint256', 'uint256'],
+    [
+      pricing.serviceIdHash,
+      toBigInt(pricing.inputUsdPerMillion),
+      toBigInt(pricing.cachedInputUsdPerMillion),
+      toBigInt(pricing.outputUsdPerMillion),
+      toBigInt(pricing.serviceMode),
+    ],
+  ));
+}
+
+export function computePricingCatalogRoot(pricing: readonly ServicePricingCommitment[]): string {
+  return computeMerkleRoot(pricing.map(hashServicePricing));
+}
+
 export function hashServiceUsageRow(row: ServiceUsageRow): string {
   const coder = AbiCoder.defaultAbiCoder();
   return keccak256(coder.encode(
-    ['bytes32', 'bytes32', 'uint256', 'uint256', 'uint256', 'uint256', 'uint256', 'uint256', 'uint256', 'uint256', 'uint256'],
+    ['bytes32', 'bytes32', 'bytes32', 'uint256', 'uint256', 'uint256', 'uint256', 'uint256', 'uint256', 'uint256', 'uint256', 'uint256'],
     [
       row.channelId,
       row.serviceIdHash,
+      row.servicePricingHash,
       toBigInt(row.inputUsdPerMillion),
       toBigInt(row.cachedInputUsdPerMillion),
       toBigInt(row.outputUsdPerMillion),
@@ -205,14 +233,11 @@ export function hashServiceUsageRow(row: ServiceUsageRow): string {
   ));
 }
 
-export function computeServiceUsageHash(rows: readonly ServiceUsageRow[]): string {
-  const rowHashes = rows.map(hashServiceUsageRow);
-  if (rowHashes.length === 0) return ZERO_BYTES32;
-  const coder = AbiCoder.defaultAbiCoder();
-  return keccak256(coder.encode(['bytes32[]'], [[...rowHashes].sort(compareHex)]));
+export function computeServiceUsageRoot(rows: readonly ServiceUsageRow[]): string {
+  return computeMerkleRoot(rows.map(hashServiceUsageRow));
 }
 
-export function sumServiceUsageRows(rows: readonly ServiceUsageRow[]): Omit<SpendingAuthMetadataV2, 'pricingSnapshotHash' | 'serviceUsageHash' | 'receiptRoot'> {
+export function sumServiceUsageRows(rows: readonly ServiceUsageRow[]): Omit<SpendingAuthMetadataV2, 'pricingCatalogRoot' | 'serviceUsageRoot' | 'receiptRoot'> {
   return rows.reduce(
     (acc, row) => ({
       cumulativeFreshInputTokens: acc.cumulativeFreshInputTokens + toBigInt(row.cumulativeFreshInputTokens),
@@ -232,9 +257,9 @@ export function sumServiceUsageRows(rows: readonly ServiceUsageRow[]): Omit<Spen
 }
 
 export function metadataV2MatchesServiceUsage(metadata: SpendingAuthMetadataV2, rows: readonly ServiceUsageRow[]): boolean {
-  const serviceUsageHash = computeServiceUsageHash(rows);
+  const serviceUsageRoot = computeServiceUsageRoot(rows);
   const sums = sumServiceUsageRows(rows);
-  return serviceUsageHash.toLowerCase() === metadata.serviceUsageHash.toLowerCase()
+  return serviceUsageRoot.toLowerCase() === metadata.serviceUsageRoot.toLowerCase()
     && sums.cumulativeFreshInputTokens === metadata.cumulativeFreshInputTokens
     && sums.cumulativeCachedInputTokens === metadata.cumulativeCachedInputTokens
     && sums.cumulativeOutputTokens === metadata.cumulativeOutputTokens
@@ -258,6 +283,25 @@ function compareHex(a: string, b: string): number {
   const aa = a.toLowerCase();
   const bb = b.toLowerCase();
   return aa < bb ? -1 : aa > bb ? 1 : 0;
+}
+
+function computeMerkleRoot(leaves: readonly string[]): string {
+  if (leaves.length === 0) return ZERO_BYTES32;
+  let level = [...leaves].sort(compareHex);
+  while (level.length > 1) {
+    const next: string[] = [];
+    for (let i = 0; i < level.length; i += 2) {
+      next.push(hashMerklePair(level[i]!, level[i + 1] ?? level[i]!));
+    }
+    level = next.sort(compareHex);
+  }
+  return level[0]!;
+}
+
+function hashMerklePair(a: string, b: string): string {
+  const [left, right] = compareHex(a, b) <= 0 ? [a, b] : [b, a];
+  const coder = AbiCoder.defaultAbiCoder();
+  return keccak256(coder.encode(['bytes32', 'bytes32'], [left, right]));
 }
 
 // =========================================================================
