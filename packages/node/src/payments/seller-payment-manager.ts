@@ -86,7 +86,7 @@ interface RecordUsageReportEvidenceParams {
     cachedInputUsdPerMillion?: number;
     outputUsdPerMillion: number;
   };
-  freshInputTokens: bigint;
+  inputTokens: bigint;
   cachedInputTokens: bigint;
   outputTokens: bigint;
   costUsdc: bigint;
@@ -1134,7 +1134,7 @@ export class SellerPaymentManager {
       cachedInputUsdPerMillion: (params.pricing.cachedInputUsdPerMillion ?? params.pricing.inputUsdPerMillion).toString(),
       outputUsdPerMillion: params.pricing.outputUsdPerMillion.toString(),
       serviceMode: SERVICE_MODE_PAID.toString(),
-      cumulativeFreshInputTokens: (BigInt(prevUsage?.cumulativeFreshInputTokens ?? '0') + params.freshInputTokens).toString(),
+      cumulativeInputTokens: (BigInt(prevUsage?.cumulativeInputTokens ?? '0') + params.inputTokens).toString(),
       cumulativeCachedInputTokens: (BigInt(prevUsage?.cumulativeCachedInputTokens ?? '0') + params.cachedInputTokens).toString(),
       cumulativeOutputTokens: (BigInt(prevUsage?.cumulativeOutputTokens ?? '0') + params.outputTokens).toString(),
       cumulativeRequestCount: (BigInt(prevUsage?.cumulativeRequestCount ?? '0') + 1n).toString(),
@@ -1145,19 +1145,19 @@ export class SellerPaymentManager {
     const serviceUsageRoot = computeServiceUsageRoot(serviceUsageRows);
     const totals = serviceUsageRows.reduce(
       (acc, row) => ({
-        fresh: acc.fresh + BigInt(row.cumulativeFreshInputTokens),
+        input: acc.input + BigInt(row.cumulativeInputTokens),
         cached: acc.cached + BigInt(row.cumulativeCachedInputTokens),
         output: acc.output + BigInt(row.cumulativeOutputTokens),
         requests: acc.requests + BigInt(row.cumulativeRequestCount),
         paid: acc.paid + BigInt(row.cumulativeAmountPaid),
       }),
-      { fresh: 0n, cached: 0n, output: 0n, requests: 0n, paid: 0n },
+      { input: 0n, cached: 0n, output: 0n, requests: 0n, paid: 0n },
     );
     const metadata: NeedAuthUsageReportMetadataPayload = {
       pricingCatalogRoot: params.pricingCatalogRoot,
       serviceUsageRoot,
       receiptRoot: ZERO_BYTES32,
-      cumulativeFreshInputTokens: totals.fresh.toString(),
+      cumulativeInputTokens: totals.input.toString(),
       cumulativeCachedInputTokens: totals.cached.toString(),
       cumulativeOutputTokens: totals.output.toString(),
       cumulativeRequestCount: totals.requests.toString(),
@@ -1167,7 +1167,7 @@ export class SellerPaymentManager {
       pricingCatalogRoot: metadata.pricingCatalogRoot,
       serviceUsageRoot: metadata.serviceUsageRoot,
       receiptRoot: metadata.receiptRoot,
-      cumulativeFreshInputTokens: BigInt(metadata.cumulativeFreshInputTokens),
+      cumulativeInputTokens: BigInt(metadata.cumulativeInputTokens),
       cumulativeCachedInputTokens: BigInt(metadata.cumulativeCachedInputTokens),
       cumulativeOutputTokens: BigInt(metadata.cumulativeOutputTokens),
       cumulativeRequestCount: BigInt(metadata.cumulativeRequestCount),

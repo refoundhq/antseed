@@ -113,7 +113,7 @@ describe('payment codec round-trips', () => {
         pricingCatalogRoot: '0x' + '22'.repeat(32),
         serviceUsageRoot: '0x' + '33'.repeat(32),
         receiptRoot: '0x' + '44'.repeat(32),
-        cumulativeFreshInputTokens: '5',
+        cumulativeInputTokens: '7',
         cumulativeCachedInputTokens: '2',
         cumulativeOutputTokens: '5',
         cumulativeRequestCount: '1',

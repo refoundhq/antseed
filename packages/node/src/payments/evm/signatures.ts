@@ -64,7 +64,7 @@ export interface SpendingAuthMetadataV2 {
   pricingCatalogRoot: string;
   serviceUsageRoot: string;
   receiptRoot: string;
-  cumulativeFreshInputTokens: bigint;
+  cumulativeInputTokens: bigint;
   cumulativeCachedInputTokens: bigint;
   cumulativeOutputTokens: bigint;
   cumulativeRequestCount: bigint;
@@ -93,7 +93,7 @@ export interface ServiceUsageRow {
   cachedInputUsdPerMillion: Uintish;
   outputUsdPerMillion: Uintish;
   serviceMode: Uintish;
-  cumulativeFreshInputTokens: Uintish;
+  cumulativeInputTokens: Uintish;
   cumulativeCachedInputTokens: Uintish;
   cumulativeOutputTokens: Uintish;
   cumulativeRequestCount: Uintish;
@@ -124,7 +124,7 @@ export function encodeMetadataV2(metadata: SpendingAuthMetadataV2): string {
       metadata.pricingCatalogRoot,
       metadata.serviceUsageRoot,
       metadata.receiptRoot,
-      metadata.cumulativeFreshInputTokens,
+      metadata.cumulativeInputTokens,
       metadata.cumulativeCachedInputTokens,
       metadata.cumulativeOutputTokens,
       metadata.cumulativeRequestCount,
@@ -153,7 +153,7 @@ export function decodeMetadata(encodedMetadata: string): DecodedSpendingAuthMeta
       pricingCatalogRoot,
       serviceUsageRoot,
       receiptRoot,
-      cumulativeFreshInputTokens,
+      cumulativeInputTokens,
       cumulativeCachedInputTokens,
       cumulativeOutputTokens,
       cumulativeRequestCount,
@@ -168,7 +168,7 @@ export function decodeMetadata(encodedMetadata: string): DecodedSpendingAuthMeta
       pricingCatalogRoot,
       serviceUsageRoot,
       receiptRoot,
-      cumulativeFreshInputTokens,
+      cumulativeInputTokens,
       cumulativeCachedInputTokens,
       cumulativeOutputTokens,
       cumulativeRequestCount,
@@ -224,7 +224,7 @@ export function hashServiceUsageRow(row: ServiceUsageRow): string {
       toBigInt(row.cachedInputUsdPerMillion),
       toBigInt(row.outputUsdPerMillion),
       toBigInt(row.serviceMode),
-      toBigInt(row.cumulativeFreshInputTokens),
+      toBigInt(row.cumulativeInputTokens),
       toBigInt(row.cumulativeCachedInputTokens),
       toBigInt(row.cumulativeOutputTokens),
       toBigInt(row.cumulativeRequestCount),
@@ -240,14 +240,14 @@ export function computeServiceUsageRoot(rows: readonly ServiceUsageRow[]): strin
 export function sumServiceUsageRows(rows: readonly ServiceUsageRow[]): Omit<SpendingAuthMetadataV2, 'pricingCatalogRoot' | 'serviceUsageRoot' | 'receiptRoot'> {
   return rows.reduce(
     (acc, row) => ({
-      cumulativeFreshInputTokens: acc.cumulativeFreshInputTokens + toBigInt(row.cumulativeFreshInputTokens),
+      cumulativeInputTokens: acc.cumulativeInputTokens + toBigInt(row.cumulativeInputTokens),
       cumulativeCachedInputTokens: acc.cumulativeCachedInputTokens + toBigInt(row.cumulativeCachedInputTokens),
       cumulativeOutputTokens: acc.cumulativeOutputTokens + toBigInt(row.cumulativeOutputTokens),
       cumulativeRequestCount: acc.cumulativeRequestCount + toBigInt(row.cumulativeRequestCount),
       cumulativeAmountPaid: acc.cumulativeAmountPaid + toBigInt(row.cumulativeAmountPaid),
     }),
     {
-      cumulativeFreshInputTokens: 0n,
+      cumulativeInputTokens: 0n,
       cumulativeCachedInputTokens: 0n,
       cumulativeOutputTokens: 0n,
       cumulativeRequestCount: 0n,
@@ -260,7 +260,7 @@ export function metadataV2MatchesServiceUsage(metadata: SpendingAuthMetadataV2, 
   const serviceUsageRoot = computeServiceUsageRoot(rows);
   const sums = sumServiceUsageRows(rows);
   return serviceUsageRoot.toLowerCase() === metadata.serviceUsageRoot.toLowerCase()
-    && sums.cumulativeFreshInputTokens === metadata.cumulativeFreshInputTokens
+    && sums.cumulativeInputTokens === metadata.cumulativeInputTokens
     && sums.cumulativeCachedInputTokens === metadata.cumulativeCachedInputTokens
     && sums.cumulativeOutputTokens === metadata.cumulativeOutputTokens
     && sums.cumulativeRequestCount === metadata.cumulativeRequestCount

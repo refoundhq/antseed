@@ -935,7 +935,7 @@ export class BuyerPaymentManager {
           pricingCatalogRoot: usageReportMetadata.pricingCatalogRoot,
           serviceUsageRoot: usageReportMetadata.serviceUsageRoot,
           receiptRoot: usageReportMetadata.receiptRoot,
-          cumulativeFreshInputTokens: BigInt(usageReportMetadata.cumulativeFreshInputTokens),
+          cumulativeInputTokens: BigInt(usageReportMetadata.cumulativeInputTokens),
           cumulativeCachedInputTokens: BigInt(usageReportMetadata.cumulativeCachedInputTokens),
           cumulativeOutputTokens: BigInt(usageReportMetadata.cumulativeOutputTokens),
           cumulativeRequestCount: BigInt(usageReportMetadata.cumulativeRequestCount),

@@ -150,7 +150,7 @@ export interface NeedAuthUsageReportMetadataPayload {
   pricingCatalogRoot: string;
   serviceUsageRoot: string;
   receiptRoot: string;
-  cumulativeFreshInputTokens: string;
+  cumulativeInputTokens: string;
   cumulativeCachedInputTokens: string;
   cumulativeOutputTokens: string;
   cumulativeRequestCount: string;
@@ -167,7 +167,7 @@ export interface ChannelUsageReportServiceUsageRowPayload {
   cachedInputUsdPerMillion: string;
   outputUsdPerMillion: string;
   serviceMode: string;
-  cumulativeFreshInputTokens: string;
+  cumulativeInputTokens: string;
   cumulativeCachedInputTokens: string;
   cumulativeOutputTokens: string;
   cumulativeRequestCount: string;

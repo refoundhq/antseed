@@ -421,7 +421,7 @@ export class SellerRequestHandler {
                 service,
                 pricingCatalogRoot,
                 pricing: requestPricing,
-                freshInputTokens: BigInt(usage.freshInputTokens),
+                inputTokens: BigInt(usage.inputTokens),
                 cachedInputTokens: BigInt(usage.cachedInputTokens),
                 outputTokens: BigInt(usage.outputTokens),
                 costUsdc,

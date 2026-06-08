@@ -5,7 +5,7 @@ import { StatsClient } from './stats-client.js';
 const STATS_ABI = [
   'event MetadataRecorded(uint256 indexed agentId, address indexed buyer, bytes32 indexed channelId, bytes32 metadataHash, uint256 inputTokens, uint256 outputTokens, uint256 requestCount)',
   'event UsageReportVerificationRecorded(bytes32 indexed reportHash, uint256 indexed sellerAgentId, uint256 indexed verifierAgentId, address seller, address buyer, address verifier, bytes32 channelId, bytes32 metadataHash, bytes32 pricingCatalogRoot, bytes32 serviceUsageRoot, uint256 cumulativeAmount, bool accepted)',
-  'event UsageReportServiceUsageRecorded(bytes32 indexed reportHash, uint256 indexed sellerAgentId, bytes32 indexed serviceIdHash, bytes32 servicePricingHash, bytes32 channelId, uint256 inputUsdPerMillion, uint256 cachedInputUsdPerMillion, uint256 outputUsdPerMillion, uint256 serviceMode, uint256 cumulativeFreshInputTokens, uint256 cumulativeCachedInputTokens, uint256 cumulativeOutputTokens, uint256 cumulativeRequestCount, uint256 cumulativeAmountPaid)',
+  'event UsageReportServiceUsageRecorded(bytes32 indexed reportHash, uint256 indexed sellerAgentId, bytes32 indexed serviceIdHash, bytes32 servicePricingHash, bytes32 channelId, uint256 inputUsdPerMillion, uint256 cachedInputUsdPerMillion, uint256 outputUsdPerMillion, uint256 serviceMode, uint256 cumulativeInputTokens, uint256 cumulativeCachedInputTokens, uint256 cumulativeOutputTokens, uint256 cumulativeRequestCount, uint256 cumulativeAmountPaid)',
 ] as const;
 
 const CONTRACT_ADDRESS = '0x0000000000000000000000000000000000000001';
@@ -98,7 +98,7 @@ function buildServiceUsageLog(params: {
   cachedInputUsdPerMillion: bigint;
   outputUsdPerMillion: bigint;
   serviceMode: bigint;
-  cumulativeFreshInputTokens: bigint;
+  cumulativeInputTokens: bigint;
   cumulativeCachedInputTokens: bigint;
   cumulativeOutputTokens: bigint;
   cumulativeRequestCount: bigint;
@@ -118,7 +118,7 @@ function buildServiceUsageLog(params: {
     params.cachedInputUsdPerMillion,
     params.outputUsdPerMillion,
     params.serviceMode,
-    params.cumulativeFreshInputTokens,
+    params.cumulativeInputTokens,
     params.cumulativeCachedInputTokens,
     params.cumulativeOutputTokens,
     params.cumulativeRequestCount,
@@ -313,7 +313,7 @@ describe('StatsClient', () => {
       cachedInputUsdPerMillion: 1n,
       outputUsdPerMillion: 15n,
       serviceMode: 1n,
-      cumulativeFreshInputTokens: 100n,
+      cumulativeInputTokens: 100n,
       cumulativeCachedInputTokens: 20n,
       cumulativeOutputTokens: 50n,
       cumulativeRequestCount: 3n,
@@ -339,7 +339,7 @@ describe('StatsClient', () => {
       cachedInputUsdPerMillion: 1n,
       outputUsdPerMillion: 15n,
       serviceMode: 1n,
-      cumulativeFreshInputTokens: 100n,
+      cumulativeInputTokens: 100n,
       cumulativeCachedInputTokens: 20n,
       cumulativeOutputTokens: 50n,
       cumulativeRequestCount: 3n,

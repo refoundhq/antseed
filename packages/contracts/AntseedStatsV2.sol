@@ -23,7 +23,7 @@ contract AntseedStatsV2 is IAntseedStats, Ownable {
     // ─── Structs ────────────────────────────────────────────────────
     struct ChannelMetadataSnapshot {
         uint256 totalInputTokens;
-        uint256 freshInputTokens;
+        uint256 inputTokens;
         uint256 cachedInputTokens;
         uint256 outputTokens;
         uint256 requestCount;
@@ -35,7 +35,7 @@ contract AntseedStatsV2 is IAntseedStats, Ownable {
         bytes32 pricingCatalogRoot;
         bytes32 serviceUsageRoot;
         bytes32 receiptRoot;
-        uint256 freshInputTokens;
+        uint256 inputTokens;
         uint256 cachedInputTokens;
         uint256 outputTokens;
         uint256 requestCount;
@@ -64,7 +64,7 @@ contract AntseedStatsV2 is IAntseedStats, Ownable {
         uint256 cachedInputUsdPerMillion;
         uint256 outputUsdPerMillion;
         uint256 serviceMode;
-        uint256 cumulativeFreshInputTokens;
+        uint256 cumulativeInputTokens;
         uint256 cumulativeCachedInputTokens;
         uint256 cumulativeOutputTokens;
         uint256 cumulativeRequestCount;
@@ -117,7 +117,7 @@ contract AntseedStatsV2 is IAntseedStats, Ownable {
         bytes32 pricingCatalogRoot,
         bytes32 serviceUsageRoot,
         bytes32 receiptRoot,
-        uint256 freshInputTokens,
+        uint256 inputTokens,
         uint256 cachedInputTokens,
         uint256 outputTokens,
         uint256 requestCount,
@@ -157,7 +157,7 @@ contract AntseedStatsV2 is IAntseedStats, Ownable {
         uint256 cachedInputUsdPerMillion,
         uint256 outputUsdPerMillion,
         uint256 serviceMode,
-        uint256 cumulativeFreshInputTokens,
+        uint256 cumulativeInputTokens,
         uint256 cumulativeCachedInputTokens,
         uint256 cumulativeOutputTokens,
         uint256 cumulativeRequestCount,
@@ -218,10 +218,11 @@ contract AntseedStatsV2 is IAntseedStats, Ownable {
         DecodedMetadata memory decoded = _decodeMetadata(metadata);
 
         ChannelMetadataSnapshot storage snapshot = _channelSnapshots[channelId];
-        uint256 totalInputTokens = decoded.freshInputTokens + decoded.cachedInputTokens;
+        uint256 totalInputTokens = decoded.inputTokens;
         uint256 amountPaid = decoded.version == 1 ? snapshot.amountPaid : decoded.amountPaid;
         if (
             totalInputTokens < snapshot.totalInputTokens
+                || decoded.cachedInputTokens > totalInputTokens
                 || decoded.outputTokens < snapshot.outputTokens
                 || decoded.requestCount < snapshot.requestCount
                 || amountPaid < snapshot.amountPaid
@@ -234,7 +235,7 @@ contract AntseedStatsV2 is IAntseedStats, Ownable {
         uint256 requestDelta = decoded.requestCount - snapshot.requestCount;
 
         snapshot.totalInputTokens = totalInputTokens;
-        snapshot.freshInputTokens = decoded.freshInputTokens;
+        snapshot.inputTokens = decoded.inputTokens;
         snapshot.cachedInputTokens = decoded.cachedInputTokens;
         snapshot.outputTokens = decoded.outputTokens;
         snapshot.requestCount = decoded.requestCount;
@@ -264,7 +265,7 @@ contract AntseedStatsV2 is IAntseedStats, Ownable {
                 decoded.pricingCatalogRoot,
                 decoded.serviceUsageRoot,
                 decoded.receiptRoot,
-                decoded.freshInputTokens,
+                decoded.inputTokens,
                 decoded.cachedInputTokens,
                 decoded.outputTokens,
                 decoded.requestCount,
@@ -437,7 +438,7 @@ contract AntseedStatsV2 is IAntseedStats, Ownable {
                 row.cachedInputUsdPerMillion,
                 row.outputUsdPerMillion,
                 row.serviceMode,
-                row.cumulativeFreshInputTokens,
+                row.cumulativeInputTokens,
                 row.cumulativeCachedInputTokens,
                 row.cumulativeOutputTokens,
                 row.cumulativeRequestCount,
@@ -460,7 +461,7 @@ contract AntseedStatsV2 is IAntseedStats, Ownable {
                 row.cachedInputUsdPerMillion,
                 row.outputUsdPerMillion,
                 row.serviceMode,
-                row.cumulativeFreshInputTokens,
+                row.cumulativeInputTokens,
                 row.cumulativeCachedInputTokens,
                 row.cumulativeOutputTokens,
                 row.cumulativeRequestCount,
@@ -533,7 +534,7 @@ contract AntseedStatsV2 is IAntseedStats, Ownable {
         decoded.version = version;
 
         if (version == 1) {
-            (, decoded.freshInputTokens, decoded.outputTokens, decoded.requestCount) =
+            (, decoded.inputTokens, decoded.outputTokens, decoded.requestCount) =
                 abi.decode(metadata, (uint256, uint256, uint256, uint256));
             return decoded;
         }
@@ -544,7 +545,7 @@ contract AntseedStatsV2 is IAntseedStats, Ownable {
                 decoded.pricingCatalogRoot,
                 decoded.serviceUsageRoot,
                 decoded.receiptRoot,
-                decoded.freshInputTokens,
+                decoded.inputTokens,
                 decoded.cachedInputTokens,
                 decoded.outputTokens,
                 decoded.requestCount,
@@ -567,7 +568,7 @@ contract AntseedStatsV2 is IAntseedStats, Ownable {
 
         bytes memory legacyMetadata = abi.encode(
             uint256(1),
-            decoded.freshInputTokens + decoded.cachedInputTokens,
+            decoded.inputTokens,
             decoded.outputTokens,
             decoded.requestCount
         );

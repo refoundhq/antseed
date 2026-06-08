@@ -53,7 +53,7 @@ export interface DecodedUsageReportServiceUsageRecorded {
   cachedInputUsdPerMillion: bigint;
   outputUsdPerMillion: bigint;
   serviceMode: bigint;
-  cumulativeFreshInputTokens: bigint;
+  cumulativeInputTokens: bigint;
   cumulativeCachedInputTokens: bigint;
   cumulativeOutputTokens: bigint;
   cumulativeRequestCount: bigint;
@@ -63,9 +63,9 @@ export interface DecodedUsageReportServiceUsageRecorded {
 const STATS_ABI = [
   'event MetadataRecorded(uint256 indexed agentId, address indexed buyer, bytes32 indexed channelId, bytes32 metadataHash, uint256 inputTokens, uint256 outputTokens, uint256 requestCount)',
   'event UsageReportVerificationRecorded(bytes32 indexed reportHash, uint256 indexed sellerAgentId, uint256 indexed verifierAgentId, address seller, address buyer, address verifier, bytes32 channelId, bytes32 metadataHash, bytes32 pricingCatalogRoot, bytes32 serviceUsageRoot, uint256 cumulativeAmount, bool accepted)',
-  'event UsageReportServiceUsageRecorded(bytes32 indexed reportHash, uint256 indexed sellerAgentId, bytes32 indexed serviceIdHash, bytes32 servicePricingHash, bytes32 channelId, uint256 inputUsdPerMillion, uint256 cachedInputUsdPerMillion, uint256 outputUsdPerMillion, uint256 serviceMode, uint256 cumulativeFreshInputTokens, uint256 cumulativeCachedInputTokens, uint256 cumulativeOutputTokens, uint256 cumulativeRequestCount, uint256 cumulativeAmountPaid)',
+  'event UsageReportServiceUsageRecorded(bytes32 indexed reportHash, uint256 indexed sellerAgentId, bytes32 indexed serviceIdHash, bytes32 servicePricingHash, bytes32 channelId, uint256 inputUsdPerMillion, uint256 cachedInputUsdPerMillion, uint256 outputUsdPerMillion, uint256 serviceMode, uint256 cumulativeInputTokens, uint256 cumulativeCachedInputTokens, uint256 cumulativeOutputTokens, uint256 cumulativeRequestCount, uint256 cumulativeAmountPaid)',
   'function recordUsageReportVerification(bytes32 reportHash, bytes32 channelId, address seller, address buyer, uint256 sellerAgentId, uint256 verifierAgentId, uint256 cumulativeAmount, bytes32 metadataHash, bytes32 pricingCatalogRoot, bytes32 serviceUsageRoot, bool accepted) external',
-  'function recordUsageReportVerificationWithServiceUsage(bytes32 reportHash, bytes32 channelId, address seller, address buyer, uint256 sellerAgentId, uint256 verifierAgentId, uint256 cumulativeAmount, bytes32 metadataHash, bytes32 pricingCatalogRoot, bytes32 serviceUsageRoot, bool accepted, (bytes32 channelId, bytes32 serviceIdHash, bytes32 servicePricingHash, uint256 inputUsdPerMillion, uint256 cachedInputUsdPerMillion, uint256 outputUsdPerMillion, uint256 serviceMode, uint256 cumulativeFreshInputTokens, uint256 cumulativeCachedInputTokens, uint256 cumulativeOutputTokens, uint256 cumulativeRequestCount, uint256 cumulativeAmountPaid)[] serviceUsageRows) external',
+  'function recordUsageReportVerificationWithServiceUsage(bytes32 reportHash, bytes32 channelId, address seller, address buyer, uint256 sellerAgentId, uint256 verifierAgentId, uint256 cumulativeAmount, bytes32 metadataHash, bytes32 pricingCatalogRoot, bytes32 serviceUsageRoot, bool accepted, (bytes32 channelId, bytes32 serviceIdHash, bytes32 servicePricingHash, uint256 inputUsdPerMillion, uint256 cachedInputUsdPerMillion, uint256 outputUsdPerMillion, uint256 serviceMode, uint256 cumulativeInputTokens, uint256 cumulativeCachedInputTokens, uint256 cumulativeOutputTokens, uint256 cumulativeRequestCount, uint256 cumulativeAmountPaid)[] serviceUsageRows) external',
 ] as const;
 
 export class StatsClient extends BaseEvmClient {
@@ -187,7 +187,7 @@ export class StatsClient extends BaseEvmClient {
         cachedInputUsdPerMillion: parsed.args[6] as bigint,
         outputUsdPerMillion: parsed.args[7] as bigint,
         serviceMode: parsed.args[8] as bigint,
-        cumulativeFreshInputTokens: parsed.args[9] as bigint,
+        cumulativeInputTokens: parsed.args[9] as bigint,
         cumulativeCachedInputTokens: parsed.args[10] as bigint,
         cumulativeOutputTokens: parsed.args[11] as bigint,
         cumulativeRequestCount: parsed.args[12] as bigint,
@@ -234,7 +234,7 @@ export class StatsClient extends BaseEvmClient {
           cachedInputUsdPerMillion: BigInt(row.cachedInputUsdPerMillion),
           outputUsdPerMillion: BigInt(row.outputUsdPerMillion),
           serviceMode: BigInt(row.serviceMode),
-          cumulativeFreshInputTokens: BigInt(row.cumulativeFreshInputTokens),
+          cumulativeInputTokens: BigInt(row.cumulativeInputTokens),
           cumulativeCachedInputTokens: BigInt(row.cumulativeCachedInputTokens),
           cumulativeOutputTokens: BigInt(row.cumulativeOutputTokens),
           cumulativeRequestCount: BigInt(row.cumulativeRequestCount),

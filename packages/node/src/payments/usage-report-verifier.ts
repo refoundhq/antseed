@@ -442,15 +442,21 @@ function verifyAnnouncedPricing(
     ) {
       addIssue('usage-pricing-mismatch', 'service usage row pricing does not match announced metadata pricing');
     }
+    const cumulativeInputTokens = toBigInt(row.cumulativeInputTokens);
+    const cumulativeCachedInputTokens = toBigInt(row.cumulativeCachedInputTokens);
+    if (cumulativeCachedInputTokens > cumulativeInputTokens) {
+      addIssue('usage-cached-input-exceeds-input', 'service usage row cached input tokens exceed total input tokens');
+      continue;
+    }
     const expectedCost = computeCostUsdc(
-      Number(toBigInt(row.cumulativeFreshInputTokens)),
+      Number(cumulativeInputTokens - cumulativeCachedInputTokens),
       Number(toBigInt(row.cumulativeOutputTokens)),
       {
         inputUsdPerMillion: Number(toBigInt(row.inputUsdPerMillion)),
         cachedInputUsdPerMillion: Number(toBigInt(row.cachedInputUsdPerMillion)),
         outputUsdPerMillion: Number(toBigInt(row.outputUsdPerMillion)),
       },
-      Number(toBigInt(row.cumulativeCachedInputTokens)),
+      Number(cumulativeCachedInputTokens),
     );
     if (expectedCost !== toBigInt(row.cumulativeAmountPaid)) {
       addIssue('announced-pricing-cost-mismatch', `service usage paid amount ${row.cumulativeAmountPaid} does not match announced pricing ${expectedCost}`);
@@ -512,7 +518,7 @@ function fromServiceUsageRowPayload(payload: ChannelUsageReportServiceUsageRowPa
     cachedInputUsdPerMillion: payload.cachedInputUsdPerMillion,
     outputUsdPerMillion: payload.outputUsdPerMillion,
     serviceMode: payload.serviceMode,
-    cumulativeFreshInputTokens: payload.cumulativeFreshInputTokens,
+    cumulativeInputTokens: payload.cumulativeInputTokens,
     cumulativeCachedInputTokens: payload.cumulativeCachedInputTokens,
     cumulativeOutputTokens: payload.cumulativeOutputTokens,
     cumulativeRequestCount: payload.cumulativeRequestCount,
@@ -550,7 +556,7 @@ function validateReportFields(
     validateUintString(`${prefix}.cachedInputUsdPerMillion`, row.cachedInputUsdPerMillion, addIssue);
     validateUintString(`${prefix}.outputUsdPerMillion`, row.outputUsdPerMillion, addIssue);
     validateUintString(`${prefix}.serviceMode`, row.serviceMode, addIssue);
-    validateUintString(`${prefix}.cumulativeFreshInputTokens`, row.cumulativeFreshInputTokens, addIssue);
+    validateUintString(`${prefix}.cumulativeInputTokens`, row.cumulativeInputTokens, addIssue);
     validateUintString(`${prefix}.cumulativeCachedInputTokens`, row.cumulativeCachedInputTokens, addIssue);
     validateUintString(`${prefix}.cumulativeOutputTokens`, row.cumulativeOutputTokens, addIssue);
     validateUintString(`${prefix}.cumulativeRequestCount`, row.cumulativeRequestCount, addIssue);
