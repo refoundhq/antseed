@@ -21,6 +21,7 @@ import {
 import {
   computeUsageReportVerifierSelectionSeed,
   createUsageReportAck,
+  derivePricingCatalogProof,
   derivePricingCatalogRoot,
   getUsageReportVerifierAssignment,
   selectUsageReportVerifiers,
@@ -110,7 +111,7 @@ describe('usage-report-verifier', () => {
     expect(result.issues.map((issue) => issue.code)).toContain('usage-pricing-mismatch');
   });
 
-  it('rejects reports when the seller metadata pricing catalog is unavailable', async () => {
+  it('verifies pricing proofs without fetching the seller metadata catalog', async () => {
     const { report, domain, costUsdc } = await createValidPaidReport();
 
     const result = verifyChannelUsageReport(report, {
@@ -118,8 +119,8 @@ describe('usage-report-verifier', () => {
       settledCumulativeAmount: costUsdc,
     });
 
-    expect(result.ok).toBe(false);
-    expect(result.issues.map((issue) => issue.code)).toContain('missing-seller-metadata');
+    expect(result.ok).toBe(true);
+    expect(result.issues).toEqual([]);
   });
 
   it('rejects reports when seller metadata is not signed by the seller peer', async () => {
@@ -265,6 +266,9 @@ async function createValidPaidReport(): Promise<{
     cumulativeRequestCount: 1n,
     cumulativeAmountPaid: costUsdc,
   };
+  const pricingProof = derivePricingCatalogProof(sellerMetadata, usageRow.servicePricingHash);
+  if (!pricingProof) throw new Error('test fixture pricing proof missing');
+  usageRow.pricingProof = pricingProof;
   const metadata = {
     pricingCatalogRoot,
     serviceUsageRoot: computeServiceUsageRoot([usageRow]),
@@ -340,6 +344,7 @@ function toUsagePayload(row: ServiceUsageRow) {
     cachedInputUsdPerMillion: row.cachedInputUsdPerMillion.toString(),
     outputUsdPerMillion: row.outputUsdPerMillion.toString(),
     serviceMode: row.serviceMode.toString(),
+    pricingProof: [...(row.pricingProof ?? [])],
     cumulativeInputTokens: row.cumulativeInputTokens.toString(),
     cumulativeCachedInputTokens: row.cumulativeCachedInputTokens.toString(),
     cumulativeOutputTokens: row.cumulativeOutputTokens.toString(),

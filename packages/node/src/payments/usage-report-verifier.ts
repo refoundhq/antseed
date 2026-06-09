@@ -12,6 +12,7 @@ import { signUtf8, verifySignature, verifyUtf8 } from '../p2p/identity.js';
 import { hexToBytes } from '../utils/hex.js';
 import {
   computeEncodedMetadataHash,
+  computePricingCatalogProof,
   computePricingCatalogRoot,
   computeServiceUsageRoot,
   decodeMetadata,
@@ -21,7 +22,9 @@ import {
   SERVICE_MODE_FREE,
   SERVICE_MODE_PAID,
   SPENDING_AUTH_TYPES,
+  verifyPricingCatalogProof,
   ZERO_BYTES32,
+  type ServicePricingCommitment,
   type ServiceUsageRow,
   type SpendingAuthMetadataV2,
 } from './evm/signatures.js';
@@ -382,6 +385,9 @@ function verifyUsageRows(
     if (row.servicePricingHash.toLowerCase() !== expectedServicePricingHash.toLowerCase()) {
       addIssue('usage-service-pricing-hash-mismatch', 'service usage row servicePricingHash does not match row pricing fields');
     }
+    if (!verifyPricingCatalogProof(row.servicePricingHash, row.pricingProof ?? [], report.pricingCatalogRoot)) {
+      addIssue('usage-service-pricing-proof-mismatch', 'service usage row pricing proof does not match pricingCatalogRoot');
+    }
     if (toBigInt(row.serviceMode) === SERVICE_MODE_FREE && toBigInt(row.cumulativeAmountPaid) !== 0n) {
       addIssue('free-usage-paid-amount', 'free service usage row has nonzero paid amount');
     }
@@ -394,10 +400,7 @@ function verifyAnnouncedPricing(
   metadata: PeerMetadata | null,
   addIssue: (code: string, message: string) => void,
 ): void {
-  if (!metadata) {
-    addIssue('missing-seller-metadata', 'usage report verification requires the seller signed metadata used for pricing');
-    return;
-  }
+  if (!metadata) return;
 
   const expectedPricingCatalogRoot = derivePricingCatalogRoot(metadata);
   if (report.pricingCatalogRoot.toLowerCase() !== expectedPricingCatalogRoot.toLowerCase()) {
@@ -518,6 +521,7 @@ function fromServiceUsageRowPayload(payload: ChannelUsageReportServiceUsageRowPa
     cachedInputUsdPerMillion: payload.cachedInputUsdPerMillion,
     outputUsdPerMillion: payload.outputUsdPerMillion,
     serviceMode: payload.serviceMode,
+    pricingProof: payload.pricingProof,
     cumulativeInputTokens: payload.cumulativeInputTokens,
     cumulativeCachedInputTokens: payload.cumulativeCachedInputTokens,
     cumulativeOutputTokens: payload.cumulativeOutputTokens,
@@ -556,6 +560,13 @@ function validateReportFields(
     validateUintString(`${prefix}.cachedInputUsdPerMillion`, row.cachedInputUsdPerMillion, addIssue);
     validateUintString(`${prefix}.outputUsdPerMillion`, row.outputUsdPerMillion, addIssue);
     validateUintString(`${prefix}.serviceMode`, row.serviceMode, addIssue);
+    if (!Array.isArray(row.pricingProof)) {
+      addIssue('invalid-report-field', `${prefix}.pricingProof must be an array`);
+    } else {
+      row.pricingProof.forEach((proofHash, proofIndex) => {
+        validateBytes32(`${prefix}.pricingProof[${proofIndex}]`, proofHash, addIssue);
+      });
+    }
     validateUintString(`${prefix}.cumulativeInputTokens`, row.cumulativeInputTokens, addIssue);
     validateUintString(`${prefix}.cumulativeCachedInputTokens`, row.cumulativeCachedInputTokens, addIssue);
     validateUintString(`${prefix}.cumulativeOutputTokens`, row.cumulativeOutputTokens, addIssue);
@@ -569,7 +580,11 @@ export function serviceIdHash(provider: string, service: string): string {
 }
 
 export function derivePricingCatalogRoot(metadata: PeerMetadata): string {
-  return computePricingCatalogRoot(metadata.providers.flatMap((provider) =>
+  return computePricingCatalogRoot(derivePricingCatalog(metadata));
+}
+
+export function derivePricingCatalog(metadata: PeerMetadata): ServicePricingCommitment[] {
+  return metadata.providers.flatMap((provider) =>
     provider.services.map((service) => {
       const pricing = provider.servicePricing?.[service] ?? provider.defaultPricing;
       const cachedInputUsdPerMillion = pricing.cachedInputUsdPerMillion ?? pricing.inputUsdPerMillion;
@@ -581,7 +596,11 @@ export function derivePricingCatalogRoot(metadata: PeerMetadata): string {
         serviceMode: isFreePricing(pricing) ? SERVICE_MODE_FREE : SERVICE_MODE_PAID,
       };
     })
-  ));
+  );
+}
+
+export function derivePricingCatalogProof(metadata: PeerMetadata, servicePricingHash: string): string[] | null {
+  return computePricingCatalogProof(derivePricingCatalog(metadata), servicePricingHash);
 }
 
 function verifySellerMetadataSignature(metadata: PeerMetadata): boolean {

@@ -15,7 +15,7 @@ import type {
 } from './types/http.js';
 import { parseResponseUsage } from './utils/response-usage.js';
 import { computeCostUsdc, estimateTokensFromBytes, type ServicePricing } from './payments/pricing.js';
-import { derivePricingCatalogRoot } from './payments/usage-report-verifier.js';
+import { derivePricingCatalog, derivePricingCatalogRoot } from './payments/usage-report-verifier.js';
 import { debugLog, debugWarn } from './utils/debug.js';
 import { PAYMENT_CODE_CHANNEL_EXHAUSTED, type NeedAuthUsageReportMetadataPayload } from './types/protocol.js';
 
@@ -406,10 +406,11 @@ export class SellerRequestHandler {
             const requiredAmount = cumulativeSpend;
             const service = this._extractRequestedService(request) ?? 'unknown';
             const sellerMetadata = this._deps.announcer?.getLatestMetadata();
+            const pricingCatalog = sellerMetadata ? derivePricingCatalog(sellerMetadata) : null;
             const pricingCatalogRoot = sellerMetadata ? derivePricingCatalogRoot(sellerMetadata) : null;
             let usageReportMetadata: NeedAuthUsageReportMetadataPayload | null | undefined;
             try {
-              if (!pricingCatalogRoot) {
+              if (!pricingCatalog || !pricingCatalogRoot) {
                 throw new Error('seller metadata unavailable');
               }
               usageReportMetadata = await spm.recordUsageReportEvidence({
@@ -419,6 +420,7 @@ export class SellerRequestHandler {
                 responseBody,
                 provider: provider.name,
                 service,
+                pricingCatalog,
                 pricingCatalogRoot,
                 pricing: requestPricing,
                 inputTokens: BigInt(usage.inputTokens),

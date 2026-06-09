@@ -14,7 +14,7 @@ import { encodeMetadataForSigning } from '../src/discovery/metadata-codec.js';
 import { bytesToHex } from '../src/utils/hex.js';
 import { toPeerId } from '../src/types/peer.js';
 import { AbiCoder, Wallet } from 'ethers';
-import { createUsageReportAck, derivePricingCatalogRoot, verifyChannelReportAttestation, verifyChannelUsageReport } from '../src/payments/usage-report-verifier.js';
+import { createUsageReportAck, derivePricingCatalog, derivePricingCatalogRoot, verifyChannelReportAttestation, verifyChannelUsageReport } from '../src/payments/usage-report-verifier.js';
 import { computeCostUsdc } from '../src/payments/pricing.js';
 import { makeChannelsDomain } from '../src/payments/evm/signatures.js';
 
@@ -464,6 +464,7 @@ describe('Full Payment Flow Integration', () => {
       signature: '',
     };
     sellerMetadata.signature = bytesToHex(signData(sellerIdentity.wallet, encodeMetadataForSigning(sellerMetadata)));
+    const pricingCatalog = derivePricingCatalog(sellerMetadata);
     const pricingCatalogRoot = derivePricingCatalogRoot(sellerMetadata);
     const freshInputTokens = 120n;
     const cachedInputTokens = 10n;
@@ -483,6 +484,7 @@ describe('Full Payment Flow Integration', () => {
       responseBody,
       provider: 'anthropic',
       service: 'claude-sonnet-4-5-20250929',
+      pricingCatalog,
       pricingCatalogRoot,
       pricing,
       inputTokens: freshInputTokens + cachedInputTokens,
@@ -524,6 +526,7 @@ describe('Full Payment Flow Integration', () => {
     expect(report.serviceUsageRows[0]!.inputUsdPerMillion).toBe(String(pricing.inputUsdPerMillion));
     expect(report.serviceUsageRows[0]!.cachedInputUsdPerMillion).toBe(String(pricing.cachedInputUsdPerMillion));
     expect(report.serviceUsageRows[0]!.outputUsdPerMillion).toBe(String(pricing.outputUsdPerMillion));
+    expect(report.serviceUsageRows[0]!.pricingProof).toEqual([]);
     expect(report.serviceUsageRows[0]!.cumulativeRequestCount).toBe('1');
     expect(report.serviceUsageRows[0]!.cumulativeAmountPaid).toBe(costUsdc.toString());
 

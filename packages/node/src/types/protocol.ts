@@ -167,6 +167,7 @@ export interface ChannelUsageReportServiceUsageRowPayload {
   cachedInputUsdPerMillion: string;
   outputUsdPerMillion: string;
   serviceMode: string;
+  pricingProof: string[];
   cumulativeInputTokens: string;
   cumulativeCachedInputTokens: string;
   cumulativeOutputTokens: string;

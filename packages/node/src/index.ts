@@ -97,6 +97,8 @@ export type { BuyerPaymentConfig } from './payments/buyer-payment-manager.js';
 export {
   createChannelReportAttestation,
   createUsageReportAck,
+  derivePricingCatalog,
+  derivePricingCatalogProof,
   derivePricingCatalogRoot,
   encodeAttestationForSigning,
   computeChannelUsageReportHash,

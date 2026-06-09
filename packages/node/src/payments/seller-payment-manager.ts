@@ -16,12 +16,14 @@ import {
   encodeMetadata,
   computeEncodedMetadataHash,
   decodeMetadata,
+  computePricingCatalogProof,
   computeServiceUsageRoot,
   hashServicePricing,
   METADATA_V2_VERSION,
   SERVICE_MODE_PAID,
   ZERO_BYTES32,
   ZERO_METADATA,
+  type ServicePricingCommitment,
   type SpendingAuthMetadataV2,
 } from './evm/signatures.js';
 import { serviceIdHash } from './usage-report-verifier.js';
@@ -82,6 +84,7 @@ interface RecordUsageReportEvidenceParams {
   responseBody: Uint8Array;
   provider: string;
   service: string;
+  pricingCatalog: readonly ServicePricingCommitment[];
   pricingCatalogRoot: string;
   pricing: {
     inputUsdPerMillion: number;
@@ -1146,6 +1149,11 @@ export class SellerPaymentManager {
       outputUsdPerMillion: params.pricing.outputUsdPerMillion,
       serviceMode: SERVICE_MODE_PAID,
     });
+    const pricingProof = computePricingCatalogProof(params.pricingCatalog, servicePricingHash);
+    if (!pricingProof) {
+      debugWarn(`[SellerPayment] Usage report evidence skipped: pricing proof unavailable for ${params.provider}:${params.service}`);
+      return null;
+    }
     const usageKey = `${params.provider}:${params.service}:${servicePricingHash}`;
     const prevUsage = usageRowsByKey.get(usageKey);
     usageRowsByKey.set(usageKey, {
@@ -1158,6 +1166,7 @@ export class SellerPaymentManager {
       cachedInputUsdPerMillion: (params.pricing.cachedInputUsdPerMillion ?? params.pricing.inputUsdPerMillion).toString(),
       outputUsdPerMillion: params.pricing.outputUsdPerMillion.toString(),
       serviceMode: SERVICE_MODE_PAID.toString(),
+      pricingProof,
       cumulativeInputTokens: (BigInt(prevUsage?.cumulativeInputTokens ?? '0') + params.inputTokens).toString(),
       cumulativeCachedInputTokens: (BigInt(prevUsage?.cumulativeCachedInputTokens ?? '0') + params.cachedInputTokens).toString(),
       cumulativeOutputTokens: (BigInt(prevUsage?.cumulativeOutputTokens ?? '0') + params.outputTokens).toString(),

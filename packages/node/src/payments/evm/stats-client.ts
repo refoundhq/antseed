@@ -66,7 +66,7 @@ const STATS_ABI = [
   'event UsageReportVerificationRecorded(bytes32 indexed reportHash, uint256 indexed sellerAgentId, uint256 indexed verifierAgentId, address seller, address buyer, address verifier, bytes32 channelId, bytes32 metadataHash, bytes32 pricingCatalogRoot, bytes32 serviceUsageRoot, bytes32 selectionScore, uint256 cumulativeAmount, bool accepted)',
   'event UsageReportServiceUsageRecorded(bytes32 indexed reportHash, uint256 indexed sellerAgentId, bytes32 indexed serviceIdHash, bytes32 servicePricingHash, bytes32 channelId, uint256 inputUsdPerMillion, uint256 cachedInputUsdPerMillion, uint256 outputUsdPerMillion, uint256 serviceMode, uint256 cumulativeInputTokens, uint256 cumulativeCachedInputTokens, uint256 cumulativeOutputTokens, uint256 cumulativeRequestCount, uint256 cumulativeAmountPaid)',
   'function recordUsageReportVerification(bytes32 reportHash, bytes32 channelId, address seller, address buyer, uint256 sellerAgentId, uint256 verifierAgentId, uint256 cumulativeAmount, bytes32 metadataHash, bytes32 pricingCatalogRoot, bytes32 serviceUsageRoot, bool accepted) external',
-  'function recordUsageReportVerificationWithServiceUsage(bytes32 reportHash, bytes32 channelId, address seller, address buyer, uint256 sellerAgentId, uint256 verifierAgentId, uint256 cumulativeAmount, bytes32 metadataHash, bytes32 pricingCatalogRoot, bytes32 serviceUsageRoot, bool accepted, (bytes32 channelId, bytes32 serviceIdHash, bytes32 servicePricingHash, uint256 inputUsdPerMillion, uint256 cachedInputUsdPerMillion, uint256 outputUsdPerMillion, uint256 serviceMode, uint256 cumulativeInputTokens, uint256 cumulativeCachedInputTokens, uint256 cumulativeOutputTokens, uint256 cumulativeRequestCount, uint256 cumulativeAmountPaid)[] serviceUsageRows) external',
+  'function recordUsageReportVerificationWithServiceUsage(bytes32 reportHash, bytes32 channelId, address seller, address buyer, uint256 sellerAgentId, uint256 verifierAgentId, uint256 cumulativeAmount, bytes32 metadataHash, bytes32 pricingCatalogRoot, bytes32 serviceUsageRoot, bool accepted, (bytes32 channelId, bytes32 serviceIdHash, bytes32 servicePricingHash, uint256 inputUsdPerMillion, uint256 cachedInputUsdPerMillion, uint256 outputUsdPerMillion, uint256 serviceMode, bytes32[] pricingProof, uint256 cumulativeInputTokens, uint256 cumulativeCachedInputTokens, uint256 cumulativeOutputTokens, uint256 cumulativeRequestCount, uint256 cumulativeAmountPaid)[] serviceUsageRows) external',
 ] as const;
 
 export class StatsClient extends BaseEvmClient {
@@ -236,6 +236,7 @@ export class StatsClient extends BaseEvmClient {
           cachedInputUsdPerMillion: BigInt(row.cachedInputUsdPerMillion),
           outputUsdPerMillion: BigInt(row.outputUsdPerMillion),
           serviceMode: BigInt(row.serviceMode),
+          pricingProof: row.pricingProof,
           cumulativeInputTokens: BigInt(row.cumulativeInputTokens),
           cumulativeCachedInputTokens: BigInt(row.cumulativeCachedInputTokens),
           cumulativeOutputTokens: BigInt(row.cumulativeOutputTokens),

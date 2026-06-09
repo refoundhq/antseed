@@ -234,10 +234,24 @@ function parseServiceUsageRow(obj: Record<string, unknown>): ChannelUsageReportS
     cachedInputUsdPerMillion: requireString(obj, 'cachedInputUsdPerMillion'),
     outputUsdPerMillion: requireString(obj, 'outputUsdPerMillion'),
     serviceMode: requireString(obj, 'serviceMode'),
+    pricingProof: parseStringArray(obj, 'pricingProof'),
     cumulativeInputTokens: requireString(obj, 'cumulativeInputTokens'),
     cumulativeCachedInputTokens: requireString(obj, 'cumulativeCachedInputTokens'),
     cumulativeOutputTokens: requireString(obj, 'cumulativeOutputTokens'),
     cumulativeRequestCount: requireString(obj, 'cumulativeRequestCount'),
     cumulativeAmountPaid: requireString(obj, 'cumulativeAmountPaid'),
   };
+}
+
+function parseStringArray(obj: Record<string, unknown>, field: string): string[] {
+  const val = obj[field];
+  if (!Array.isArray(val)) {
+    throw new Error(`Missing or invalid array field: ${field}`);
+  }
+  return val.map((item, index) => {
+    if (typeof item !== 'string') {
+      throw new Error(`Invalid string at ${field}[${index}]`);
+    }
+    return item;
+  });
 }

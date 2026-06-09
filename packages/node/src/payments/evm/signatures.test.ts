@@ -4,6 +4,7 @@ import {
   SERVICE_MODE_PAID,
   ZERO_BYTES32,
   computeEncodedMetadataHash,
+  computePricingCatalogProof,
   computePricingCatalogRoot,
   computeServiceUsageRoot,
   decodeMetadata,
@@ -12,6 +13,7 @@ import {
   hashServicePricing,
   hashUtf8,
   metadataV2MatchesServiceUsage,
+  verifyPricingCatalogProof,
   type ServiceUsageRow,
   type SpendingAuthMetadataV2,
 } from './signatures.js';
@@ -98,6 +100,10 @@ describe('spending auth metadata helpers', () => {
     expect(computePricingCatalogRoot([paidPricing, freePricing]))
       .toBe(computePricingCatalogRoot([freePricing, paidPricing]));
     expect(computePricingCatalogRoot([paidPricing])).not.toBe(computePricingCatalogRoot([paidPricing, freePricing]));
+    const paidProof = computePricingCatalogProof([paidPricing, freePricing], hashServicePricing(paidPricing));
+    expect(paidProof).not.toBeNull();
+    expect(verifyPricingCatalogProof(hashServicePricing(paidPricing), paidProof ?? [], computePricingCatalogRoot([paidPricing, freePricing]))).toBe(true);
+    expect(verifyPricingCatalogProof(hashServicePricing(paidPricing), paidProof ?? [], computePricingCatalogRoot([paidPricing]))).toBe(false);
     expect(computeServiceUsageRoot([])).toBe(ZERO_BYTES32);
     expect(computeServiceUsageRoot(usageRows)).toBe(computeServiceUsageRoot([...usageRows].reverse()));
     expect(computeServiceUsageRoot(usageRows.slice(0, 1))).not.toBe(computeServiceUsageRoot(usageRows));

@@ -107,6 +107,8 @@ export type { BuyerPaymentConfig, PerRequestAuthResult } from './buyer-payment-m
 export {
   createChannelReportAttestation,
   createUsageReportAck,
+  derivePricingCatalog,
+  derivePricingCatalogProof,
   derivePricingCatalogRoot,
   encodeAttestationForSigning,
   computeChannelUsageReportHash,

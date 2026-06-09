@@ -94,6 +94,7 @@ export interface ServiceUsageRow {
   cachedInputUsdPerMillion: Uintish;
   outputUsdPerMillion: Uintish;
   serviceMode: Uintish;
+  pricingProof?: readonly string[];
   cumulativeInputTokens: Uintish;
   cumulativeCachedInputTokens: Uintish;
   cumulativeOutputTokens: Uintish;
@@ -216,6 +217,14 @@ export function computePricingCatalogRoot(pricing: readonly ServicePricingCommit
   return computeMerkleRoot(pricing.map(hashServicePricing));
 }
 
+export function computePricingCatalogProof(pricing: readonly ServicePricingCommitment[], servicePricingHash: string): string[] | null {
+  return computeMerkleProof(pricing.map(hashServicePricing), servicePricingHash);
+}
+
+export function verifyPricingCatalogProof(servicePricingHash: string, proof: readonly string[], pricingCatalogRoot: string): boolean {
+  return verifyMerkleProof(servicePricingHash, proof, pricingCatalogRoot);
+}
+
 export function hashServiceUsageRow(row: ServiceUsageRow): string {
   const coder = AbiCoder.defaultAbiCoder();
   return keccak256(coder.encode(
@@ -300,6 +309,37 @@ function computeMerkleRoot(leaves: readonly string[]): string {
     level = next.sort(compareHex);
   }
   return level[0]!;
+}
+
+function computeMerkleProof(leaves: readonly string[], leaf: string): string[] | null {
+  if (leaves.length === 0) return null;
+  let level = [...leaves].sort(compareHex);
+  let targetIndex = level.findIndex((value) => value.toLowerCase() === leaf.toLowerCase());
+  if (targetIndex < 0) return null;
+
+  const proof: string[] = [];
+  while (level.length > 1) {
+    const siblingIndex = targetIndex % 2 === 0 ? targetIndex + 1 : targetIndex - 1;
+    const sibling = level[siblingIndex] ?? level[targetIndex]!;
+    proof.push(sibling);
+
+    const parent = hashMerklePair(level[targetIndex]!, sibling);
+    const next: string[] = [];
+    for (let i = 0; i < level.length; i += 2) {
+      next.push(hashMerklePair(level[i]!, level[i + 1] ?? level[i]!));
+    }
+    level = next.sort(compareHex);
+    targetIndex = level.findIndex((value) => value.toLowerCase() === parent.toLowerCase());
+    if (targetIndex < 0) return null;
+  }
+
+  return proof;
+}
+
+function verifyMerkleProof(leaf: string, proof: readonly string[], root: string): boolean {
+  if (root.toLowerCase() === ZERO_BYTES32 && leaf.toLowerCase() !== ZERO_BYTES32) return false;
+  const computedRoot = proof.reduce((acc, sibling) => hashMerklePair(acc, sibling), leaf);
+  return computedRoot.toLowerCase() === root.toLowerCase();
 }
 
 function hashMerklePair(a: string, b: string): string {

@@ -49,6 +49,10 @@ contract AntseedStatsV2 is IAntseedStats, Ownable {
         bytes32 pricingCatalogRoot;
         bytes32 serviceUsageRoot;
         bytes32 buyerSelectionSalt;
+        uint256 inputTokens;
+        uint256 cachedInputTokens;
+        uint256 outputTokens;
+        uint256 requestCount;
         uint256 amountPaid;
         bool recorded;
     }
@@ -76,6 +80,7 @@ contract AntseedStatsV2 is IAntseedStats, Ownable {
         uint256 cachedInputUsdPerMillion;
         uint256 outputUsdPerMillion;
         uint256 serviceMode;
+        bytes32[] pricingProof;
         uint256 cumulativeInputTokens;
         uint256 cumulativeCachedInputTokens;
         uint256 cumulativeOutputTokens;
@@ -189,6 +194,9 @@ contract AntseedStatsV2 is IAntseedStats, Ownable {
     error DuplicateVerification();
     error TooManyServiceUsageRows();
     error InvalidServiceUsageRoot();
+    error InvalidServiceUsageTotals();
+    error InvalidServicePricingHash();
+    error InvalidServicePricingProof();
     error MetadataCommitmentNotRecorded();
     error MetadataCommitmentMismatch();
     error UnsupportedMetadataVersion(uint256 version);
@@ -296,6 +304,10 @@ contract AntseedStatsV2 is IAntseedStats, Ownable {
                 pricingCatalogRoot: decoded.pricingCatalogRoot,
                 serviceUsageRoot: decoded.serviceUsageRoot,
                 buyerSelectionSalt: decoded.buyerSelectionSalt,
+                inputTokens: decoded.inputTokens,
+                cachedInputTokens: decoded.cachedInputTokens,
+                outputTokens: decoded.outputTokens,
+                requestCount: decoded.requestCount,
                 amountPaid: amountPaid,
                 recorded: true
             });
@@ -361,7 +373,12 @@ contract AntseedStatsV2 is IAntseedStats, Ownable {
         );
 
         if (accepted && !reportServiceUsageRecorded[reportHash]) {
-            _recordReportServiceUsage(reportHash, sellerAgentId, serviceUsageRoot, serviceUsageRows);
+            _recordReportServiceUsage(
+                reportHash,
+                sellerAgentId,
+                _channelMetadataCommitments[channelId][metadataHash],
+                serviceUsageRows
+            );
         }
     }
 
@@ -499,12 +516,39 @@ contract AntseedStatsV2 is IAntseedStats, Ownable {
     function _recordReportServiceUsage(
         bytes32 reportHash,
         uint256 sellerAgentId,
-        bytes32 serviceUsageRoot,
+        ChannelMetadataCommitment storage commitment,
         ServiceUsageRow[] calldata serviceUsageRows
     ) internal {
         if (serviceUsageRows.length > MAX_SERVICE_USAGE_ROWS) revert TooManyServiceUsageRows();
-        if (_computeServiceUsageRoot(serviceUsageRows) != serviceUsageRoot) {
+        if (_computeServiceUsageRoot(serviceUsageRows) != commitment.serviceUsageRoot) {
             revert InvalidServiceUsageRoot();
+        }
+        uint256 inputTokens;
+        uint256 cachedInputTokens;
+        uint256 outputTokens;
+        uint256 requestCount;
+        uint256 amountPaid;
+        for (uint256 i = 0; i < serviceUsageRows.length; i++) {
+            ServiceUsageRow calldata row = serviceUsageRows[i];
+            bytes32 servicePricingHash = _hashServicePricing(row);
+            if (servicePricingHash != row.servicePricingHash) revert InvalidServicePricingHash();
+            if (!_verifyMerkleProof(servicePricingHash, row.pricingProof, commitment.pricingCatalogRoot)) {
+                revert InvalidServicePricingProof();
+            }
+            inputTokens += row.cumulativeInputTokens;
+            cachedInputTokens += row.cumulativeCachedInputTokens;
+            outputTokens += row.cumulativeOutputTokens;
+            requestCount += row.cumulativeRequestCount;
+            amountPaid += row.cumulativeAmountPaid;
+        }
+        if (
+            inputTokens != commitment.inputTokens
+                || cachedInputTokens != commitment.cachedInputTokens
+                || outputTokens != commitment.outputTokens
+                || requestCount != commitment.requestCount
+                || amountPaid != commitment.amountPaid
+        ) {
+            revert InvalidServiceUsageTotals();
         }
 
         reportServiceUsageRecorded[reportHash] = true;
@@ -551,6 +595,28 @@ contract AntseedStatsV2 is IAntseedStats, Ownable {
             ));
         }
         return _computeMerkleRoot(rowHashes);
+    }
+
+    function _hashServicePricing(ServiceUsageRow calldata row) internal pure returns (bytes32) {
+        return keccak256(abi.encode(
+            row.serviceIdHash,
+            row.inputUsdPerMillion,
+            row.cachedInputUsdPerMillion,
+            row.outputUsdPerMillion,
+            row.serviceMode
+        ));
+    }
+
+    function _verifyMerkleProof(
+        bytes32 leaf,
+        bytes32[] calldata proof,
+        bytes32 root
+    ) internal pure returns (bool) {
+        bytes32 computed = leaf;
+        for (uint256 i = 0; i < proof.length; i++) {
+            computed = _hashMerklePair(computed, proof[i]);
+        }
+        return computed == root;
     }
 
     function _computeMerkleRoot(bytes32[] memory leaves) internal pure returns (bytes32) {

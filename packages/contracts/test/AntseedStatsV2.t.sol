@@ -376,16 +376,18 @@ contract AntseedStatsV2Test is Test {
     function test_recordUsageReportVerificationWithServiceUsage_recordsServiceRows() public {
         bytes32 reportHash = keccak256("report-with-service");
         bytes32 channelId = keccak256("channel");
-        bytes32 pricingCatalogRoot = keccak256("pricing");
+        bytes32 serviceId = keccak256("service:gpt");
+        bytes32 pricingCatalogRoot = _servicePricingHash(serviceId, 3, 1, 15, 1);
         AntseedStatsV2.ServiceUsageRow[] memory rows = new AntseedStatsV2.ServiceUsageRow[](1);
         rows[0] = AntseedStatsV2.ServiceUsageRow({
             channelId: channelId,
-            serviceIdHash: keccak256("service:gpt"),
-            servicePricingHash: keccak256("service:gpt:pricing"),
+            serviceIdHash: serviceId,
+            servicePricingHash: pricingCatalogRoot,
             inputUsdPerMillion: 3,
             cachedInputUsdPerMillion: 1,
             outputUsdPerMillion: 15,
             serviceMode: 1,
+            pricingProof: new bytes32[](0),
             cumulativeInputTokens: 100,
             cumulativeCachedInputTokens: 20,
             cumulativeOutputTokens: 50,
@@ -456,16 +458,18 @@ contract AntseedStatsV2Test is Test {
 
         bytes32 reportHash = keccak256("report-multi-verifier-service");
         bytes32 channelId = keccak256("channel");
-        bytes32 pricingCatalogRoot = keccak256("pricing");
+        bytes32 serviceId = keccak256("service:gpt");
+        bytes32 pricingCatalogRoot = _servicePricingHash(serviceId, 3, 1, 15, 1);
         AntseedStatsV2.ServiceUsageRow[] memory rows = new AntseedStatsV2.ServiceUsageRow[](1);
         rows[0] = AntseedStatsV2.ServiceUsageRow({
             channelId: channelId,
-            serviceIdHash: keccak256("service:gpt"),
-            servicePricingHash: keccak256("service:gpt:pricing"),
+            serviceIdHash: serviceId,
+            servicePricingHash: pricingCatalogRoot,
             inputUsdPerMillion: 3,
             cachedInputUsdPerMillion: 1,
             outputUsdPerMillion: 15,
             serviceMode: 1,
+            pricingProof: new bytes32[](0),
             cumulativeInputTokens: 100,
             cumulativeCachedInputTokens: 20,
             cumulativeOutputTokens: 50,
@@ -535,15 +539,18 @@ contract AntseedStatsV2Test is Test {
     }
 
     function test_recordUsageReportVerificationWithServiceUsage_revert_invalidServiceUsageRoot() public {
+        bytes32 serviceId = keccak256("service:gpt");
+        bytes32 pricingCatalogRoot = _servicePricingHash(serviceId, 3, 1, 15, 1);
         AntseedStatsV2.ServiceUsageRow[] memory rows = new AntseedStatsV2.ServiceUsageRow[](1);
         rows[0] = AntseedStatsV2.ServiceUsageRow({
             channelId: keccak256("channel"),
-            serviceIdHash: keccak256("service:gpt"),
-            servicePricingHash: keccak256("service:gpt:pricing"),
+            serviceIdHash: serviceId,
+            servicePricingHash: pricingCatalogRoot,
             inputUsdPerMillion: 3,
             cachedInputUsdPerMillion: 1,
             outputUsdPerMillion: 15,
             serviceMode: 1,
+            pricingProof: new bytes32[](0),
             cumulativeInputTokens: 100,
             cumulativeCachedInputTokens: 20,
             cumulativeOutputTokens: 50,
@@ -552,7 +559,7 @@ contract AntseedStatsV2Test is Test {
         });
         bytes32 wrongServiceUsageRoot = keccak256("wrong-hash");
         (bytes32 metadataHash,) =
-            _recordMetadataCommitment(rows[0].channelId, keccak256("pricing"), wrongServiceUsageRoot, 12345);
+            _recordMetadataCommitment(rows[0].channelId, pricingCatalogRoot, wrongServiceUsageRoot, 12345);
 
         vm.prank(verifier);
         vm.expectRevert(AntseedStatsV2.InvalidServiceUsageRoot.selector);
@@ -565,8 +572,95 @@ contract AntseedStatsV2Test is Test {
             verifierAgentId,
             12345,
             metadataHash,
-            keccak256("pricing"),
+            pricingCatalogRoot,
             wrongServiceUsageRoot,
+            true,
+            rows
+        );
+    }
+
+    function test_recordUsageReportVerificationWithServiceUsage_revert_invalidPricingProof() public {
+        bytes32 reportHash = keccak256("bad-pricing-proof-report");
+        bytes32 channelId = keccak256("channel-pricing-proof");
+        bytes32 serviceId = keccak256("service:gpt");
+        bytes32 servicePricingHash = _servicePricingHash(serviceId, 3, 1, 15, 1);
+        bytes32 pricingCatalogRoot = keccak256("different-pricing-root");
+
+        AntseedStatsV2.ServiceUsageRow[] memory rows = new AntseedStatsV2.ServiceUsageRow[](1);
+        rows[0] = AntseedStatsV2.ServiceUsageRow({
+            channelId: channelId,
+            serviceIdHash: serviceId,
+            servicePricingHash: servicePricingHash,
+            inputUsdPerMillion: 3,
+            cachedInputUsdPerMillion: 1,
+            outputUsdPerMillion: 15,
+            serviceMode: 1,
+            pricingProof: new bytes32[](0),
+            cumulativeInputTokens: 100,
+            cumulativeCachedInputTokens: 20,
+            cumulativeOutputTokens: 50,
+            cumulativeRequestCount: 3,
+            cumulativeAmountPaid: 12345
+        });
+        bytes32 serviceUsageRoot = _singleServiceUsageRoot(rows[0]);
+        (bytes32 metadataHash,) = _recordMetadataCommitment(channelId, pricingCatalogRoot, serviceUsageRoot, 12345);
+
+        vm.prank(verifier);
+        vm.expectRevert(AntseedStatsV2.InvalidServicePricingProof.selector);
+        statsV2.recordUsageReportVerificationWithServiceUsage(
+            reportHash,
+            channelId,
+            seller,
+            buyer,
+            agentId,
+            verifierAgentId,
+            12345,
+            metadataHash,
+            pricingCatalogRoot,
+            serviceUsageRoot,
+            true,
+            rows
+        );
+    }
+
+    function test_recordUsageReportVerificationWithServiceUsage_revert_invalidServiceTotals() public {
+        bytes32 reportHash = keccak256("bad-service-totals-report");
+        bytes32 channelId = keccak256("channel-service-totals");
+        bytes32 serviceId = keccak256("service:gpt");
+        bytes32 pricingCatalogRoot = _servicePricingHash(serviceId, 3, 1, 15, 1);
+
+        AntseedStatsV2.ServiceUsageRow[] memory rows = new AntseedStatsV2.ServiceUsageRow[](1);
+        rows[0] = AntseedStatsV2.ServiceUsageRow({
+            channelId: channelId,
+            serviceIdHash: serviceId,
+            servicePricingHash: pricingCatalogRoot,
+            inputUsdPerMillion: 3,
+            cachedInputUsdPerMillion: 1,
+            outputUsdPerMillion: 15,
+            serviceMode: 1,
+            pricingProof: new bytes32[](0),
+            cumulativeInputTokens: 101,
+            cumulativeCachedInputTokens: 20,
+            cumulativeOutputTokens: 50,
+            cumulativeRequestCount: 3,
+            cumulativeAmountPaid: 12345
+        });
+        bytes32 serviceUsageRoot = _singleServiceUsageRoot(rows[0]);
+        (bytes32 metadataHash,) = _recordMetadataCommitment(channelId, pricingCatalogRoot, serviceUsageRoot, 12345);
+
+        vm.prank(verifier);
+        vm.expectRevert(AntseedStatsV2.InvalidServiceUsageTotals.selector);
+        statsV2.recordUsageReportVerificationWithServiceUsage(
+            reportHash,
+            channelId,
+            seller,
+            buyer,
+            agentId,
+            verifierAgentId,
+            12345,
+            metadataHash,
+            pricingCatalogRoot,
+            serviceUsageRoot,
             true,
             rows
         );
@@ -716,6 +810,22 @@ contract AntseedStatsV2Test is Test {
             row.cumulativeOutputTokens,
             row.cumulativeRequestCount,
             row.cumulativeAmountPaid
+        ));
+    }
+
+    function _servicePricingHash(
+        bytes32 serviceIdHash,
+        uint256 inputUsdPerMillion,
+        uint256 cachedInputUsdPerMillion,
+        uint256 outputUsdPerMillion,
+        uint256 serviceMode
+    ) internal pure returns (bytes32) {
+        return keccak256(abi.encode(
+            serviceIdHash,
+            inputUsdPerMillion,
+            cachedInputUsdPerMillion,
+            outputUsdPerMillion,
+            serviceMode
         ));
     }
 
