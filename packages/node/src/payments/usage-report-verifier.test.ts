@@ -269,6 +269,7 @@ async function createValidPaidReport(): Promise<{
     pricingCatalogRoot,
     serviceUsageRoot: computeServiceUsageRoot([usageRow]),
     receiptRoot: ZERO_BYTES32,
+    buyerSelectionSalt: `0x${'44'.repeat(32)}`,
     cumulativeInputTokens: 120n,
     cumulativeCachedInputTokens: 20n,
     cumulativeOutputTokens: 10n,

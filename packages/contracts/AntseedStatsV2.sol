@@ -35,11 +35,22 @@ contract AntseedStatsV2 is IAntseedStats, Ownable {
         bytes32 pricingCatalogRoot;
         bytes32 serviceUsageRoot;
         bytes32 receiptRoot;
+        bytes32 buyerSelectionSalt;
         uint256 inputTokens;
         uint256 cachedInputTokens;
         uint256 outputTokens;
         uint256 requestCount;
         uint256 amountPaid;
+    }
+
+    struct ChannelMetadataCommitment {
+        uint256 agentId;
+        address buyer;
+        bytes32 pricingCatalogRoot;
+        bytes32 serviceUsageRoot;
+        bytes32 buyerSelectionSalt;
+        uint256 amountPaid;
+        bool recorded;
     }
 
     struct VerificationRecord {
@@ -52,6 +63,7 @@ contract AntseedStatsV2 is IAntseedStats, Ownable {
         bytes32 metadataHash;
         bytes32 pricingCatalogRoot;
         bytes32 serviceUsageRoot;
+        bytes32 selectionScore;
         bool accepted;
         uint64 verifiedAt;
     }
@@ -89,6 +101,7 @@ contract AntseedStatsV2 is IAntseedStats, Ownable {
 
     mapping(uint256 => mapping(address => BuyerMetadataStats)) private _buyerMetadataStats;
     mapping(bytes32 => ChannelMetadataSnapshot) private _channelSnapshots;
+    mapping(bytes32 => mapping(bytes32 => ChannelMetadataCommitment)) private _channelMetadataCommitments;
     mapping(bytes32 => mapping(uint256 => VerificationRecord)) private _verificationRecords;
     mapping(bytes32 => ReportVerificationStats) private _reportVerificationStats;
     mapping(uint256 => VerifierStats) private _verifierStats;
@@ -117,6 +130,7 @@ contract AntseedStatsV2 is IAntseedStats, Ownable {
         bytes32 pricingCatalogRoot,
         bytes32 serviceUsageRoot,
         bytes32 receiptRoot,
+        bytes32 buyerSelectionSalt,
         uint256 inputTokens,
         uint256 cachedInputTokens,
         uint256 outputTokens,
@@ -144,6 +158,7 @@ contract AntseedStatsV2 is IAntseedStats, Ownable {
         bytes32 metadataHash,
         bytes32 pricingCatalogRoot,
         bytes32 serviceUsageRoot,
+        bytes32 selectionScore,
         uint256 cumulativeAmount,
         bool accepted
     );
@@ -174,6 +189,8 @@ contract AntseedStatsV2 is IAntseedStats, Ownable {
     error DuplicateVerification();
     error TooManyServiceUsageRows();
     error InvalidServiceUsageRoot();
+    error MetadataCommitmentNotRecorded();
+    error MetadataCommitmentMismatch();
     error UnsupportedMetadataVersion(uint256 version);
 
     // ─── Constructor ────────────────────────────────────────────────
@@ -216,6 +233,7 @@ contract AntseedStatsV2 is IAntseedStats, Ownable {
         if (buyer == address(0)) revert InvalidAddress();
 
         DecodedMetadata memory decoded = _decodeMetadata(metadata);
+        bytes32 metadataHash = keccak256(metadata);
 
         ChannelMetadataSnapshot storage snapshot = _channelSnapshots[channelId];
         uint256 totalInputTokens = decoded.inputTokens;
@@ -265,12 +283,22 @@ contract AntseedStatsV2 is IAntseedStats, Ownable {
                 decoded.pricingCatalogRoot,
                 decoded.serviceUsageRoot,
                 decoded.receiptRoot,
+                decoded.buyerSelectionSalt,
                 decoded.inputTokens,
                 decoded.cachedInputTokens,
                 decoded.outputTokens,
                 decoded.requestCount,
                 amountPaid
             );
+            _channelMetadataCommitments[channelId][metadataHash] = ChannelMetadataCommitment({
+                agentId: agentId,
+                buyer: buyer,
+                pricingCatalogRoot: decoded.pricingCatalogRoot,
+                serviceUsageRoot: decoded.serviceUsageRoot,
+                buyerSelectionSalt: decoded.buyerSelectionSalt,
+                amountPaid: amountPaid,
+                recorded: true
+            });
         }
 
         _forwardLegacyMetadata(agentId, buyer, channelId, decoded);
@@ -373,6 +401,36 @@ contract AntseedStatsV2 is IAntseedStats, Ownable {
             revert VerifierNotStaked();
         }
 
+        ChannelMetadataCommitment storage commitment = _channelMetadataCommitments[channelId][metadataHash];
+        if (!commitment.recorded) revert MetadataCommitmentNotRecorded();
+        if (
+            commitment.agentId != sellerAgentId
+                || commitment.buyer != buyer
+                || commitment.amountPaid != cumulativeAmount
+        ) {
+            revert MetadataCommitmentMismatch();
+        }
+        if (
+            accepted
+                && (
+                    commitment.pricingCatalogRoot != pricingCatalogRoot
+                        || commitment.serviceUsageRoot != serviceUsageRoot
+                )
+        ) {
+            revert MetadataCommitmentMismatch();
+        }
+
+        bytes32 selectionScore = _computeSelectionScore(
+            commitment.buyerSelectionSalt,
+            channelId,
+            metadataHash,
+            seller,
+            buyer,
+            sellerAgentId,
+            msg.sender,
+            verifierAgentId
+        );
+
         existing.verifier = msg.sender;
         existing.seller = seller;
         existing.buyer = buyer;
@@ -382,6 +440,7 @@ contract AntseedStatsV2 is IAntseedStats, Ownable {
         existing.metadataHash = metadataHash;
         existing.pricingCatalogRoot = pricingCatalogRoot;
         existing.serviceUsageRoot = serviceUsageRoot;
+        existing.selectionScore = selectionScore;
         existing.accepted = accepted;
         existing.verifiedAt = uint64(block.timestamp);
 
@@ -409,9 +468,32 @@ contract AntseedStatsV2 is IAntseedStats, Ownable {
             metadataHash,
             pricingCatalogRoot,
             serviceUsageRoot,
+            selectionScore,
             cumulativeAmount,
             accepted
         );
+    }
+
+    function _computeSelectionScore(
+        bytes32 buyerSelectionSalt,
+        bytes32 channelId,
+        bytes32 metadataHash,
+        address seller,
+        address buyer,
+        uint256 sellerAgentId,
+        address verifier,
+        uint256 verifierAgentId
+    ) internal pure returns (bytes32) {
+        return keccak256(abi.encode(
+            buyerSelectionSalt,
+            channelId,
+            metadataHash,
+            seller,
+            buyer,
+            sellerAgentId,
+            verifier,
+            verifierAgentId
+        ));
     }
 
     function _recordReportServiceUsage(
@@ -545,12 +627,13 @@ contract AntseedStatsV2 is IAntseedStats, Ownable {
                 decoded.pricingCatalogRoot,
                 decoded.serviceUsageRoot,
                 decoded.receiptRoot,
+                decoded.buyerSelectionSalt,
                 decoded.inputTokens,
                 decoded.cachedInputTokens,
                 decoded.outputTokens,
                 decoded.requestCount,
                 decoded.amountPaid
-            ) = abi.decode(metadata, (uint256, bytes32, bytes32, bytes32, uint256, uint256, uint256, uint256, uint256));
+            ) = abi.decode(metadata, (uint256, bytes32, bytes32, bytes32, bytes32, uint256, uint256, uint256, uint256, uint256));
             return decoded;
         }
 

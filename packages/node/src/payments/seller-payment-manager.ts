@@ -14,13 +14,15 @@ import {
   RESERVE_AUTH_TYPES,
   makeChannelsDomain,
   encodeMetadata,
-  encodeMetadataV2,
   computeEncodedMetadataHash,
+  decodeMetadata,
   computeServiceUsageRoot,
   hashServicePricing,
+  METADATA_V2_VERSION,
   SERVICE_MODE_PAID,
   ZERO_BYTES32,
   ZERO_METADATA,
+  type SpendingAuthMetadataV2,
 } from './evm/signatures.js';
 import { serviceIdHash } from './usage-report-verifier.js';
 import { debugLog, debugWarn } from '../utils/debug.js';
@@ -95,7 +97,6 @@ interface RecordUsageReportEvidenceParams {
 
 interface UsageReportDraft {
   metadata: NeedAuthUsageReportMetadataPayload;
-  metadataHash: string;
   pricingCatalogRoot: string;
   serviceUsageRows: ChannelUsageReportServiceUsageRowPayload[];
 }
@@ -1081,8 +1082,7 @@ export class SellerPaymentManager {
     if (!this._sellerAgentId || !this._onUsageReportReady) return;
     const draft = this._usageReportDrafts.get(auth.channelId);
     if (!draft) return;
-    if (draft.metadataHash.toLowerCase() !== auth.metadataHash.toLowerCase()) return;
-    if (BigInt(draft.metadata.cumulativeAmountPaid) !== BigInt(auth.cumulativeAmount)) return;
+    if (!this._validateUsageReportMetadata(draft, auth)) return;
     const { seller } = await this._resolvedAddresses!;
 
     const report: ChannelUsageReportPayload = {
@@ -1103,6 +1103,30 @@ export class SellerPaymentManager {
     void Promise.resolve(this._onUsageReportReady(report)).catch((err) => {
       debugWarn(`[SellerPayment] Usage report callback failed: ${err instanceof Error ? err.message : err}`);
     });
+  }
+
+  private _validateUsageReportMetadata(draft: UsageReportDraft, auth: SpendingAuthPayload): SpendingAuthMetadataV2 | null {
+    if (computeEncodedMetadataHash(auth.metadata).toLowerCase() !== auth.metadataHash.toLowerCase()) return null;
+    if (BigInt(draft.metadata.cumulativeAmountPaid) !== BigInt(auth.cumulativeAmount)) return null;
+
+    let decoded;
+    try {
+      decoded = decodeMetadata(auth.metadata);
+    } catch {
+      return null;
+    }
+
+    if (decoded.version !== METADATA_V2_VERSION) return null;
+    if (decoded.buyerSelectionSalt.toLowerCase() === ZERO_BYTES32) return null;
+    if (decoded.pricingCatalogRoot.toLowerCase() !== draft.metadata.pricingCatalogRoot.toLowerCase()) return null;
+    if (decoded.serviceUsageRoot.toLowerCase() !== draft.metadata.serviceUsageRoot.toLowerCase()) return null;
+    if (decoded.receiptRoot.toLowerCase() !== draft.metadata.receiptRoot.toLowerCase()) return null;
+    if (decoded.cumulativeInputTokens !== BigInt(draft.metadata.cumulativeInputTokens)) return null;
+    if (decoded.cumulativeCachedInputTokens !== BigInt(draft.metadata.cumulativeCachedInputTokens)) return null;
+    if (decoded.cumulativeOutputTokens !== BigInt(draft.metadata.cumulativeOutputTokens)) return null;
+    if (decoded.cumulativeRequestCount !== BigInt(draft.metadata.cumulativeRequestCount)) return null;
+    if (decoded.cumulativeAmountPaid !== BigInt(draft.metadata.cumulativeAmountPaid)) return null;
+    return decoded;
   }
 
   async recordUsageReportEvidence(params: RecordUsageReportEvidenceParams): Promise<NeedAuthUsageReportMetadataPayload | null> {
@@ -1163,19 +1187,8 @@ export class SellerPaymentManager {
       cumulativeRequestCount: totals.requests.toString(),
       cumulativeAmountPaid: totals.paid.toString(),
     };
-    const encodedMetadata = encodeMetadataV2({
-      pricingCatalogRoot: metadata.pricingCatalogRoot,
-      serviceUsageRoot: metadata.serviceUsageRoot,
-      receiptRoot: metadata.receiptRoot,
-      cumulativeInputTokens: BigInt(metadata.cumulativeInputTokens),
-      cumulativeCachedInputTokens: BigInt(metadata.cumulativeCachedInputTokens),
-      cumulativeOutputTokens: BigInt(metadata.cumulativeOutputTokens),
-      cumulativeRequestCount: BigInt(metadata.cumulativeRequestCount),
-      cumulativeAmountPaid: BigInt(metadata.cumulativeAmountPaid),
-    });
     this._usageReportDrafts.set(params.channelId, {
       metadata,
-      metadataHash: computeEncodedMetadataHash(encodedMetadata),
       pricingCatalogRoot: params.pricingCatalogRoot,
       serviceUsageRows,
     });

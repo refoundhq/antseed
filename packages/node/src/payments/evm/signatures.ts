@@ -64,6 +64,7 @@ export interface SpendingAuthMetadataV2 {
   pricingCatalogRoot: string;
   serviceUsageRoot: string;
   receiptRoot: string;
+  buyerSelectionSalt: string;
   cumulativeInputTokens: bigint;
   cumulativeCachedInputTokens: bigint;
   cumulativeOutputTokens: bigint;
@@ -118,12 +119,13 @@ export function encodeMetadata(metadata: SpendingAuthMetadata): string {
 export function encodeMetadataV2(metadata: SpendingAuthMetadataV2): string {
   const coder = AbiCoder.defaultAbiCoder();
   return coder.encode(
-    ['uint256', 'bytes32', 'bytes32', 'bytes32', 'uint256', 'uint256', 'uint256', 'uint256', 'uint256'],
+    ['uint256', 'bytes32', 'bytes32', 'bytes32', 'bytes32', 'uint256', 'uint256', 'uint256', 'uint256', 'uint256'],
     [
       METADATA_V2_VERSION,
       metadata.pricingCatalogRoot,
       metadata.serviceUsageRoot,
       metadata.receiptRoot,
+      metadata.buyerSelectionSalt,
       metadata.cumulativeInputTokens,
       metadata.cumulativeCachedInputTokens,
       metadata.cumulativeOutputTokens,
@@ -153,21 +155,23 @@ export function decodeMetadata(encodedMetadata: string): DecodedSpendingAuthMeta
       pricingCatalogRoot,
       serviceUsageRoot,
       receiptRoot,
+      buyerSelectionSalt,
       cumulativeInputTokens,
       cumulativeCachedInputTokens,
       cumulativeOutputTokens,
       cumulativeRequestCount,
       cumulativeAmountPaid,
     ] = coder.decode(
-      ['uint256', 'bytes32', 'bytes32', 'bytes32', 'uint256', 'uint256', 'uint256', 'uint256', 'uint256'],
+      ['uint256', 'bytes32', 'bytes32', 'bytes32', 'bytes32', 'uint256', 'uint256', 'uint256', 'uint256', 'uint256'],
       encodedMetadata,
-    ) as unknown as [bigint, string, string, string, bigint, bigint, bigint, bigint, bigint];
+    ) as unknown as [bigint, string, string, string, string, bigint, bigint, bigint, bigint, bigint];
 
     return {
       version: METADATA_V2_VERSION,
       pricingCatalogRoot,
       serviceUsageRoot,
       receiptRoot,
+      buyerSelectionSalt,
       cumulativeInputTokens,
       cumulativeCachedInputTokens,
       cumulativeOutputTokens,
@@ -237,7 +241,7 @@ export function computeServiceUsageRoot(rows: readonly ServiceUsageRow[]): strin
   return computeMerkleRoot(rows.map(hashServiceUsageRow));
 }
 
-export function sumServiceUsageRows(rows: readonly ServiceUsageRow[]): Omit<SpendingAuthMetadataV2, 'pricingCatalogRoot' | 'serviceUsageRoot' | 'receiptRoot'> {
+export function sumServiceUsageRows(rows: readonly ServiceUsageRow[]): Omit<SpendingAuthMetadataV2, 'pricingCatalogRoot' | 'serviceUsageRoot' | 'receiptRoot' | 'buyerSelectionSalt'> {
   return rows.reduce(
     (acc, row) => ({
       cumulativeInputTokens: acc.cumulativeInputTokens + toBigInt(row.cumulativeInputTokens),

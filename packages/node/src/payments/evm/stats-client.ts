@@ -36,6 +36,7 @@ export interface DecodedUsageReportVerificationRecorded {
   metadataHash: string;
   pricingCatalogRoot: string;
   serviceUsageRoot: string;
+  selectionScore: string;
   cumulativeAmount: bigint;
   accepted: boolean;
 }
@@ -62,7 +63,7 @@ export interface DecodedUsageReportServiceUsageRecorded {
 
 const STATS_ABI = [
   'event MetadataRecorded(uint256 indexed agentId, address indexed buyer, bytes32 indexed channelId, bytes32 metadataHash, uint256 inputTokens, uint256 outputTokens, uint256 requestCount)',
-  'event UsageReportVerificationRecorded(bytes32 indexed reportHash, uint256 indexed sellerAgentId, uint256 indexed verifierAgentId, address seller, address buyer, address verifier, bytes32 channelId, bytes32 metadataHash, bytes32 pricingCatalogRoot, bytes32 serviceUsageRoot, uint256 cumulativeAmount, bool accepted)',
+  'event UsageReportVerificationRecorded(bytes32 indexed reportHash, uint256 indexed sellerAgentId, uint256 indexed verifierAgentId, address seller, address buyer, address verifier, bytes32 channelId, bytes32 metadataHash, bytes32 pricingCatalogRoot, bytes32 serviceUsageRoot, bytes32 selectionScore, uint256 cumulativeAmount, bool accepted)',
   'event UsageReportServiceUsageRecorded(bytes32 indexed reportHash, uint256 indexed sellerAgentId, bytes32 indexed serviceIdHash, bytes32 servicePricingHash, bytes32 channelId, uint256 inputUsdPerMillion, uint256 cachedInputUsdPerMillion, uint256 outputUsdPerMillion, uint256 serviceMode, uint256 cumulativeInputTokens, uint256 cumulativeCachedInputTokens, uint256 cumulativeOutputTokens, uint256 cumulativeRequestCount, uint256 cumulativeAmountPaid)',
   'function recordUsageReportVerification(bytes32 reportHash, bytes32 channelId, address seller, address buyer, uint256 sellerAgentId, uint256 verifierAgentId, uint256 cumulativeAmount, bytes32 metadataHash, bytes32 pricingCatalogRoot, bytes32 serviceUsageRoot, bool accepted) external',
   'function recordUsageReportVerificationWithServiceUsage(bytes32 reportHash, bytes32 channelId, address seller, address buyer, uint256 sellerAgentId, uint256 verifierAgentId, uint256 cumulativeAmount, bytes32 metadataHash, bytes32 pricingCatalogRoot, bytes32 serviceUsageRoot, bool accepted, (bytes32 channelId, bytes32 serviceIdHash, bytes32 servicePricingHash, uint256 inputUsdPerMillion, uint256 cachedInputUsdPerMillion, uint256 outputUsdPerMillion, uint256 serviceMode, uint256 cumulativeInputTokens, uint256 cumulativeCachedInputTokens, uint256 cumulativeOutputTokens, uint256 cumulativeRequestCount, uint256 cumulativeAmountPaid)[] serviceUsageRows) external',
@@ -146,8 +147,9 @@ export class StatsClient extends BaseEvmClient {
         metadataHash: parsed.args[7] as string,
         pricingCatalogRoot: parsed.args[8] as string,
         serviceUsageRoot: parsed.args[9] as string,
-        cumulativeAmount: parsed.args[10] as bigint,
-        accepted: parsed.args[11] as boolean,
+        selectionScore: parsed.args[10] as string,
+        cumulativeAmount: parsed.args[11] as bigint,
+        accepted: parsed.args[12] as boolean,
       });
     }
     out.sort((a, b) =>

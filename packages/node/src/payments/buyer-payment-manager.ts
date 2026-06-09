@@ -935,6 +935,7 @@ export class BuyerPaymentManager {
           pricingCatalogRoot: usageReportMetadata.pricingCatalogRoot,
           serviceUsageRoot: usageReportMetadata.serviceUsageRoot,
           receiptRoot: usageReportMetadata.receiptRoot,
+          buyerSelectionSalt: `0x${randomBytes(32).toString('hex')}`,
           cumulativeInputTokens: BigInt(usageReportMetadata.cumulativeInputTokens),
           cumulativeCachedInputTokens: BigInt(usageReportMetadata.cumulativeCachedInputTokens),
           cumulativeOutputTokens: BigInt(usageReportMetadata.cumulativeOutputTokens),

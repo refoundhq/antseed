@@ -95,6 +95,7 @@ contract AntseedStatsV2Test is Test {
         bytes32 pricingCatalogRoot = keccak256("pricing");
         bytes32 serviceUsageRoot = keccak256("usage");
         bytes32 receiptRoot = keccak256("receipt");
+        bytes32 buyerSelectionSalt = keccak256("buyer-salt");
 
         vm.prank(writer);
         statsV2.recordMetadata(
@@ -113,6 +114,7 @@ contract AntseedStatsV2Test is Test {
             pricingCatalogRoot,
             serviceUsageRoot,
             receiptRoot,
+            buyerSelectionSalt,
             150,
             50,
             55,
@@ -128,6 +130,7 @@ contract AntseedStatsV2Test is Test {
                 pricingCatalogRoot,
                 serviceUsageRoot,
                 receiptRoot,
+                buyerSelectionSalt,
                 uint256(150),
                 uint256(50),
                 uint256(55),
@@ -147,6 +150,7 @@ contract AntseedStatsV2Test is Test {
         bytes32 pricingCatalogRoot = keccak256("pricing");
         bytes32 serviceUsageRoot = keccak256("usage");
         bytes32 receiptRoot = keccak256("receipt");
+        bytes32 buyerSelectionSalt = keccak256("buyer-salt");
 
         vm.prank(writer);
         vm.expectEmit(true, true, true, true);
@@ -157,6 +161,7 @@ contract AntseedStatsV2Test is Test {
             pricingCatalogRoot,
             serviceUsageRoot,
             receiptRoot,
+            buyerSelectionSalt,
             125,
             25,
             40,
@@ -172,6 +177,7 @@ contract AntseedStatsV2Test is Test {
                 pricingCatalogRoot,
                 serviceUsageRoot,
                 receiptRoot,
+                buyerSelectionSalt,
                 uint256(125),
                 uint256(25),
                 uint256(40),
@@ -195,6 +201,7 @@ contract AntseedStatsV2Test is Test {
                 pricingCatalogRoot,
                 serviceUsageRoot,
                 receiptRoot,
+                keccak256("buyer-salt-next"),
                 uint256(165),
                 uint256(35),
                 uint256(55),
@@ -223,6 +230,7 @@ contract AntseedStatsV2Test is Test {
                 keccak256("pricing"),
                 keccak256("usage"),
                 keccak256("receipt"),
+                keccak256("buyer-salt"),
                 uint256(125),
                 uint256(25),
                 uint256(40),
@@ -264,6 +272,7 @@ contract AntseedStatsV2Test is Test {
                 keccak256("pricing"),
                 keccak256("usage"),
                 keccak256("receipt"),
+                keccak256("buyer-salt"),
                 uint256(125),
                 uint256(25),
                 uint256(40),
@@ -305,9 +314,11 @@ contract AntseedStatsV2Test is Test {
     function test_recordUsageReportVerification_recordsAcceptedVerification() public {
         bytes32 reportHash = keccak256("report");
         bytes32 channelId = keccak256("channel");
-        bytes32 metadataHash = keccak256("metadata");
         bytes32 pricingCatalogRoot = keccak256("pricing");
         bytes32 serviceUsageRoot = keccak256("usage");
+        (bytes32 metadataHash, bytes32 buyerSelectionSalt) =
+            _recordMetadataCommitment(channelId, pricingCatalogRoot, serviceUsageRoot, 50e6);
+        bytes32 selectionScore = _selectionScore(buyerSelectionSalt, channelId, metadataHash, verifier, verifierAgentId);
 
         vm.prank(verifier);
         vm.expectEmit(true, true, true, true);
@@ -322,6 +333,7 @@ contract AntseedStatsV2Test is Test {
             metadataHash,
             pricingCatalogRoot,
             serviceUsageRoot,
+            selectionScore,
             50e6,
             true
         );
@@ -346,6 +358,7 @@ contract AntseedStatsV2Test is Test {
         assertEq(record.buyer, buyer);
         assertEq(record.sellerAgentId, agentId);
         assertEq(record.cumulativeAmount, 50e6);
+        assertEq(record.selectionScore, selectionScore);
         assertEq(record.accepted, true);
         assertGt(record.verifiedAt, 0);
 
@@ -363,7 +376,6 @@ contract AntseedStatsV2Test is Test {
     function test_recordUsageReportVerificationWithServiceUsage_recordsServiceRows() public {
         bytes32 reportHash = keccak256("report-with-service");
         bytes32 channelId = keccak256("channel");
-        bytes32 metadataHash = keccak256("metadata");
         bytes32 pricingCatalogRoot = keccak256("pricing");
         AntseedStatsV2.ServiceUsageRow[] memory rows = new AntseedStatsV2.ServiceUsageRow[](1);
         rows[0] = AntseedStatsV2.ServiceUsageRow({
@@ -381,6 +393,9 @@ contract AntseedStatsV2Test is Test {
             cumulativeAmountPaid: 12345
         });
         bytes32 serviceUsageRoot = _singleServiceUsageRoot(rows[0]);
+        (bytes32 metadataHash, bytes32 buyerSelectionSalt) =
+            _recordMetadataCommitment(channelId, pricingCatalogRoot, serviceUsageRoot, 12345);
+        bytes32 selectionScore = _selectionScore(buyerSelectionSalt, channelId, metadataHash, verifier, verifierAgentId);
 
         vm.prank(verifier);
         vm.expectEmit(true, true, true, true);
@@ -395,6 +410,7 @@ contract AntseedStatsV2Test is Test {
             metadataHash,
             pricingCatalogRoot,
             serviceUsageRoot,
+            selectionScore,
             12345,
             true
         );
@@ -440,7 +456,6 @@ contract AntseedStatsV2Test is Test {
 
         bytes32 reportHash = keccak256("report-multi-verifier-service");
         bytes32 channelId = keccak256("channel");
-        bytes32 metadataHash = keccak256("metadata");
         bytes32 pricingCatalogRoot = keccak256("pricing");
         AntseedStatsV2.ServiceUsageRow[] memory rows = new AntseedStatsV2.ServiceUsageRow[](1);
         rows[0] = AntseedStatsV2.ServiceUsageRow({
@@ -458,6 +473,7 @@ contract AntseedStatsV2Test is Test {
             cumulativeAmountPaid: 12345
         });
         bytes32 serviceUsageRoot = _singleServiceUsageRoot(rows[0]);
+        (bytes32 metadataHash,) = _recordMetadataCommitment(channelId, pricingCatalogRoot, serviceUsageRoot, 12345);
 
         vm.prank(verifier);
         statsV2.recordUsageReportVerificationWithServiceUsage(
@@ -534,6 +550,9 @@ contract AntseedStatsV2Test is Test {
             cumulativeRequestCount: 3,
             cumulativeAmountPaid: 12345
         });
+        bytes32 wrongServiceUsageRoot = keccak256("wrong-hash");
+        (bytes32 metadataHash,) =
+            _recordMetadataCommitment(rows[0].channelId, keccak256("pricing"), wrongServiceUsageRoot, 12345);
 
         vm.prank(verifier);
         vm.expectRevert(AntseedStatsV2.InvalidServiceUsageRoot.selector);
@@ -545,9 +564,9 @@ contract AntseedStatsV2Test is Test {
             agentId,
             verifierAgentId,
             12345,
-            keccak256("metadata"),
+            metadataHash,
             keccak256("pricing"),
-            keccak256("wrong-hash"),
+            wrongServiceUsageRoot,
             true,
             rows
         );
@@ -555,19 +574,23 @@ contract AntseedStatsV2Test is Test {
 
     function test_recordUsageReportVerification_recordsRejectedVerification() public {
         bytes32 reportHash = keccak256("report-rejected");
+        bytes32 channelId = keccak256("channel-rejected");
+        bytes32 pricingCatalogRoot = keccak256("pricing");
+        bytes32 serviceUsageRoot = keccak256("usage");
+        (bytes32 metadataHash,) = _recordMetadataCommitment(channelId, pricingCatalogRoot, serviceUsageRoot, 0);
 
         vm.prank(verifier);
         statsV2.recordUsageReportVerification(
             reportHash,
-            keccak256("channel"),
+            channelId,
             seller,
             buyer,
             agentId,
             verifierAgentId,
             0,
-            keccak256("metadata"),
-            keccak256("pricing"),
-            keccak256("usage"),
+            metadataHash,
+            pricingCatalogRoot,
+            serviceUsageRoot,
             false
         );
 
@@ -584,19 +607,23 @@ contract AntseedStatsV2Test is Test {
 
     function test_recordUsageReportVerification_revert_duplicateVerifierAgent() public {
         bytes32 reportHash = keccak256("report-duplicate");
+        bytes32 channelId = keccak256("channel-duplicate");
+        bytes32 pricingCatalogRoot = keccak256("pricing");
+        bytes32 serviceUsageRoot = keccak256("usage");
+        (bytes32 metadataHash,) = _recordMetadataCommitment(channelId, pricingCatalogRoot, serviceUsageRoot, 0);
 
         vm.prank(verifier);
         statsV2.recordUsageReportVerification(
             reportHash,
-            keccak256("channel"),
+            channelId,
             seller,
             buyer,
             agentId,
             verifierAgentId,
             0,
-            keccak256("metadata"),
-            keccak256("pricing"),
-            keccak256("usage"),
+            metadataHash,
+            pricingCatalogRoot,
+            serviceUsageRoot,
             true
         );
 
@@ -604,15 +631,15 @@ contract AntseedStatsV2Test is Test {
         vm.expectRevert(AntseedStatsV2.DuplicateVerification.selector);
         statsV2.recordUsageReportVerification(
             reportHash,
-            keccak256("channel"),
+            channelId,
             seller,
             buyer,
             agentId,
             verifierAgentId,
             0,
-            keccak256("metadata"),
-            keccak256("pricing"),
-            keccak256("usage"),
+            metadataHash,
+            pricingCatalogRoot,
+            serviceUsageRoot,
             true
         );
     }
@@ -689,6 +716,50 @@ contract AntseedStatsV2Test is Test {
             row.cumulativeOutputTokens,
             row.cumulativeRequestCount,
             row.cumulativeAmountPaid
+        ));
+    }
+
+    function _recordMetadataCommitment(
+        bytes32 channelId,
+        bytes32 pricingCatalogRoot,
+        bytes32 serviceUsageRoot,
+        uint256 amountPaid
+    ) internal returns (bytes32 metadataHash, bytes32 buyerSelectionSalt) {
+        buyerSelectionSalt = keccak256(abi.encodePacked("buyer-selection-salt", channelId, amountPaid));
+        bytes memory metadata = abi.encode(
+            uint256(2),
+            pricingCatalogRoot,
+            serviceUsageRoot,
+            bytes32(0),
+            buyerSelectionSalt,
+            uint256(100),
+            uint256(20),
+            uint256(50),
+            uint256(3),
+            amountPaid
+        );
+        metadataHash = keccak256(metadata);
+
+        vm.prank(writer);
+        statsV2.recordMetadata(agentId, buyer, channelId, metadata);
+    }
+
+    function _selectionScore(
+        bytes32 buyerSelectionSalt,
+        bytes32 channelId,
+        bytes32 metadataHash,
+        address verifierAddress,
+        uint256 verifierId
+    ) internal view returns (bytes32) {
+        return keccak256(abi.encode(
+            buyerSelectionSalt,
+            channelId,
+            metadataHash,
+            seller,
+            buyer,
+            agentId,
+            verifierAddress,
+            verifierId
         ));
     }
 }
