@@ -1,9 +1,10 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 
-import type { DecodedMetadataRecorded } from '@antseed/node';
+import type { DecodedMetadataPointerRecorded, DecodedMetadataRecorded, UsageManifest } from '@antseed/node';
 import { SqliteStore } from './store.js';
 import { MetadataIndexer } from './indexer.js';
+import type { UsageManifestFetcher } from './usage-manifest-fetcher.js';
 
 type MockStatsClient = Pick<
   import('@antseed/node').StatsClient,
@@ -15,6 +16,7 @@ type MockStatsClient = Pick<
 function makeMockClient(opts: {
   blockNumber: number;
   events?: DecodedMetadataRecorded[];
+  pointerEvents?: DecodedMetadataPointerRecorded[];
   throwOnFetch?: boolean;
 }): {
   client: MockStatsClient;
@@ -31,7 +33,7 @@ function makeMockClient(opts: {
       return opts.events ?? [];
     },
     async getMetadataPointerRecordedEvents() {
-      return [];
+      return opts.pointerEvents ?? [];
     },
   };
   return { client, fetchCalls };
@@ -49,6 +51,49 @@ function makeEvent(overrides: Partial<DecodedMetadataRecorded> = {}): DecodedMet
     inputTokens: 0n,
     outputTokens: 0n,
     requestCount: 0n,
+    ...overrides,
+  };
+}
+
+function makePointerEvent(overrides: Partial<DecodedMetadataPointerRecorded> = {}): DecodedMetadataPointerRecorded {
+  return {
+    blockNumber: 1,
+    txHash: '0x' + '9'.repeat(64),
+    logIndex: 0,
+    agentId: 1n,
+    buyer: '0x' + '0'.repeat(40),
+    channelId: '0x' + '1'.repeat(64),
+    metadataHash: '0x' + '2'.repeat(64),
+    cid: 'bafkreitest',
+    cidBytes: '0x6261666b72656974657374',
+    usageRoot: '0x' + '3'.repeat(64),
+    ...overrides,
+  };
+}
+
+function makeManifest(channelId: string, overrides: Partial<UsageManifest> = {}): UsageManifest {
+  return {
+    version: 1,
+    channelId,
+    records: [],
+    totals: {
+      costUsdc: '1000',
+      inputTokens: '100',
+      cachedInputTokens: '0',
+      freshInputTokens: '100',
+      outputTokens: '50',
+      requestCount: '1',
+    },
+    services: {
+      'gpt-5.5': {
+        costUsdc: '1000',
+        inputTokens: '100',
+        cachedInputTokens: '0',
+        freshInputTokens: '100',
+        outputTokens: '50',
+        requestCount: '1',
+      },
+    },
     ...overrides,
   };
 }
@@ -278,6 +323,58 @@ describe('MetadataIndexer', () => {
     assert.equal(fetchCalls.length, 1);
     assert.equal(fetchCalls[0]!.fromBlock, 0);
     assert.equal(store.getCheckpoint(CHAIN_ID, CONTRACT), 188);
+
+    store.close();
+  });
+
+  it('retries usage manifest pointers after transient fetch failure even after checkpoint advances', async () => {
+    const store = makeStore();
+    const channelId = '0x' + 'c'.repeat(64);
+    const pointer = makePointerEvent({ blockNumber: 10, channelId, agentId: 7n });
+    const manifest = makeManifest(channelId);
+    let fetchAttempts = 0;
+    const fetcher = {
+      async fetch(cid: string, usageRoot: string) {
+        fetchAttempts += 1;
+        assert.equal(cid, pointer.cid);
+        assert.equal(usageRoot, pointer.usageRoot.toLowerCase());
+        if (fetchAttempts === 1) throw new Error('gateway unavailable');
+        return manifest;
+      },
+    } as unknown as UsageManifestFetcher;
+
+    const { client, fetchCalls } = makeMockClient({
+      blockNumber: 100,
+      pointerEvents: [pointer],
+    });
+    const indexer = new MetadataIndexer({
+      store,
+      statsClient: client,
+      usageManifestFetcher: fetcher,
+      chainId: CHAIN_ID,
+      contractAddress: CONTRACT,
+      deployBlock: 0,
+      tickIntervalMs: 60_000,
+      reorgSafetyBlocks: 12,
+    });
+
+    await indexer.tick();
+
+    assert.equal(fetchAttempts, 1);
+    assert.equal(store.getCheckpoint(CHAIN_ID, CONTRACT), 88);
+    assert.equal(store.getPendingUsageManifestPointers(CHAIN_ID, CONTRACT).length, 1);
+    assert.equal(store.getSellerTotals(7), null);
+
+    await indexer.tick();
+
+    assert.equal(fetchAttempts, 2);
+    assert.equal(fetchCalls.length, 1);
+    assert.equal(store.getPendingUsageManifestPointers(CHAIN_ID, CONTRACT).length, 0);
+    const totals = store.getSellerTotals(7);
+    assert.ok(totals !== null);
+    assert.equal(totals.totalInputTokens, 100n);
+    assert.equal(totals.totalOutputTokens, 50n);
+    assert.equal(totals.totalRequests, 1n);
 
     store.close();
   });

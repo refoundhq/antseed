@@ -98,6 +98,7 @@ export class MetadataIndexer {
       const safeTo = latest - this._reorgSafetyBlocks;
 
       if (safeTo < this._deployBlock) {
+        await this._processPendingUsageManifests();
         return;
       }
 
@@ -105,6 +106,7 @@ export class MetadataIndexer {
       const fromBlock = checkpoint === null ? this._deployBlock : checkpoint + 1;
 
       if (fromBlock > safeTo) {
+        await this._processPendingUsageManifests();
         return;
       }
 
@@ -151,32 +153,37 @@ export class MetadataIndexer {
         toBlock,
         blockTimestamps,
         newCheckpointTimestamp,
+        pointerEvents,
       );
 
-      if (this._usageManifestFetcher) {
-        for (const event of pointerEvents) {
-          try {
-            const manifest = await this._usageManifestFetcher.fetch(event.cid, event.usageRoot);
-            this._store.applyUsageManifest(
-              this._chainId,
-              this._contractAddress,
-              event,
-              manifest,
-              blockTimestamps?.get(event.blockNumber) ?? null,
-            );
-          } catch (err) {
-            console.error(
-              `[indexer] usage manifest skipped cid=${event.cid}: ${err instanceof Error ? err.message : err}`,
-            );
-          }
-        }
-      }
+      await this._processPendingUsageManifests(blockTimestamps);
 
       console.log(`[indexer] ${fromBlock}..${toBlock} events=${events.length} pointers=${pointerEvents.length}`);
     } catch (err) {
       console.error('[indexer] tick error:', err);
     } finally {
       this._running = false;
+    }
+  }
+
+  private async _processPendingUsageManifests(blockTimestamps?: Map<number, number>): Promise<void> {
+    if (!this._usageManifestFetcher) return;
+    const pending = this._store.getPendingUsageManifestPointers(this._chainId, this._contractAddress);
+    for (const event of pending) {
+      try {
+        const manifest = await this._usageManifestFetcher.fetch(event.cid, event.usageRoot);
+        this._store.applyUsageManifest(
+          this._chainId,
+          this._contractAddress,
+          event,
+          manifest,
+          blockTimestamps?.get(event.blockNumber) ?? null,
+        );
+      } catch (err) {
+        console.error(
+          `[indexer] usage manifest pending cid=${event.cid}: ${err instanceof Error ? err.message : err}`,
+        );
+      }
     }
   }
 }

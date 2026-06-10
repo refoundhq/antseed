@@ -1,6 +1,8 @@
 import Database from 'better-sqlite3';
 import type { DecodedMetadataPointerRecorded, DecodedMetadataRecorded, UsageManifest } from '@antseed/node';
 
+export type StoredUsageManifestPointer = Omit<DecodedMetadataPointerRecorded, 'metadataHash'>;
+
 export interface SellerTotals {
   totalRequests: bigint;
   totalInputTokens: bigint;
@@ -56,6 +58,18 @@ interface SellerTotalsRow {
   last_updated_at: number;
 }
 
+interface UsageManifestPointerRow {
+  tx_hash: string;
+  log_index: number;
+  agent_id: number;
+  buyer: string;
+  channel_id: string;
+  cid: string;
+  cid_bytes: string;
+  usage_root: string;
+  block_number: number;
+}
+
 export class SqliteStore {
   private db: Database.Database;
 
@@ -74,6 +88,10 @@ export class SqliteStore {
   private _selectAllSellerTotals!: Database.Statement<[], SellerTotalsRow>;
   private _countBuyers!: Database.Statement<[number], { c: number }>;
   private _countChannels!: Database.Statement<[number], { c: number }>;
+  private _insertUsageManifestPointer!: Database.Statement<[string, string, string, number, number, string, string, string, string, string, number]>;
+  private _selectUsageManifestPointerProcessed!: Database.Statement<[string, string, string, number], { processed_at: number | null }>;
+  private _selectPendingUsageManifestPointers!: Database.Statement<[string, string, number], UsageManifestPointerRow>;
+  private _markUsageManifestPointerProcessed!: Database.Statement<[number, string, string, string, number]>;
 
   constructor(dbPath: string) {
     this.db = new Database(dbPath);
@@ -231,6 +249,32 @@ export class SqliteStore {
     this._countChannels = this.db.prepare(
       'SELECT COUNT(*) AS c FROM seller_channel_totals WHERE agent_id = ?',
     );
+
+    this._insertUsageManifestPointer = this.db.prepare(
+      `INSERT OR IGNORE INTO usage_manifest_pointers
+        (chain_id, contract_address, tx_hash, log_index, agent_id, buyer, channel_id,
+         cid, cid_bytes, usage_root, block_number, processed_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
+    );
+
+    this._selectUsageManifestPointerProcessed = this.db.prepare(
+      `SELECT processed_at FROM usage_manifest_pointers
+       WHERE chain_id = ? AND contract_address = ? AND tx_hash = ? AND log_index = ?`,
+    );
+
+    this._selectPendingUsageManifestPointers = this.db.prepare(
+      `SELECT tx_hash, log_index, agent_id, buyer, channel_id, cid, cid_bytes, usage_root, block_number
+       FROM usage_manifest_pointers
+       WHERE chain_id = ? AND contract_address = ? AND processed_at IS NULL
+       ORDER BY block_number ASC, log_index ASC
+       LIMIT ?`,
+    );
+
+    this._markUsageManifestPointerProcessed = this.db.prepare(
+      `UPDATE usage_manifest_pointers
+       SET processed_at = ?
+       WHERE chain_id = ? AND contract_address = ? AND tx_hash = ? AND log_index = ?`,
+    );
   }
 
   /** Returns last indexed block for (chainId, contractAddress), or null if no checkpoint. */
@@ -244,7 +288,8 @@ export class SqliteStore {
    *   1. For each event, upsert seller_metadata_totals (add deltas, track first/last block, bump count).
    *   2. Upsert seller_buyer_totals for (agentId, buyer) with the same deltas.
    *   3. Upsert seller_channel_totals for (agentId, channelId) with the same deltas.
-   *   4. Advance indexer_checkpoint.last_block = newCheckpoint for this (chainId, contractAddress).
+   *   4. Insert v2 usage manifest pointer events as unprocessed retry work.
+   *   5. Advance indexer_checkpoint.last_block = newCheckpoint for this (chainId, contractAddress).
    * If any step throws, the transaction is rolled back — next tick re-fetches the same range.
    *
    * Events MUST be sorted ascending by (blockNumber, logIndex) — StatsClient guarantees this.
@@ -258,6 +303,7 @@ export class SqliteStore {
     newCheckpoint: number,
     blockTimestamps?: Map<number, number>,
     newCheckpointTimestamp?: number | null,
+    pointerEvents: DecodedMetadataPointerRecorded[] = [],
   ): void {
     this.db.transaction(() => {
       for (const event of events) {
@@ -341,6 +387,10 @@ export class SqliteStore {
         );
       }
 
+      for (const event of pointerEvents) {
+        this._insertPointerEvent(chainId, contractAddress, event);
+      }
+
       this._upsertCheckpoint.run(
         chainId,
         contractAddress.toLowerCase(),
@@ -350,10 +400,30 @@ export class SqliteStore {
     })();
   }
 
+  getPendingUsageManifestPointers(
+    chainId: string,
+    contractAddress: string,
+    limit = 100,
+  ): StoredUsageManifestPointer[] {
+    return this._selectPendingUsageManifestPointers
+      .all(chainId, contractAddress.toLowerCase(), limit)
+      .map((row) => ({
+        blockNumber: row.block_number,
+        txHash: row.tx_hash,
+        logIndex: row.log_index,
+        agentId: BigInt(row.agent_id),
+        buyer: row.buyer,
+        channelId: row.channel_id,
+        cid: row.cid,
+        cidBytes: row.cid_bytes,
+        usageRoot: row.usage_root,
+      }));
+  }
+
   applyUsageManifest(
     chainId: string,
     contractAddress: string,
-    event: DecodedMetadataPointerRecorded,
+    event: DecodedMetadataPointerRecorded | StoredUsageManifestPointer,
     manifest: UsageManifest,
     blockTimestamp?: number | null,
   ): void {
@@ -370,30 +440,15 @@ export class SqliteStore {
         throw new Error(`usage manifest does not match pointer channel ${channelId}`);
       }
 
-      const inserted = this.db.prepare(
-        `INSERT OR IGNORE INTO usage_manifest_pointers
-          (chain_id, contract_address, tx_hash, log_index, agent_id, buyer, channel_id,
-           cid, cid_bytes, usage_root, block_number, processed_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
-      ).run(
-        chainId,
-        contractAddress.toLowerCase(),
-        event.txHash.toLowerCase(),
-        event.logIndex,
-        agentId,
-        buyer,
-        channelId,
-        event.cid,
-        event.cidBytes,
-        event.usageRoot.toLowerCase(),
-        event.blockNumber,
-      );
+      const inserted = this._insertPointerEvent(chainId, contractAddress, event);
 
       if (inserted.changes === 0) {
-        const row = this.db.prepare(
-          `SELECT processed_at FROM usage_manifest_pointers
-           WHERE chain_id = ? AND contract_address = ? AND tx_hash = ? AND log_index = ?`,
-        ).get(chainId, contractAddress.toLowerCase(), event.txHash.toLowerCase(), event.logIndex) as { processed_at: number | null } | undefined;
+        const row = this._selectUsageManifestPointerProcessed.get(
+          chainId,
+          contractAddress.toLowerCase(),
+          event.txHash.toLowerCase(),
+          event.logIndex,
+        );
         if (row?.processed_at != null) return;
       }
 
@@ -459,12 +514,38 @@ export class SqliteStore {
         this._applyServiceManifestTotals(agentId, channelId, service, totals);
       }
 
-      this.db.prepare(
-        `UPDATE usage_manifest_pointers
-         SET processed_at = ?
-         WHERE chain_id = ? AND contract_address = ? AND tx_hash = ? AND log_index = ?`,
-      ).run(now, chainId, contractAddress.toLowerCase(), event.txHash.toLowerCase(), event.logIndex);
+      this._markUsageManifestPointerProcessed.run(
+        now,
+        chainId,
+        contractAddress.toLowerCase(),
+        event.txHash.toLowerCase(),
+        event.logIndex,
+      );
     })();
+  }
+
+  private _insertPointerEvent(
+    chainId: string,
+    contractAddress: string,
+    event: DecodedMetadataPointerRecorded | StoredUsageManifestPointer,
+  ): Database.RunResult {
+    if (event.agentId > BigInt(Number.MAX_SAFE_INTEGER)) {
+      console.warn(`[store] agentId ${event.agentId} exceeds MAX_SAFE_INTEGER — skipping usage manifest pointer`);
+      return { changes: 0, lastInsertRowid: 0 };
+    }
+    return this._insertUsageManifestPointer.run(
+      chainId,
+      contractAddress.toLowerCase(),
+      event.txHash.toLowerCase(),
+      event.logIndex,
+      Number(event.agentId),
+      event.buyer.toLowerCase(),
+      event.channelId.toLowerCase(),
+      event.cid,
+      event.cidBytes,
+      event.usageRoot.toLowerCase(),
+      event.blockNumber,
+    );
   }
 
   private _applyServiceManifestTotals(
