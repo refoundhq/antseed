@@ -13,12 +13,13 @@ interface ActionModalProps {
 export function ActionModal({ isOpen, onClose, title, subtitle, variant = 'default', children }: ActionModalProps) {
   return (
     <Modal
-      bodyClassName="payment-action-dialog__body"
-      className={`payment-action-dialog payment-action-dialog--${variant}`}
+      bodyClassName="action-modal-body"
+      className={`action-modal-card action-modal-card--${variant}`}
       closeLabel="Close"
       eyebrow={variant === 'deposit' ? 'Deposit wizard' : undefined}
       isOpen={isOpen}
       onClose={onClose}
+      overlayClassName="action-modal-overlay"
       size={variant === 'deposit' ? 'lg' : 'md'}
       subtitle={subtitle}
       title={title}

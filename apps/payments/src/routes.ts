@@ -154,9 +154,43 @@ export function registerRoutes(fastify: FastifyInstance, ctx: RouteContext): voi
     };
   });
 
-  fastify.get('/api/transactions', async () => {
-    // TODO: Read deposit/withdrawal events from on-chain logs
-    return { transactions: [] };
+  fastify.get('/api/rpc-health', async (_request, reply) => {
+    const startedAt = Date.now();
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+    try {
+      const res = await fetch(ctx.cryptoConfig.rpcUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'eth_blockNumber',
+          params: [],
+        }),
+        signal: controller.signal,
+      });
+      const body = await res.json().catch(() => null) as {
+        result?: string;
+        error?: { message?: string };
+      } | null;
+      if (!res.ok || !body?.result || body.error) {
+        const error = body?.error?.message ?? `RPC returned HTTP ${res.status}`;
+        return reply.status(502).send({ ok: false, error });
+      }
+      return {
+        ok: true,
+        blockNumber: Number.parseInt(body.result, 16),
+        latencyMs: Date.now() - startedAt,
+      };
+    } catch (err) {
+      const error = err instanceof Error && err.name === 'AbortError'
+        ? 'RPC request timed out'
+        : err instanceof Error ? err.message : String(err);
+      return reply.status(502).send({ ok: false, error });
+    } finally {
+      clearTimeout(timeout);
+    }
   });
 
   // Withdrawals are now submitted directly from the connected wallet

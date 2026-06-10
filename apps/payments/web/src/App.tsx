@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import type { BalanceData, PaymentConfig } from './types';
 import { getBalance, getConfig } from './api';
 import { Sidebar, type TabId } from './layout/Sidebar';
@@ -13,19 +13,23 @@ import { DashboardView } from './views/DashboardView';
 import { EmissionsView } from './views/EmissionsView';
 import { DiemRewardsView } from './views/DiemRewardsView';
 import { ChannelsView } from './components/ChannelsView';
+import { SettingsView } from './views/SettingsView';
 import { AuthorizedWalletProvider } from './context/AuthorizedWalletContext';
+import { useAuthorizedWallet } from './context/AuthorizedWalletContext';
 import { AuthorizeWalletAlert } from './layout/AuthorizeWalletAlert';
 
 export type OverlayPhase = 'deposit' | 'success' | null;
 
-const VALID_TABS = new Set<TabId>(['dashboard', 'channels', 'emissions', 'diem-rewards']);
+const VALID_TABS = new Set<TabId>(['overview', 'rewards', 'diem-rewards', 'activity', 'settings']);
 
 function parseTabFromUrl(): TabId {
   const raw = new URLSearchParams(window.location.search).get('tab');
-  if (!raw) return 'dashboard';
+  if (!raw) return 'overview';
   // Legacy compat: the old deposits tab no longer exists; fall through to dashboard.
-  if (raw === 'deposit' || raw === 'deposits') return 'dashboard';
-  return VALID_TABS.has(raw as TabId) ? (raw as TabId) : 'dashboard';
+  if (raw === 'deposit' || raw === 'deposits' || raw === 'dashboard') return 'overview';
+  if (raw === 'channels') return 'activity';
+  if (raw === 'emissions') return 'rewards';
+  return VALID_TABS.has(raw as TabId) ? (raw as TabId) : 'overview';
 }
 
 function shouldOpenDepositFromUrl(): boolean {
@@ -51,6 +55,8 @@ function clearDepositActionFromUrl() {
 export function App() {
   const [balance, setBalance] = useState<BalanceData | null>(null);
   const [balanceLoaded, setBalanceLoaded] = useState(false);
+  const [balanceError, setBalanceError] = useState(false);
+  const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [config, setConfig] = useState<PaymentConfig | null>(null);
   const [activeTab, setActiveTab] = useState<TabId>(() => parseTabFromUrl());
   const [walletDrawerOpen, setWalletDrawerOpen] = useState(false);
@@ -77,9 +83,14 @@ export function App() {
     try {
       const data = await getBalance();
       setBalance(data);
+      setBalanceError(false);
       setBalanceLoaded(true);
     } catch {
-      // Balance not available yet — keep loading state until a fetch succeeds.
+      // Don't spin forever on a failed fetch — surface it and keep retrying so a
+      // transient network blip self-heals without the user reloading the page.
+      setBalanceError(true);
+      if (retryTimer.current) clearTimeout(retryTimer.current);
+      retryTimer.current = setTimeout(() => { void fetchBalance(); }, 5000);
     }
   }, []);
 
@@ -91,6 +102,9 @@ export function App() {
   useEffect(() => {
     void fetchBalance();
     void getConfig().then(setConfig).catch(() => {});
+    return () => {
+      if (retryTimer.current) clearTimeout(retryTimer.current);
+    };
   }, [fetchBalance]);
 
   const handleSelectTab = useCallback((tab: TabId) => {
@@ -112,6 +126,8 @@ export function App() {
       <AppShell
         balance={balance}
         balanceLoaded={balanceLoaded}
+        balanceError={balanceError}
+        onRetryBalance={fetchBalance}
         config={config}
         activeTab={activeTab}
         onSelectTab={handleSelectTab}
@@ -151,6 +167,8 @@ export function App() {
 interface AppShellProps {
   balance: BalanceData | null;
   balanceLoaded: boolean;
+  balanceError: boolean;
+  onRetryBalance: () => void;
   config: PaymentConfig | null;
   activeTab: TabId;
   onSelectTab: (tab: TabId) => void;
@@ -170,6 +188,8 @@ interface AppShellProps {
 function AppShell({
   balance,
   balanceLoaded,
+  balanceError,
+  onRetryBalance,
   config,
   activeTab,
   onSelectTab,
@@ -187,6 +207,7 @@ function AppShell({
 }: AppShellProps) {
   const [justDeposited, setJustDeposited] = useState(false);
   const [depositPromptDismissed, setDepositPromptDismissed] = useState(false);
+  const authorizedWallet = useAuthorizedWallet();
 
   const isLoading = !balanceLoaded;
   const isEmptyBuyer =
@@ -216,35 +237,49 @@ function AppShell({
         <Sidebar
           activeTab={activeTab}
           onSelect={onSelectTab}
-          isDark={isDark}
-          onToggleTheme={onToggleTheme}
         />
         <div className="dash-main">
           <TopBar
             activeTab={activeTab}
             balance={balance}
+            buyerEvmAddress={buyerEvmAddress}
+            atRisk={authorizedWallet.operatorSet === false && Number(balance?.total ?? 0) > 0}
+            isDark={isDark}
+            onToggleTheme={onToggleTheme}
             onOpenWallet={onOpenWalletDrawer}
-            onOpenDeposit={onOpenDeposit}
           />
           <AuthorizeWalletAlert />
           <main className="dash-content">
-            {activeTab === 'dashboard' && <DashboardView config={config} />}
-            {activeTab === 'channels'  && <ChannelsView  config={config} />}
-            {activeTab === 'emissions' && <EmissionsView config={config} />}
+            {activeTab === 'overview' && (
+              <DashboardView
+                config={config}
+                balance={balance}
+                onOpenDeposit={onOpenDeposit}
+                onOpenWithdraw={onOpenWithdraw}
+                onOpenActivity={() => onSelectTab('activity')}
+              />
+            )}
+            {activeTab === 'rewards' && <EmissionsView config={config} />}
             {activeTab === 'diem-rewards' && <DiemRewardsView config={config} />}
+            {activeTab === 'activity' && <ChannelsView config={config} />}
+            {activeTab === 'settings' && (
+              <SettingsView
+                config={config}
+              />
+            )}
           </main>
         </div>
-        <WalletDrawer
-          isOpen={walletDrawerOpen}
-          onClose={onCloseWalletDrawer}
-          balance={balance}
-          config={config}
-          buyerEvmAddress={buyerEvmAddress}
-          onOpenDeposit={onOpenDeposit}
-          onOpenWithdraw={onOpenWithdraw}
-        />
       </div>
-      <LoaderOverlay isVisible={isLoading} />
+      <WalletDrawer
+        isOpen={walletDrawerOpen}
+        onClose={onCloseWalletDrawer}
+        balance={balance}
+        config={config}
+        buyerEvmAddress={buyerEvmAddress}
+        onOpenDeposit={onOpenDeposit}
+        onOpenWithdraw={onOpenWithdraw}
+      />
+      <LoaderOverlay isVisible={isLoading} error={balanceError} onRetry={onRetryBalance} />
       <EmptyStateOverlay
         phase={overlayPhase}
         config={config}
