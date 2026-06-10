@@ -1,6 +1,7 @@
 import {
   Contract,
   FallbackProvider,
+  FetchRequest,
   JsonRpcProvider,
   Network,
   type AbstractProvider,
@@ -11,16 +12,23 @@ import {
 } from 'ethers';
 
 const FALLBACK_STALL_TIMEOUT_MS = 750;
+const JSON_RPC_REQUEST_TIMEOUT_MS = 2_500;
+
+function createJsonRpcProvider(url: string, network?: Network, opts?: object): JsonRpcProvider {
+  const request = new FetchRequest(url);
+  request.timeout = JSON_RPC_REQUEST_TIMEOUT_MS;
+  return new JsonRpcProvider(request, network, opts);
+}
 
 function buildProvider(rpcUrl: string, fallbackRpcUrls?: string[], evmChainId?: number): AbstractProvider {
   const network = evmChainId ? Network.from(evmChainId) : undefined;
   const opts = { batchMaxCount: 1, staticNetwork: network ? true : undefined };
   if (!fallbackRpcUrls || fallbackRpcUrls.length === 0) {
-    return new JsonRpcProvider(rpcUrl, network, opts);
+    return createJsonRpcProvider(rpcUrl, network, opts);
   }
   const urls = [rpcUrl, ...fallbackRpcUrls];
   const configs = urls.map((url, i) => ({
-    provider: new JsonRpcProvider(url, network, opts),
+    provider: createJsonRpcProvider(url, network, opts),
     priority: i + 1,
     stallTimeout: FALLBACK_STALL_TIMEOUT_MS,
     weight: 1,
