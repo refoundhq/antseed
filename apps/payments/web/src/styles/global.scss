@@ -51,19 +51,19 @@
 
 /* ── Dark theme ── */
 [data-theme="dark"] {
-  --page-bg: #111113;
-  --box-bg: #1a1a1d;
+  --page-bg: #1c1c1e;
+  --box-bg: #252527;
   --box-border: rgba(255,255,255,0.06);
   --box-shadow: 0 1px 3px rgba(0,0,0,0.2), 0 8px 40px rgba(0,0,0,0.3);
-  --card-bg: #222225;
+  --card-bg: #2a2a2c;
   --card-border: rgba(255,255,255,0.06);
-  --card-hover: #2a2a2e;
-  --input-bg: #161618;
+  --card-hover: #363638;
+  --input-bg: #2a2a2c;
   --input-border: rgba(255,255,255,0.1);
-  --text-primary: #eeeeee;
-  --text-secondary: #999999;
-  --text-muted: #666666;
-  --text-faint: #444444;
+  --text-primary: #e6edf3;
+  --text-secondary: #8b949e;
+  --text-muted: #8b949e;
+  --text-faint: #5f656b;
   --accent: #1fd87a;
   --accent-contrast: #06351d;
   --accent-text: #1fd87a;
@@ -1749,25 +1749,25 @@ $dash-sidebar-width: 240px;
 }
 
 [data-theme="dark"] {
-  --cream-nav: #1a1916;
-  --cream: #1e1d19;
-  --cream-field: #161513;
+  --cream-nav: #222224;
+  --cream: #1c1c1e;
+  --cream-field: #252527;
   --bg: var(--cream);
   --page-bg: var(--cream);
   --rail-bg: var(--cream-nav);
   --panel-bg: var(--cream-field);
   --box-bg: var(--cream);
-  --card-bg: var(--cream-field);
-  --card-hover: rgba(255, 255, 255, 0.04);
+  --card-bg: #2a2a2c;
+  --card-hover: #363638;
   --card-border: rgba(255, 255, 255, 0.07);
   --line: rgba(255, 255, 255, 0.07);
   --divider: var(--line);
-  --input-bg: var(--cream-field);
+  --input-bg: #2a2a2c;
   --input-border: rgba(255, 255, 255, 0.12);
-  --text-primary: #eeecea;
-  --text-secondary: #a09c93;
-  --text-muted: #6a665c;
-  --text-faint: #4a463c;
+  --text-primary: #e6edf3;
+  --text-secondary: #8b949e;
+  --text-muted: #8b949e;
+  --text-faint: #5f656b;
   --ink: var(--text-primary);
   --sub: var(--text-secondary);
   --muted: var(--text-muted);
