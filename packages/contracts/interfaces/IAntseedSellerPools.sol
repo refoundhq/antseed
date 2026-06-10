@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
+import { IAntseedRegistry } from "./IAntseedRegistry.sol";
+
 interface IAntseedSellerPools {
     event RegistrySet(address indexed registry);
     event SellerRewardsPoolSet(address indexed sellerRewardsPool);
@@ -97,6 +99,7 @@ interface IAntseedSellerPools {
         uint256 maxSlashBps,
         uint256 minEarlyExitSlashBps
     ) external;
+    function registry() external view returns (IAntseedRegistry);
     function currentEpoch() external view returns (uint256);
     function agentIdForSeller(address seller) external view returns (uint256);
 

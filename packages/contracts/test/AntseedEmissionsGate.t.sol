@@ -795,6 +795,42 @@ contract AntseedEmissionsGateTest is Test {
         assertEq(washBurned, washGross - washClaimable);
     }
 
+    function test_sellerUsageRewardBurnCapRoutesOverflowToReserve() public {
+        bytes32 programId = keccak256("recognized-seller-usage-v1");
+        _deployGate(4);
+
+        sellerPools = new AntseedSellerPools(address(realRegistry));
+        usageAccounting.setSellerPools(address(sellerPools));
+        sellerUsageRewards =
+            new AntseedSellerUsageRewards(address(programs), address(sellerPools), address(usageAccounting), programId);
+        sellerPools.setRewardStaker(address(sellerUsageRewards), true);
+        sellerPools.setApyCap(10_000, 52);
+        programs.setRewardProgram(programId, address(sellerUsageRewards), address(0), 7_000, 4, 0, true);
+
+        deal(address(token), otherSeller, 100 ether);
+        uint256 positionId = _stakeAgentPool(sellerPools, otherSeller, 100 ether, 52);
+
+        _warpGateEpoch(5);
+        usageAccounting.accruePoints(keccak256("wash"), buyer, otherSeller, 1_000_000_000);
+
+        _warpGateEpoch(6);
+        (uint256 grossReward, uint256 claimableReward, uint256 burnedReward) =
+            sellerUsageRewards.pendingStakerReward(positionId, 5);
+        uint256 burnCap = sellerUsageRewards.burnCapForEpoch(5);
+        uint256 overCapReward = grossReward - claimableReward;
+
+        assertGt(overCapReward, burnCap);
+        assertEq(burnedReward, burnCap);
+
+        vm.prank(otherSeller);
+        sellerUsageRewards.claimStakerRewards(positionId, _epochList(5), otherSeller);
+
+        assertEq(token.balanceOf(otherSeller), claimableReward);
+        assertEq(token.balanceOf(sellerUsageRewards.DEAD_ADDRESS()), burnCap);
+        assertEq(token.balanceOf(reserveDest), overCapReward - burnCap);
+        assertEq(sellerUsageRewards.epochBurnedAmount(5), burnCap);
+    }
+
     function test_stressWashTradingCannotDominateSellerOrBuyerPrograms() public {
         bytes32 sellerPoolProgramId = keccak256("recognized-seller-usage-v1");
         bytes32 buyerProgramId = keccak256("recognized-buyer-usage-v1");
@@ -867,19 +903,25 @@ contract AntseedEmissionsGateTest is Test {
         }
 
         _warpGateEpoch(6);
-        uint256 sellerProgramBudget = programs.programEpochBudget(sellerPoolProgramId, 5);
-        uint256 buyerProgramBudget = programs.programEpochBudget(buyerProgramId, 5);
-
-        (uint256 honestGross, uint256 honestClaimable, uint256 honestBurned) =
-            sellerUsageRewards.pendingStakerReward(run.firstPositionId, 5);
-        (uint256 washGross, uint256 washClaimable, uint256 washBurned) =
-            sellerUsageRewards.pendingStakerReward(run.washPositionId, 5);
-        assertEq(honestGross, (sellerProgramBudget * run.firstWeightedPoints) / run.expectedTotalWeightedPoints);
-        assertEq(washGross, (sellerProgramBudget * run.washWeightedPoints) / run.expectedTotalWeightedPoints);
-        assertEq(washBurned, washGross - washClaimable);
-        assertEq(honestBurned, honestGross - honestClaimable);
+        {
+            uint256 sellerProgramBudget = programs.programEpochBudget(sellerPoolProgramId, 5);
+            (uint256 honestGross, uint256 honestClaimable, uint256 honestBurned) =
+                sellerUsageRewards.pendingStakerReward(run.firstPositionId, 5);
+            (uint256 washGross, uint256 washClaimable, uint256 washBurned) =
+                sellerUsageRewards.pendingStakerReward(run.washPositionId, 5);
+            run.firstClaimable = honestClaimable;
+            run.washClaimable = washClaimable;
+            assertEq(honestGross, (sellerProgramBudget * run.firstWeightedPoints) / run.expectedTotalWeightedPoints);
+            assertEq(washGross, (sellerProgramBudget * run.washWeightedPoints) / run.expectedTotalWeightedPoints);
+            uint256 burnCap = sellerUsageRewards.burnCapForEpoch(5);
+            uint256 washExcess = washGross - washClaimable;
+            uint256 honestExcess = honestGross - honestClaimable;
+            assertEq(washBurned, washExcess < burnCap ? washExcess : burnCap);
+            assertEq(honestBurned, honestExcess < burnCap ? honestExcess : burnCap);
+        }
 
         {
+            uint256 buyerProgramBudget = programs.programEpochBudget(buyerProgramId, 5);
             uint256 expectedWashBuyerReward =
                 (buyerProgramBudget * run.washWeightedPoints) / run.expectedTotalWeightedPoints;
             uint256 washBuyerCap =
@@ -891,8 +933,7 @@ contract AntseedEmissionsGateTest is Test {
         }
 
         assertGt(run.washWeightedPoints, run.firstWeightedPoints);
-        assertLt(washClaimable, honestClaimable);
-        assertLt(washClaimable, washGross);
+        assertLt(run.washClaimable, run.firstClaimable);
     }
 
     function test_stressThousandAgentsAndBuyersClaimFromSavedTotals() public {
@@ -970,8 +1011,11 @@ contract AntseedEmissionsGateTest is Test {
             run.washClaimable = washClaimable;
             assertEq(firstGross, expectedFirstGross);
             assertEq(washGross, expectedWashGross);
-            assertEq(firstBurned, firstGross - firstClaimable);
-            assertEq(washBurned, washGross - washClaimable);
+            uint256 burnCap = sellerUsageRewards.burnCapForEpoch(5);
+            uint256 firstExcess = firstGross - firstClaimable;
+            uint256 washExcess = washGross - washClaimable;
+            assertEq(firstBurned, firstExcess < burnCap ? firstExcess : burnCap);
+            assertEq(washBurned, washExcess < burnCap ? washExcess : burnCap);
             assertLt(washClaimable, washGross);
         }
 
@@ -981,6 +1025,9 @@ contract AntseedEmissionsGateTest is Test {
         sellerUsageRewards.claimStakerRewards(run.washPositionId, _epochList(5), washSeller);
         assertEq(token.balanceOf(firstSeller), run.firstClaimable);
         assertEq(token.balanceOf(washSeller), run.washClaimable);
+        assertLe(token.balanceOf(sellerUsageRewards.DEAD_ADDRESS()), sellerUsageRewards.burnCapForEpoch(5));
+        assertEq(token.balanceOf(sellerUsageRewards.DEAD_ADDRESS()), sellerUsageRewards.epochBurnedAmount(5));
+        assertGt(token.balanceOf(reserveDest), 0);
 
         {
             uint256 buyerProgramBudget = programs.programEpochBudget(buyerProgramId, 5);
