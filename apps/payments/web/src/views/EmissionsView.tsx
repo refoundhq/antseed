@@ -147,6 +147,13 @@ function getPendingRowReward(row: EmissionsPendingResponse['rows'][number]): str
   return (seller + buyer).toString();
 }
 
+function getHistoryRowReward(
+  row: EmissionsPendingResponse['rows'][number],
+  fallback: SharesType | null | undefined,
+): string {
+  return (safeBigint(getPendingRowReward(row)) + getClaimedRowReward(row, fallback)).toString();
+}
+
 function rowHasClaimableSellerReward(row: EmissionsPendingResponse['rows'][number]): boolean {
   return !row.isCurrent && !row.seller.claimed && safeBigint(row.seller.amount) > 0n;
 }
@@ -468,7 +475,7 @@ export function EmissionsView({ config }: EmissionsViewProps) {
       <section className="portal-content-section" aria-labelledby="emissions-history-title">
         <div className="portal-content-head">
           <h2 className="portal-content-title" id="emissions-history-title">Emission history</h2>
-          <p>Closed-epoch pending amounts returned by the Emissions contract.</p>
+          <p>Closed-epoch reward amounts.</p>
         </div>
 
         <div className="rewards-history">
@@ -479,7 +486,7 @@ export function EmissionsView({ config }: EmissionsViewProps) {
             pastRows.slice().reverse().map((row) => (
               <div className="rewards-history-row" key={row.epoch}>
                 <span>Epoch {row.epoch}</span>
-                <strong>{formatAnts(getPendingRowReward(row))} $ANTS</strong>
+                <strong>{formatAnts(getHistoryRowReward(row, shares))} $ANTS</strong>
                 <em>{getEpochStatus(row)}</em>
               </div>
             ))
