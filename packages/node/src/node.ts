@@ -72,6 +72,7 @@ import { BuyerPaymentNegotiator } from "./payments/buyer-payment-negotiator.js";
 import { SellerAddressResolver } from "./discovery/seller-address-resolver.js";
 import { Contract as EthersContract } from "ethers";
 import { SellerPaymentManager, type SellerPaymentConfig } from "./payments/seller-payment-manager.js";
+import { SellerUsageWriter } from "./payments/seller-usage-writer.js";
 import { IdentityClient } from "./payments/evm/identity-client.js";
 import { SellerRequestHandler } from "./seller-request-handler.js";
 import {
@@ -243,6 +244,7 @@ export class AntseedNode extends EventEmitter {
   private _sellerPaymentManager: SellerPaymentManager | null = null;
   /** Seller-side cumulative usage manifests for buyer-verified stats pointers. */
   private _usageManifestStore: UsageManifestStore | null = null;
+  private _sellerUsageWriter: SellerUsageWriter | null = null;
   /** Shared channel store for payment persistence. */
   private _channelStore: ChannelStore | null = null;
   /** Periodic timeout checker interval. */
@@ -1196,7 +1198,7 @@ export class AntseedNode extends EventEmitter {
       sessionTracker: this._sessionTracker,
       channelsClient: this._channelsClient,
       announcer: this._announcer,
-      usageManifestStore: this._usageManifestStore,
+      usageWriter: this._sellerUsageWriter,
       maxUploadBodyBytes: this._config.maxUploadBodyBytes,
       emit: (event, ...args) => this.emit(event, ...args),
     });
@@ -1423,6 +1425,7 @@ export class AntseedNode extends EventEmitter {
     const paymentsDir = join(dataDir, "payments");
     if (this._config.role === 'seller' && !this._usageManifestStore) {
       this._usageManifestStore = new UsageManifestStore(join(paymentsDir, "usage-manifests"));
+      this._sellerUsageWriter = new SellerUsageWriter(this._usageManifestStore);
       debugLog("[Node] UsageManifestStore initialized");
     }
     if (!this._channelStore) {

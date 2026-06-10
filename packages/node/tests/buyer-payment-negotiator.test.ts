@@ -46,7 +46,7 @@ function createMockBpm(): BuyerPaymentManager & Record<string, unknown> {
       topUpNeeded: false,
     }),
     handleAuthAck: vi.fn(),
-    handleNeedAuth: vi.fn().mockResolvedValue({ signed: true, signedUsagePointer: false }),
+    handleNeedAuth: vi.fn().mockResolvedValue({ signed: true, signedVerifiedMetadata: false }),
     authorizeSpending: vi.fn().mockResolvedValue(undefined),
     topUpReserve: vi.fn().mockResolvedValue(undefined),
     cleanupSession: vi.fn(),
@@ -655,100 +655,128 @@ describe('BuyerPaymentNegotiator', () => {
 
   describe('cost tracking', () => {
     it('verifies usage pointers before allowing v2 NeedAuth signing', async () => {
-      const request: SerializedHttpRequest = {
-        requestId: 'req-pointer-ok',
-        method: 'POST',
-        path: '/v1/chat/completions',
-        headers: { 'content-type': 'application/json' },
-        body: enc.encode(JSON.stringify({ model: 'gpt-5.5', messages: [{ role: 'user', content: 'hello' }] })),
-      };
-      const response: SerializedHttpResponse = {
-        requestId: request.requestId,
-        statusCode: 200,
-        headers: { 'content-type': 'application/json' },
-        body: enc.encode(JSON.stringify({ usage: { prompt_tokens: 100, completion_tokens: 50 } })),
-      };
-      const costUsdc = 1050n;
-      const record = buildUsageManifestRecord({
-        requestId: request.requestId,
-        service: 'gpt-5.5',
-        costUsdc,
-        cumulativeCostUsdc: costUsdc,
-        inputTokens: 100,
-        cachedInputTokens: 0,
-        freshInputTokens: 100,
-        outputTokens: 50,
-        inputBody: request.body,
-        outputBody: response.body,
-      });
-      const pointer = computeUsageManifestPointer(buildUsageManifest('0x' + 'cc'.repeat(32), [record]));
-      (bpm.handleNeedAuth as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ signed: true, signedUsagePointer: true });
+      const tempDir = mkdtempSync(join(tmpdir(), 'buyer-usage-manifest-test-'));
+      try {
+        negotiator = new BuyerPaymentNegotiator(
+          identity,
+          bpm as unknown as BuyerPaymentManager,
+          depositsClient,
+          channelsClient,
+          channelStore,
+          { usageManifestStore: new UsageManifestStore(tempDir) },
+          emitter,
+        );
+        const request: SerializedHttpRequest = {
+          requestId: 'req-pointer-ok',
+          method: 'POST',
+          path: '/v1/chat/completions',
+          headers: { 'content-type': 'application/json' },
+          body: enc.encode(JSON.stringify({ model: 'gpt-5.5', messages: [{ role: 'user', content: 'hello' }] })),
+        };
+        const response: SerializedHttpResponse = {
+          requestId: request.requestId,
+          statusCode: 200,
+          headers: { 'content-type': 'application/json' },
+          body: enc.encode(JSON.stringify({ usage: { prompt_tokens: 100, completion_tokens: 50 } })),
+        };
+        const costUsdc = 1050n;
+        const record = buildUsageManifestRecord({
+          requestId: request.requestId,
+          service: 'gpt-5.5',
+          costUsdc,
+          cumulativeCostUsdc: costUsdc,
+          inputTokens: 100,
+          cachedInputTokens: 0,
+          freshInputTokens: 100,
+          outputTokens: 50,
+          inputBody: request.body,
+          outputBody: response.body,
+        });
+        const pointer = computeUsageManifestPointer(buildUsageManifest('0x' + 'cc'.repeat(32), [record]));
+        (bpm.handleNeedAuth as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ signed: true, signedVerifiedMetadata: true });
 
-      negotiator.estimateCostFromResponse(peer, response, 'gpt-5.5', request);
-      await negotiator.handleNeedAuth(peer.peerId, {
-        channelId: '0x' + 'cc'.repeat(32),
-        requiredCumulativeAmount: costUsdc.toString(),
-        currentAcceptedCumulative: '0',
-        deposit: '1000000',
-        requestId: request.requestId,
-        lastRequestCost: costUsdc.toString(),
-        inputTokens: '100',
-        cachedInputTokens: '0',
-        freshInputTokens: '100',
-        outputTokens: '50',
-        service: 'gpt-5.5',
-        usageCid: pointer.cid,
-        usageRoot: pointer.usageRoot,
-      }, {} as any);
+        negotiator.estimateCostFromResponse(peer, response, 'gpt-5.5', request);
+        await negotiator.handleNeedAuth(peer.peerId, {
+          channelId: '0x' + 'cc'.repeat(32),
+          requiredCumulativeAmount: costUsdc.toString(),
+          currentAcceptedCumulative: '0',
+          deposit: '1000000',
+          requestId: request.requestId,
+          lastRequestCost: costUsdc.toString(),
+          inputTokens: '100',
+          cachedInputTokens: '0',
+          freshInputTokens: '100',
+          outputTokens: '50',
+          service: 'gpt-5.5',
+          usageCid: pointer.cid,
+          usageRoot: pointer.usageRoot,
+        }, {} as any);
 
-      expect(bpm.handleNeedAuth).toHaveBeenCalledWith(
-        peer.peerId,
-        expect.objectContaining({ usageCid: pointer.cid, usageRoot: pointer.usageRoot }),
-        expect.anything(),
-        { usagePointerVerified: true },
-      );
-      expect((negotiator as unknown as { _usageObservations: Map<string, unknown> })._usageObservations.size).toBe(0);
+        expect(bpm.handleNeedAuth).toHaveBeenCalledWith(
+          peer.peerId,
+          expect.objectContaining({ usageCid: pointer.cid, usageRoot: pointer.usageRoot }),
+          expect.anything(),
+          { verifiedMetadata: expect.objectContaining({ requiredCumulativeAmount: costUsdc }) },
+        );
+        expect((negotiator as unknown as { _usageVerifier: { pendingObservationCount: number } })._usageVerifier.pendingObservationCount).toBe(0);
+      } finally {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
     });
 
     it('falls back to legacy NeedAuth signing when usage pointer verification fails', async () => {
-      const request: SerializedHttpRequest = {
-        requestId: 'req-pointer-bad',
-        method: 'POST',
-        path: '/v1/chat/completions',
-        headers: { 'content-type': 'application/json' },
-        body: enc.encode(JSON.stringify({ model: 'gpt-5.5', messages: [{ role: 'user', content: 'hello' }] })),
-      };
-      const response: SerializedHttpResponse = {
-        requestId: request.requestId,
-        statusCode: 200,
-        headers: { 'content-type': 'application/json' },
-        body: enc.encode(JSON.stringify({ usage: { prompt_tokens: 100, completion_tokens: 50 } })),
-      };
+      const tempDir = mkdtempSync(join(tmpdir(), 'buyer-usage-manifest-test-'));
+      try {
+        negotiator = new BuyerPaymentNegotiator(
+          identity,
+          bpm as unknown as BuyerPaymentManager,
+          depositsClient,
+          channelsClient,
+          channelStore,
+          { usageManifestStore: new UsageManifestStore(tempDir) },
+          emitter,
+        );
+        const request: SerializedHttpRequest = {
+          requestId: 'req-pointer-bad',
+          method: 'POST',
+          path: '/v1/chat/completions',
+          headers: { 'content-type': 'application/json' },
+          body: enc.encode(JSON.stringify({ model: 'gpt-5.5', messages: [{ role: 'user', content: 'hello' }] })),
+        };
+        const response: SerializedHttpResponse = {
+          requestId: request.requestId,
+          statusCode: 200,
+          headers: { 'content-type': 'application/json' },
+          body: enc.encode(JSON.stringify({ usage: { prompt_tokens: 100, completion_tokens: 50 } })),
+        };
 
-      negotiator.estimateCostFromResponse(peer, response, 'gpt-5.5', request);
-      await negotiator.handleNeedAuth(peer.peerId, {
-        channelId: '0x' + 'cc'.repeat(32),
-        requiredCumulativeAmount: '1050',
-        currentAcceptedCumulative: '0',
-        deposit: '1000000',
-        requestId: request.requestId,
-        lastRequestCost: '1050',
-        inputTokens: '100',
-        cachedInputTokens: '0',
-        freshInputTokens: '100',
-        outputTokens: '50',
-        service: 'gpt-5.5',
-        usageCid: 'bafkreiinvalid',
-        usageRoot: '0x' + '11'.repeat(32),
-      }, {} as any);
+        negotiator.estimateCostFromResponse(peer, response, 'gpt-5.5', request);
+        await negotiator.handleNeedAuth(peer.peerId, {
+          channelId: '0x' + 'cc'.repeat(32),
+          requiredCumulativeAmount: '1050',
+          currentAcceptedCumulative: '0',
+          deposit: '1000000',
+          requestId: request.requestId,
+          lastRequestCost: '1050',
+          inputTokens: '100',
+          cachedInputTokens: '0',
+          freshInputTokens: '100',
+          outputTokens: '50',
+          service: 'gpt-5.5',
+          usageCid: 'bafkreiinvalid',
+          usageRoot: '0x' + '11'.repeat(32),
+        }, {} as any);
 
-      expect(bpm.handleNeedAuth).toHaveBeenCalledWith(
-        peer.peerId,
-        expect.objectContaining({ usageCid: 'bafkreiinvalid' }),
-        expect.anything(),
-        { usagePointerVerified: false },
-      );
-      expect((negotiator as unknown as { _usageObservations: Map<string, unknown> })._usageObservations.size).toBe(0);
+        expect(bpm.handleNeedAuth).toHaveBeenCalledWith(
+          peer.peerId,
+          expect.objectContaining({ usageCid: 'bafkreiinvalid' }),
+          expect.anything(),
+          {},
+        );
+        expect((negotiator as unknown as { _usageVerifier: { pendingObservationCount: number } })._usageVerifier.pendingObservationCount).toBe(0);
+      } finally {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
     });
 
     it('persists verified usage records so a restarted buyer can verify the next cumulative pointer', async () => {
@@ -791,7 +819,7 @@ describe('BuyerPaymentNegotiator', () => {
           outputBody: response1.body,
         });
         const pointer1 = computeUsageManifestPointer(buildUsageManifest(channelId, [record1]));
-        (bpm.handleNeedAuth as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ signed: true, signedUsagePointer: true });
+        (bpm.handleNeedAuth as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ signed: true, signedVerifiedMetadata: true });
 
         negotiator.estimateCostFromResponse(peer, response1, 'gpt-5.5', request1);
         await negotiator.handleNeedAuth(peer.peerId, {
@@ -811,7 +839,7 @@ describe('BuyerPaymentNegotiator', () => {
         }, {} as any);
 
         const restartedBpm = createMockBpm();
-        restartedBpm.handleNeedAuth = vi.fn().mockResolvedValue({ signed: true, signedUsagePointer: true }) as any;
+        restartedBpm.handleNeedAuth = vi.fn().mockResolvedValue({ signed: true, signedVerifiedMetadata: true }) as any;
         const restarted = new BuyerPaymentNegotiator(
           identity,
           restartedBpm as unknown as BuyerPaymentManager,
@@ -870,7 +898,7 @@ describe('BuyerPaymentNegotiator', () => {
           peer.peerId,
           expect.objectContaining({ usageCid: pointer2.cid, usageRoot: pointer2.usageRoot }),
           expect.anything(),
-          { usagePointerVerified: true },
+          { verifiedMetadata: expect.objectContaining({ requiredCumulativeAmount: 2700n }) },
         );
         expect(new UsageManifestStore(tempDir).getRecords(channelId)).toHaveLength(2);
       } finally {

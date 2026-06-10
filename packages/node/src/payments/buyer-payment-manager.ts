@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { type AbstractSigner, keccak256 } from 'ethers';
+import { type AbstractSigner } from 'ethers';
 import type { Identity } from '../p2p/identity.js';
 import type { PaymentMux } from '../p2p/payment-mux.js';
 import type {
@@ -14,7 +14,6 @@ import {
   makeChannelsDomain,
   computeMetadataHash,
   encodeMetadata,
-  encodePointerMetadata,
   ZERO_METADATA,
   ZERO_METADATA_HASH,
   computeChannelId,
@@ -64,12 +63,16 @@ export interface PerRequestAuthResult {
 }
 
 export interface NeedAuthHandlingOptions {
-  usagePointerVerified?: boolean;
+  verifiedMetadata?: {
+    encodedMetadata: string;
+    metadataHash: string;
+    requiredCumulativeAmount: bigint;
+  };
 }
 
 export interface NeedAuthHandlingResult {
   signed: boolean;
-  signedUsagePointer: boolean;
+  signedVerifiedMetadata: boolean;
 }
 
 /**
@@ -838,7 +841,7 @@ export class BuyerPaymentManager {
     const session = this.getActiveSession(sellerPeerId);
     if (!session) {
       debugWarn(`[BuyerPayment] NeedAuth for unknown seller: ${sellerPeerId.slice(0, 12)}...`);
-      return { signed: false, signedUsagePointer: false };
+      return { signed: false, signedVerifiedMetadata: false };
     }
 
     const buyerService = payload.requestId ? this._requestService.get(payload.requestId) : undefined;
@@ -851,7 +854,7 @@ export class BuyerPaymentManager {
       debugLog(
         `[BuyerPayment] NeedAuth stale: required=${requiredCumulativeAmount} <= current=${currentCumulative} — ignoring`,
       );
-      return { signed: false, signedUsagePointer: false };
+      return { signed: false, signedVerifiedMetadata: false };
     }
     if (payload.requestId) this._requestService.delete(payload.requestId);
 
@@ -882,7 +885,7 @@ export class BuyerPaymentManager {
           debugWarn(
             `[BuyerPayment] NeedAuth: seller claimed cost ${sellerCost} exceeds ${this._costTolerance}x buyer estimate ${buyerEstimate} — rejecting`,
           );
-          return { signed: false, signedUsagePointer: false };
+          return { signed: false, signedVerifiedMetadata: false };
         }
         debugLog(
           `[BuyerPayment] NeedAuth: seller cost=${sellerCost} buyer estimate=${buyerEstimate} (in=${sellerIn} cached=${sellerCached} out=${sellerOut}) — validated`,
@@ -913,7 +916,7 @@ export class BuyerPaymentManager {
         debugWarn(
           `[BuyerPayment] NeedAuth: maxSignable=${maxSignable} <= currentCumulative=${currentCumulative} — overdraft limit reached`,
         );
-        return { signed: false, signedUsagePointer: false };
+        return { signed: false, signedVerifiedMetadata: false };
       }
     }
 
@@ -933,7 +936,7 @@ export class BuyerPaymentManager {
       debugWarn(
         `[BuyerPayment] NeedAuth: effectiveAmount=${effectiveAmount} <= currentCumulative=${currentCumulative} — cannot advance`,
       );
-      return { signed: false, signedUsagePointer: false };
+      return { signed: false, signedVerifiedMetadata: false };
     }
 
     debugLog(`[BuyerPayment] NeedAuth: channel=${session.sessionId.slice(0, 18)}... required=${requiredCumulativeAmount} effective=${effectiveAmount}`);
@@ -948,11 +951,11 @@ export class BuyerPaymentManager {
       cumulativeRequestCount: prevMeta.cumulativeRequestCount + 1n,
     };
     this._metadata.set(sellerPeerId, newMeta);
-    const canSignUsagePointer = Boolean(payload.usageCid && payload.usageRoot)
-      && options.usagePointerVerified === true
-      && effectiveAmount === requiredCumulativeAmount;
-    const encodedPointerMetadata = canSignUsagePointer
-      ? encodePointerMetadata(payload.usageCid!, payload.usageRoot!)
+    const verifiedMetadata = options.verifiedMetadata?.requiredCumulativeAmount === effectiveAmount
+      ? {
+          encodedMetadata: options.verifiedMetadata.encodedMetadata,
+          metadataHash: options.verifiedMetadata.metadataHash,
+        }
       : null;
 
     // Send via PaymentMux
@@ -963,14 +966,12 @@ export class BuyerPaymentManager {
         effectiveAmount,
         newMeta,
         paymentMux,
-        encodedPointerMetadata
-          ? { encodedMetadata: encodedPointerMetadata, metadataHash: keccak256(encodedPointerMetadata) }
-          : undefined,
+        verifiedMetadata ?? undefined,
       );
       debugLog(`[BuyerPayment] NeedAuth responded: new cumulativeAmount=${effectiveAmount}`);
     } catch {
       debugLog(`[BuyerPayment] NeedAuth: connection closed before SpendingAuth could be sent`);
-      return { signed: false, signedUsagePointer: false };
+      return { signed: false, signedVerifiedMetadata: false };
     }
 
     // Send topUp AFTER the SpendingAuth so the seller processes the higher
@@ -982,7 +983,7 @@ export class BuyerPaymentManager {
     if (needsTopUp || this._needsTopUp(sellerPeerId)) {
       await this._topUpAfterSpendAuthBestEffort(sellerPeerId, paymentMux, 'handleNeedAuth');
     }
-    return { signed: true, signedUsagePointer: canSignUsagePointer };
+    return { signed: true, signedVerifiedMetadata: verifiedMetadata !== null };
   }
 
   // ── Reserve top-up ─────────────────────────────────────────────

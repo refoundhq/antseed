@@ -11,6 +11,7 @@ import type { Identity } from '../src/p2p/identity.js';
 import { bytesToHex } from '../src/utils/hex.js';
 import { toPeerId } from '../src/types/peer.js';
 import { estimateCostFromBytes } from '../src/payments/pricing.js';
+import { encodePointerMetadata } from '../src/payments/evm/signatures.js';
 
 const enc = new TextEncoder();
 
@@ -499,6 +500,7 @@ describe('BuyerPaymentManager', () => {
     const channelId = await manager.authorizeSpending(sellerPeerId, mux, 10_000n, TEST_PRICING);
     mux.sentSpendingAuths.length = 0;
 
+    const encodedMetadata = encodePointerMetadata('bafkreihash', '0x' + '11'.repeat(32));
     const result = await manager.handleNeedAuth(sellerPeerId, {
       channelId,
       requiredCumulativeAmount: '50000',
@@ -506,9 +508,15 @@ describe('BuyerPaymentManager', () => {
       deposit: '1000000',
       usageCid: 'bafkreihash',
       usageRoot: '0x' + '11'.repeat(32),
-    }, mux, { usagePointerVerified: true });
+    }, mux, {
+      verifiedMetadata: {
+        encodedMetadata,
+        metadataHash: keccak256(encodedMetadata),
+        requiredCumulativeAmount: 50000n,
+      },
+    });
 
-    expect(result).toEqual({ signed: true, signedUsagePointer: true });
+    expect(result).toEqual({ signed: true, signedVerifiedMetadata: true });
     const sent = mux.sentSpendingAuths[0] as Record<string, string>;
     const coder = AbiCoder.defaultAbiCoder();
     const [version, cidBytes, usageRoot] = coder.decode(['uint256', 'bytes', 'bytes32'], sent.metadata);
@@ -523,6 +531,7 @@ describe('BuyerPaymentManager', () => {
     const channelId = await manager.authorizeSpending(sellerPeerId, mux, 10_000n, TEST_PRICING);
     mux.sentSpendingAuths.length = 0;
 
+    const encodedMetadata = encodePointerMetadata('bafkreihash', '0x' + '11'.repeat(32));
     const result = await manager.handleNeedAuth(sellerPeerId, {
       channelId,
       requiredCumulativeAmount: '50000',
@@ -530,9 +539,15 @@ describe('BuyerPaymentManager', () => {
       deposit: '1000000',
       usageCid: 'bafkreihash',
       usageRoot: '0x' + '11'.repeat(32),
-    }, mux, { usagePointerVerified: false });
+    }, mux, {
+      verifiedMetadata: {
+        encodedMetadata,
+        metadataHash: keccak256(encodedMetadata),
+        requiredCumulativeAmount: 50001n,
+      },
+    });
 
-    expect(result).toEqual({ signed: true, signedUsagePointer: false });
+    expect(result).toEqual({ signed: true, signedVerifiedMetadata: false });
     const sent = mux.sentSpendingAuths[0] as Record<string, string>;
     const [version] = AbiCoder.defaultAbiCoder().decode(['uint256', 'uint256', 'uint256', 'uint256'], sent.metadata);
     expect(version).toBe(1n);

@@ -17,11 +17,7 @@ import { parseResponseUsage } from './utils/response-usage.js';
 import { computeCostUsdc, estimateTokensFromBytes, type ServicePricing } from './payments/pricing.js';
 import { debugLog, debugWarn } from './utils/debug.js';
 import { PAYMENT_CODE_CHANNEL_EXHAUSTED } from './types/protocol.js';
-import {
-  buildUsageManifestRecord,
-  publishUsageManifestBestEffort,
-  type UsageManifestStore,
-} from './payments/usage-manifest.js';
+import type { SellerUsageWriter } from './payments/seller-usage-writer.js';
 
 export interface SellerRequestHandlerDeps {
   providers: Provider[];
@@ -29,7 +25,7 @@ export interface SellerRequestHandlerDeps {
   sessionTracker: SellerSessionTracker | null;
   channelsClient: ChannelsClient | null;
   announcer: PeerAnnouncer | null;
-  usageManifestStore?: UsageManifestStore | null;
+  usageWriter?: SellerUsageWriter | null;
   maxUploadBodyBytes?: number;
   emit: (event: string, ...args: unknown[]) => boolean;
 }
@@ -410,9 +406,8 @@ export class SellerRequestHandler {
             const accepted = spm.getAcceptedCumulative(session.sessionId);
             const requiredAmount = cumulativeSpend;
             const service = this._extractRequestedService(request) ?? undefined;
-            const usagePointer = this._writeUsageManifestBestEffort({
+            const usagePointer = this._writeUsageManifestBestEffort(buyerPeerId, {
               channelId: session.sessionId,
-              buyerPeerId,
               request,
               responseBody,
               service,
@@ -674,37 +669,17 @@ export class SellerRequestHandler {
     }
   }
 
-  private _writeUsageManifestBestEffort(input: {
-    channelId: string;
-    buyerPeerId: string;
-    request: SerializedHttpRequest;
-    responseBody: Uint8Array;
-    service?: string;
-    costUsdc: bigint;
-    cumulativeSpend: bigint;
-    usage: ReturnType<typeof parseResponseUsage>;
-  }): { cid: string; usageRoot: string } | null {
-    const store = this._deps.usageManifestStore;
-    if (!store) return null;
+  private _writeUsageManifestBestEffort(
+    buyerPeerId: string,
+    input: Parameters<SellerUsageWriter['write']>[0],
+  ): ReturnType<SellerUsageWriter['write']> {
+    const writer = this._deps.usageWriter;
+    if (!writer) return null;
     try {
-      const record = buildUsageManifestRecord({
-        requestId: input.request.requestId,
-        service: input.service,
-        costUsdc: input.costUsdc,
-        cumulativeCostUsdc: input.cumulativeSpend,
-        inputTokens: input.usage.inputTokens,
-        cachedInputTokens: input.usage.cachedInputTokens,
-        freshInputTokens: input.usage.freshInputTokens,
-        outputTokens: input.usage.outputTokens,
-        inputBody: input.request.body,
-        outputBody: input.responseBody,
-      });
-      const pointer = store.append(input.channelId, record);
-      publishUsageManifestBestEffort(pointer);
-      return { cid: pointer.cid, usageRoot: pointer.usageRoot };
+      return writer.write(input);
     } catch (err) {
       debugWarn(
-        `[SellerHandler] Usage manifest skipped for ${input.buyerPeerId.slice(0, 12)}...: ` +
+        `[SellerHandler] Usage manifest skipped for ${buyerPeerId.slice(0, 12)}...: ` +
         `${err instanceof Error ? err.message : err}`,
       );
       return null;

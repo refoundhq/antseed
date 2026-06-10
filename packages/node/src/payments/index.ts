@@ -81,10 +81,14 @@ export type {
 // Buyer payment negotiator (402 handling, SpendingAuth flow, cost tracking)
 export { BuyerPaymentNegotiator } from './buyer-payment-negotiator.js';
 export type { BuyerNegotiatorConfig, Handle402Result, NegotiationEmitter } from './buyer-payment-negotiator.js';
+export { BuyerUsageVerifier } from './buyer-usage-verifier.js';
+export type { UsageObservationInput, VerifiedUsagePointer } from './buyer-usage-verifier.js';
 
 // Seller payment manager
 export { SellerPaymentManager, DEFAULT_MIN_SETTLE_DELTA_STR } from './seller-payment-manager.js';
 export type { SellerPaymentConfig } from './seller-payment-manager.js';
+export { SellerUsageWriter } from './seller-usage-writer.js';
+export type { SellerUsagePointer, SellerUsageWriteInput } from './seller-usage-writer.js';
 
 // Pricing utilities
 export { computeCostUsdc, estimateCostFromBytes, estimateTokensFromBytes } from './pricing.js';

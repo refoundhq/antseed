@@ -76,6 +76,8 @@ export {
   UsageManifestStore,
   publishUsageManifestBestEffort,
 } from './payments/usage-manifest.js';
+export { BuyerUsageVerifier } from './payments/buyer-usage-verifier.js';
+export { SellerUsageWriter } from './payments/seller-usage-writer.js';
 export type {
   UsageManifest,
   UsageManifestPointer,
@@ -83,6 +85,8 @@ export type {
   UsageManifestRecordInput,
   UsageManifestServiceTotals,
 } from './payments/usage-manifest.js';
+export type { UsageObservationInput, VerifiedUsagePointer } from './payments/buyer-usage-verifier.js';
+export type { SellerUsagePointer, SellerUsageWriteInput } from './payments/seller-usage-writer.js';
 export { NatTraversal, type NatMapping, type NatTraversalResult } from './p2p/nat-traversal.js';
 export { BuyerPaymentManager } from './payments/buyer-payment-manager.js';
 export type { BuyerPaymentConfig } from './payments/buyer-payment-manager.js';

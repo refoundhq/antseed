@@ -16,13 +16,8 @@ import { SellerAuthorizationError } from '../discovery/seller-address-resolver.j
 import { parseResponseUsage } from '../utils/response-usage.js';
 import { computeCostUsdc, type ServicePricing } from './pricing.js';
 import { formatUsdc } from './usdc-utils.js';
-import {
-  buildUsageManifest,
-  buildUsageManifestRecord,
-  computeUsageManifestPointer,
-  type UsageManifestStore,
-  type UsageManifestRecord,
-} from './usage-manifest.js';
+import type { UsageManifestStore } from './usage-manifest.js';
+import { BuyerUsageVerifier } from './buyer-usage-verifier.js';
 
 export interface BuyerNegotiatorConfig {
   usageManifestStore?: UsageManifestStore | null;
@@ -49,18 +44,6 @@ interface LastResponseCost {
   outputContent: Uint8Array;
   latencyMs: number;
   service?: string;
-}
-
-interface UsageObservation {
-  requestId: string;
-  service?: string;
-  costUsdc: bigint;
-  inputTokens: number;
-  cachedInputTokens: number;
-  freshInputTokens: number;
-  outputTokens: number;
-  inputBody: Uint8Array;
-  outputBody: Uint8Array;
 }
 
 function parsePaymentRequiredBody(body: Uint8Array): Record<string, unknown> | null {
@@ -94,7 +77,7 @@ export class BuyerPaymentNegotiator {
   private readonly _channelStore: ChannelStore | null;
   private readonly _identity: Identity;
   private readonly _emit: NegotiationEmitter;
-  private readonly _usageManifestStore: UsageManifestStore | null;
+  private readonly _usageVerifier: BuyerUsageVerifier | null;
   private readonly _sellerAddressResolver?: SellerAddressResolver;
 
   /** Tracks which seller peers the buyer has already negotiated payment for. */
@@ -117,9 +100,6 @@ export class BuyerPaymentNegotiator {
   private readonly _muxes = new Map<PeerId, PaymentMux>();
   /** In-flight NeedAuth handlers keyed by seller peerId. */
   private readonly _pendingNeedAuth = new Map<string, Promise<void>>();
-  private readonly _usageObservations = new Map<string, UsageObservation>();
-  private readonly _usageObservationWaiters = new Map<string, Array<(value: UsageObservation | null) => void>>();
-  private readonly _verifiedUsageRecordsByChannel = new Map<string, UsageManifestRecord[]>();
 
   constructor(
     identity: Identity,
@@ -137,7 +117,7 @@ export class BuyerPaymentNegotiator {
     this._channelsClient = channelsClient;
     this._channelStore = channelStore;
     this._emit = emitter;
-    this._usageManifestStore = config.usageManifestStore ?? null;
+    this._usageVerifier = config.usageManifestStore ? new BuyerUsageVerifier(config.usageManifestStore) : null;
     this._sellerAddressResolver = sellerAddressResolver;
   }
 
@@ -512,7 +492,7 @@ export class BuyerPaymentNegotiator {
     this._bpm.recordAndPersistTokens(peer.peerId, usage.inputTokens, usage.outputTokens);
 
     if (request?.requestId) {
-      this._recordUsageObservation(peer.peerId, {
+      this._usageVerifier?.recordObservation(peer.peerId, {
         requestId: request.requestId,
         service,
         costUsdc,
@@ -636,7 +616,7 @@ export class BuyerPaymentNegotiator {
     this._lockedPeers.delete(peerId);
     this._firstRequestSent.delete(peerId);
     this._lastResponseCost.delete(peerId);
-    this._clearUsageStateForPeer(peerId);
+    this._usageVerifier?.clearPeer(peerId);
   }
 
   /** Wait for in-flight NeedAuth handlers to complete (settlement safety). */
@@ -660,19 +640,15 @@ export class BuyerPaymentNegotiator {
     this._pendingPaymentRequired.clear();
     this._bufferedPaymentRequired.clear();
     this._negotiationLocks.clear();
-    this._usageObservations.clear();
-    for (const waiters of this._usageObservationWaiters.values()) {
-      for (const resolve of waiters) resolve(null);
-    }
-    this._usageObservationWaiters.clear();
-    this._verifiedUsageRecordsByChannel.clear();
+    this._usageVerifier?.cleanup();
   }
 
   async handleNeedAuth(peerId: PeerId, payload: NeedAuthPayload, pmux: PaymentMux): Promise<void> {
-    let verifiedRecord: UsageManifestRecord | null = null;
+    const verifiedPointer = payload.usageCid || payload.usageRoot
+      ? await this._usageVerifier?.verifyPointer(peerId, payload) ?? null
+      : null;
     if (payload.usageCid || payload.usageRoot) {
-      verifiedRecord = await this._verifyUsagePointer(peerId, payload);
-      if (!verifiedRecord) {
+      if (!verifiedPointer) {
         debugWarn(
           `[BuyerNegotiator] Usage pointer verification failed for ${peerId.slice(0, 12)}...; signing legacy metadata only`,
         );
@@ -680,97 +656,19 @@ export class BuyerPaymentNegotiator {
     }
 
     const result = await this._bpm.handleNeedAuth(peerId, payload, pmux, {
-      usagePointerVerified: verifiedRecord !== null,
+      ...(verifiedPointer
+        ? {
+            verifiedMetadata: {
+              encodedMetadata: verifiedPointer.encodedMetadata,
+              metadataHash: verifiedPointer.metadataHash,
+              requiredCumulativeAmount: verifiedPointer.requiredCumulativeAmount,
+            },
+          }
+        : {}),
     });
-    if (result.signed && verifiedRecord) {
-      this._commitVerifiedUsageRecord(payload.channelId, verifiedRecord);
+    if (result.signedVerifiedMetadata && verifiedPointer) {
+      this._usageVerifier?.commit(payload.channelId, verifiedPointer.record);
     }
-  }
-
-  private _recordUsageObservation(peerId: PeerId, observation: UsageObservation): void {
-    const key = this._usageObservationKey(peerId, observation.requestId);
-    this._usageObservations.set(key, observation);
-    const waiters = this._usageObservationWaiters.get(key);
-    if (!waiters) return;
-    this._usageObservationWaiters.delete(key);
-    for (const resolve of waiters) resolve(observation);
-  }
-
-  private async _verifyUsagePointer(peerId: PeerId, payload: NeedAuthPayload): Promise<UsageManifestRecord | null> {
-    if (!payload.requestId || !payload.usageCid || !payload.usageRoot) return null;
-    const key = this._usageObservationKey(peerId, payload.requestId);
-    const observation = await this._waitForUsageObservation(key, 2_000);
-    this._usageObservations.delete(key);
-    if (!observation) return null;
-
-    const record = buildUsageManifestRecord({
-      requestId: observation.requestId,
-      service: observation.service,
-      costUsdc: BigInt(payload.lastRequestCost ?? observation.costUsdc),
-      cumulativeCostUsdc: BigInt(payload.requiredCumulativeAmount),
-      inputTokens: observation.inputTokens,
-      cachedInputTokens: observation.cachedInputTokens,
-      freshInputTokens: observation.freshInputTokens,
-      outputTokens: observation.outputTokens,
-      inputBody: observation.inputBody,
-      outputBody: observation.outputBody,
-    });
-    const previous = this._getVerifiedUsageRecords(payload.channelId);
-    const pointer = computeUsageManifestPointer(buildUsageManifest(payload.channelId, [...previous, record]));
-    const rootMatches = pointer.usageRoot.toLowerCase() === payload.usageRoot.toLowerCase();
-    const cidMatches = pointer.cid === payload.usageCid;
-    return rootMatches && cidMatches ? record : null;
-  }
-
-  private async _waitForUsageObservation(key: string, timeoutMs: number): Promise<UsageObservation | null> {
-    const existing = this._usageObservations.get(key);
-    if (existing) return existing;
-    return await new Promise((resolve) => {
-      const timer = setTimeout(() => {
-        const waiters = this._usageObservationWaiters.get(key)?.filter((entry) => entry !== wrapped);
-        if (waiters && waiters.length > 0) this._usageObservationWaiters.set(key, waiters);
-        else this._usageObservationWaiters.delete(key);
-        resolve(null);
-      }, timeoutMs);
-      const wrapped = (value: UsageObservation | null): void => {
-        clearTimeout(timer);
-        resolve(value);
-      };
-      const waiters = this._usageObservationWaiters.get(key) ?? [];
-      waiters.push(wrapped);
-      this._usageObservationWaiters.set(key, waiters);
-    });
-  }
-
-  private _commitVerifiedUsageRecord(channelId: string, record: UsageManifestRecord): void {
-    const records = this._getVerifiedUsageRecords(channelId);
-    records.push(record);
-    this._verifiedUsageRecordsByChannel.set(channelId, records);
-    this._usageManifestStore?.replace(channelId, records);
-  }
-
-  private _getVerifiedUsageRecords(channelId: string): UsageManifestRecord[] {
-    const existing = this._verifiedUsageRecordsByChannel.get(channelId);
-    if (existing) return existing;
-    const records = this._usageManifestStore?.getRecords(channelId) ?? [];
-    this._verifiedUsageRecordsByChannel.set(channelId, records);
-    return records;
-  }
-
-  private _clearUsageStateForPeer(peerId: PeerId): void {
-    const prefix = `${peerId}:`;
-    for (const key of this._usageObservations.keys()) {
-      if (key.startsWith(prefix)) this._usageObservations.delete(key);
-    }
-    for (const [key, waiters] of this._usageObservationWaiters) {
-      if (!key.startsWith(prefix)) continue;
-      this._usageObservationWaiters.delete(key);
-      for (const resolve of waiters) resolve(null);
-    }
-  }
-
-  private _usageObservationKey(peerId: PeerId, requestId: string): string {
-    return `${peerId}:${requestId}`;
   }
 
   /**
