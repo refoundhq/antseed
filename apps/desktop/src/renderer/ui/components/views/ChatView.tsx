@@ -981,6 +981,12 @@ export function ChatView({ active, onSelectView }: ChatViewProps) {
   const activeConversationIsSending = snap.chatActiveConversation
     ? snap.chatSendingConversationIds.includes(snap.chatActiveConversation)
     : snap.chatSending;
+  const permissionModeLocked = activeConversationIsSending || activeToolApprovalRequests.length > 0;
+
+  useEffect(() => {
+    if (permissionModeLocked) setPermissionMenuOpen(false);
+  }, [permissionModeLocked]);
+
   const showThinkingIndicator = snap.chatSending && (
     !snap.chatSendingConversationId ||
     snap.chatSendingConversationId === snap.chatActiveConversation ||
@@ -1433,7 +1439,12 @@ export function ChatView({ active, onSelectView }: ChatViewProps) {
                 <button
                   type="button"
                   className={`${styles.permissionModeButton} ${selectedPermissionMode.tone === 'risk' ? styles.permissionModeButtonRisk : styles.permissionModeButtonSafe}`}
-                  onClick={() => setPermissionMenuOpen((open) => !open)}
+                  onClick={() => {
+                    if (permissionModeLocked) return;
+                    setPermissionMenuOpen((open) => !open);
+                  }}
+                  disabled={permissionModeLocked}
+                  title={permissionModeLocked ? 'Agent access can be changed after the current response finishes.' : undefined}
                   aria-haspopup="menu"
                   aria-expanded={permissionMenuOpen}
                 >
@@ -1445,7 +1456,7 @@ export function ChatView({ active, onSelectView }: ChatViewProps) {
                   <span>{selectedPermissionMode.label}</span>
                   <span className={styles.permissionModeChevron} aria-hidden="true" />
                 </button>
-                {permissionMenuOpen ? (
+                {permissionMenuOpen && !permissionModeLocked ? (
                   <div className={styles.permissionModeMenu} role="menu">
                     {PERMISSION_MODES.map((mode) => {
                       const selected = mode.value === snap.chatPermissionMode;

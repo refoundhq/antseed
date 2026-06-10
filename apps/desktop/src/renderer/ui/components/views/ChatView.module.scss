@@ -781,6 +781,12 @@
   &:active {
     transform: translateY(1px);
   }
+
+  &:disabled {
+    cursor: not-allowed;
+    opacity: 0.62;
+    transform: none;
+  }
 }
 
 .permission-mode-button-safe {
