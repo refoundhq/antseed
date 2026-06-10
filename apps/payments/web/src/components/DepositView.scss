@@ -274,7 +274,7 @@
   .dv-step--done & {
     background: var(--accent);
     border-color: var(--accent);
-    color: var(--accent-text);
+    color: var(--on-accent, #07140d);
   }
 
   .dv-step--active & {
@@ -297,7 +297,7 @@
   width: 100%;
   padding: var(--sp-3) var(--sp-4);
   background: var(--accent);
-  color: var(--accent-text);
+  color: var(--on-accent, #07140d);
   border: none;
   border-radius: var(--radius-md);
   font: inherit;
