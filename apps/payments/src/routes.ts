@@ -30,16 +30,18 @@ interface RouteContext {
 
 // Use shared utilities from @antseed/node
 const formatUsdc6 = formatUsdc;
+const RPC_READ_ATTEMPTS = 2;
+const RPC_READ_TIMEOUT_MS = 2_500;
 
 // Retry helper for on-chain view calls. Base RPC occasionally returns an
 // unparseable response (ethers surfaces it as CALL_EXCEPTION with null
 // revert data even though the call didn't actually revert); view calls are
 // idempotent, so retrying clears these transient failures.
-async function retryRead<T>(fn: () => Promise<T>, attempts = 3): Promise<T> {
+async function retryRead<T>(fn: () => Promise<T>, attempts = RPC_READ_ATTEMPTS): Promise<T> {
   let lastErr: unknown;
   for (let i = 0; i < attempts; i++) {
     try {
-      return await fn();
+      return await withReadTimeout(fn());
     } catch (err) {
       lastErr = err;
       if (i < attempts - 1) {
@@ -48,6 +50,20 @@ async function retryRead<T>(fn: () => Promise<T>, attempts = 3): Promise<T> {
     }
   }
   throw lastErr;
+}
+
+async function withReadTimeout<T>(promise: Promise<T>): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeout = setTimeout(() => {
+      reject(new Error(`RPC read timed out after ${RPC_READ_TIMEOUT_MS}ms`));
+    }, RPC_READ_TIMEOUT_MS);
+  });
+  try {
+    return await Promise.race([promise, timeoutPromise]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
 }
 
 function createClient(config: PaymentCryptoConfig, evmChainId?: number): DepositsClient {

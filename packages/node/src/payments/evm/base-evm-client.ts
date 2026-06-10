@@ -10,6 +10,8 @@ import {
   type TransactionResponse,
 } from 'ethers';
 
+const FALLBACK_STALL_TIMEOUT_MS = 750;
+
 function buildProvider(rpcUrl: string, fallbackRpcUrls?: string[], evmChainId?: number): AbstractProvider {
   const network = evmChainId ? Network.from(evmChainId) : undefined;
   const opts = { batchMaxCount: 1, staticNetwork: network ? true : undefined };
@@ -20,7 +22,7 @@ function buildProvider(rpcUrl: string, fallbackRpcUrls?: string[], evmChainId?: 
   const configs = urls.map((url, i) => ({
     provider: new JsonRpcProvider(url, network, opts),
     priority: i + 1,
-    stallTimeout: 2000,
+    stallTimeout: FALLBACK_STALL_TIMEOUT_MS,
     weight: 1,
   }));
   return new FallbackProvider(configs, network, { quorum: 1 });
