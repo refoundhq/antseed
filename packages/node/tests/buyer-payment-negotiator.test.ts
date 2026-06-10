@@ -1,4 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { BuyerPaymentNegotiator, type BuyerNegotiatorConfig, type NegotiationEmitter } from '../src/payments/buyer-payment-negotiator.js';
 import type { PeerInfo, PeerId } from '../src/types/peer.js';
 import type { SerializedHttpResponse, SerializedHttpRequest } from '../src/types/http.js';
@@ -10,6 +13,12 @@ import type { StoredChannel } from '../src/payments/channel-store.js';
 import type { Identity } from '../src/p2p/identity.js';
 import type { PeerConnection } from '../src/p2p/connection-manager.js';
 import type { PaymentRequiredPayload } from '../src/types/protocol.js';
+import {
+  buildUsageManifest,
+  buildUsageManifestRecord,
+  computeUsageManifestPointer,
+  UsageManifestStore,
+} from '../src/payments/usage-manifest.js';
 
 const enc = new TextEncoder();
 
@@ -37,7 +46,7 @@ function createMockBpm(): BuyerPaymentManager & Record<string, unknown> {
       topUpNeeded: false,
     }),
     handleAuthAck: vi.fn(),
-    handleNeedAuth: vi.fn(),
+    handleNeedAuth: vi.fn().mockResolvedValue({ signed: true, signedUsagePointer: false }),
     authorizeSpending: vi.fn().mockResolvedValue(undefined),
     topUpReserve: vi.fn().mockResolvedValue(undefined),
     cleanupSession: vi.fn(),
@@ -645,6 +654,230 @@ describe('BuyerPaymentNegotiator', () => {
   });
 
   describe('cost tracking', () => {
+    it('verifies usage pointers before allowing v2 NeedAuth signing', async () => {
+      const request: SerializedHttpRequest = {
+        requestId: 'req-pointer-ok',
+        method: 'POST',
+        path: '/v1/chat/completions',
+        headers: { 'content-type': 'application/json' },
+        body: enc.encode(JSON.stringify({ model: 'gpt-5.5', messages: [{ role: 'user', content: 'hello' }] })),
+      };
+      const response: SerializedHttpResponse = {
+        requestId: request.requestId,
+        statusCode: 200,
+        headers: { 'content-type': 'application/json' },
+        body: enc.encode(JSON.stringify({ usage: { prompt_tokens: 100, completion_tokens: 50 } })),
+      };
+      const costUsdc = 1050n;
+      const record = buildUsageManifestRecord({
+        requestId: request.requestId,
+        service: 'gpt-5.5',
+        costUsdc,
+        cumulativeCostUsdc: costUsdc,
+        inputTokens: 100,
+        cachedInputTokens: 0,
+        freshInputTokens: 100,
+        outputTokens: 50,
+        inputBody: request.body,
+        outputBody: response.body,
+      });
+      const pointer = computeUsageManifestPointer(buildUsageManifest('0x' + 'cc'.repeat(32), [record]));
+      (bpm.handleNeedAuth as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ signed: true, signedUsagePointer: true });
+
+      negotiator.estimateCostFromResponse(peer, response, 'gpt-5.5', request);
+      await negotiator.handleNeedAuth(peer.peerId, {
+        channelId: '0x' + 'cc'.repeat(32),
+        requiredCumulativeAmount: costUsdc.toString(),
+        currentAcceptedCumulative: '0',
+        deposit: '1000000',
+        requestId: request.requestId,
+        lastRequestCost: costUsdc.toString(),
+        inputTokens: '100',
+        cachedInputTokens: '0',
+        freshInputTokens: '100',
+        outputTokens: '50',
+        service: 'gpt-5.5',
+        usageCid: pointer.cid,
+        usageRoot: pointer.usageRoot,
+      }, {} as any);
+
+      expect(bpm.handleNeedAuth).toHaveBeenCalledWith(
+        peer.peerId,
+        expect.objectContaining({ usageCid: pointer.cid, usageRoot: pointer.usageRoot }),
+        expect.anything(),
+        { usagePointerVerified: true },
+      );
+      expect((negotiator as unknown as { _usageObservations: Map<string, unknown> })._usageObservations.size).toBe(0);
+    });
+
+    it('falls back to legacy NeedAuth signing when usage pointer verification fails', async () => {
+      const request: SerializedHttpRequest = {
+        requestId: 'req-pointer-bad',
+        method: 'POST',
+        path: '/v1/chat/completions',
+        headers: { 'content-type': 'application/json' },
+        body: enc.encode(JSON.stringify({ model: 'gpt-5.5', messages: [{ role: 'user', content: 'hello' }] })),
+      };
+      const response: SerializedHttpResponse = {
+        requestId: request.requestId,
+        statusCode: 200,
+        headers: { 'content-type': 'application/json' },
+        body: enc.encode(JSON.stringify({ usage: { prompt_tokens: 100, completion_tokens: 50 } })),
+      };
+
+      negotiator.estimateCostFromResponse(peer, response, 'gpt-5.5', request);
+      await negotiator.handleNeedAuth(peer.peerId, {
+        channelId: '0x' + 'cc'.repeat(32),
+        requiredCumulativeAmount: '1050',
+        currentAcceptedCumulative: '0',
+        deposit: '1000000',
+        requestId: request.requestId,
+        lastRequestCost: '1050',
+        inputTokens: '100',
+        cachedInputTokens: '0',
+        freshInputTokens: '100',
+        outputTokens: '50',
+        service: 'gpt-5.5',
+        usageCid: 'bafkreiinvalid',
+        usageRoot: '0x' + '11'.repeat(32),
+      }, {} as any);
+
+      expect(bpm.handleNeedAuth).toHaveBeenCalledWith(
+        peer.peerId,
+        expect.objectContaining({ usageCid: 'bafkreiinvalid' }),
+        expect.anything(),
+        { usagePointerVerified: false },
+      );
+      expect((negotiator as unknown as { _usageObservations: Map<string, unknown> })._usageObservations.size).toBe(0);
+    });
+
+    it('persists verified usage records so a restarted buyer can verify the next cumulative pointer', async () => {
+      const tempDir = mkdtempSync(join(tmpdir(), 'buyer-usage-manifest-test-'));
+      try {
+        const manifestStore = new UsageManifestStore(tempDir);
+        negotiator = new BuyerPaymentNegotiator(
+          identity,
+          bpm as unknown as BuyerPaymentManager,
+          depositsClient,
+          channelsClient,
+          channelStore,
+          { usageManifestStore: manifestStore },
+          emitter,
+        );
+        const channelId = '0x' + 'cc'.repeat(32);
+        const request1: SerializedHttpRequest = {
+          requestId: 'req-restart-1',
+          method: 'POST',
+          path: '/v1/chat/completions',
+          headers: { 'content-type': 'application/json' },
+          body: enc.encode(JSON.stringify({ model: 'gpt-5.5', messages: [{ role: 'user', content: 'one' }] })),
+        };
+        const response1: SerializedHttpResponse = {
+          requestId: request1.requestId,
+          statusCode: 200,
+          headers: { 'content-type': 'application/json' },
+          body: enc.encode(JSON.stringify({ usage: { prompt_tokens: 100, completion_tokens: 50 } })),
+        };
+        const record1 = buildUsageManifestRecord({
+          requestId: request1.requestId,
+          service: 'gpt-5.5',
+          costUsdc: 1050n,
+          cumulativeCostUsdc: 1050n,
+          inputTokens: 100,
+          cachedInputTokens: 0,
+          freshInputTokens: 100,
+          outputTokens: 50,
+          inputBody: request1.body,
+          outputBody: response1.body,
+        });
+        const pointer1 = computeUsageManifestPointer(buildUsageManifest(channelId, [record1]));
+        (bpm.handleNeedAuth as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ signed: true, signedUsagePointer: true });
+
+        negotiator.estimateCostFromResponse(peer, response1, 'gpt-5.5', request1);
+        await negotiator.handleNeedAuth(peer.peerId, {
+          channelId,
+          requiredCumulativeAmount: '1050',
+          currentAcceptedCumulative: '0',
+          deposit: '1000000',
+          requestId: request1.requestId,
+          lastRequestCost: '1050',
+          inputTokens: '100',
+          cachedInputTokens: '0',
+          freshInputTokens: '100',
+          outputTokens: '50',
+          service: 'gpt-5.5',
+          usageCid: pointer1.cid,
+          usageRoot: pointer1.usageRoot,
+        }, {} as any);
+
+        const restartedBpm = createMockBpm();
+        restartedBpm.handleNeedAuth = vi.fn().mockResolvedValue({ signed: true, signedUsagePointer: true }) as any;
+        const restarted = new BuyerPaymentNegotiator(
+          identity,
+          restartedBpm as unknown as BuyerPaymentManager,
+          depositsClient,
+          channelsClient,
+          channelStore,
+          { usageManifestStore: new UsageManifestStore(tempDir) },
+          emitter,
+        );
+
+        const request2: SerializedHttpRequest = {
+          requestId: 'req-restart-2',
+          method: 'POST',
+          path: '/v1/chat/completions',
+          headers: { 'content-type': 'application/json' },
+          body: enc.encode(JSON.stringify({ model: 'gpt-5.5', messages: [{ role: 'user', content: 'two' }] })),
+        };
+        const response2: SerializedHttpResponse = {
+          requestId: request2.requestId,
+          statusCode: 200,
+          headers: { 'content-type': 'application/json' },
+          body: enc.encode(JSON.stringify({ usage: { prompt_tokens: 200, completion_tokens: 70 } })),
+        };
+        const record2 = buildUsageManifestRecord({
+          requestId: request2.requestId,
+          service: 'gpt-5.5',
+          costUsdc: 1650n,
+          cumulativeCostUsdc: 2700n,
+          inputTokens: 200,
+          cachedInputTokens: 0,
+          freshInputTokens: 200,
+          outputTokens: 70,
+          inputBody: request2.body,
+          outputBody: response2.body,
+        });
+        const pointer2 = computeUsageManifestPointer(buildUsageManifest(channelId, [record1, record2]));
+
+        restarted.estimateCostFromResponse(peer, response2, 'gpt-5.5', request2);
+        await restarted.handleNeedAuth(peer.peerId, {
+          channelId,
+          requiredCumulativeAmount: '2700',
+          currentAcceptedCumulative: '1050',
+          deposit: '1000000',
+          requestId: request2.requestId,
+          lastRequestCost: '1650',
+          inputTokens: '200',
+          cachedInputTokens: '0',
+          freshInputTokens: '200',
+          outputTokens: '70',
+          service: 'gpt-5.5',
+          usageCid: pointer2.cid,
+          usageRoot: pointer2.usageRoot,
+        }, {} as any);
+
+        expect(restartedBpm.handleNeedAuth).toHaveBeenCalledWith(
+          peer.peerId,
+          expect.objectContaining({ usageCid: pointer2.cid, usageRoot: pointer2.usageRoot }),
+          expect.anything(),
+          { usagePointerVerified: true },
+        );
+        expect(new UsageManifestStore(tempDir).getRecords(channelId)).toHaveLength(2);
+      } finally {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
     it('estimateCostFromResponse stores estimated cost', () => {
       const response: SerializedHttpResponse = {
         requestId: 'req-1',

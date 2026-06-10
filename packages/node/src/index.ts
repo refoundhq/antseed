@@ -47,6 +47,7 @@ export {
   StatsClient,
   type StatsClientConfig,
   type DecodedMetadataRecorded,
+  type DecodedMetadataPointerRecorded,
 } from './payments/evm/stats-client.js';
 export { signData, verifySignature, signUtf8, verifyUtf8 } from './p2p/identity.js';
 export {
@@ -59,12 +60,29 @@ export {
   RESERVE_AUTH_TYPES,
   SET_OPERATOR_TYPES,
   computeMetadataHash,
+  computePointerMetadataHash,
   encodeMetadata,
+  encodePointerMetadata,
   computeChannelId,
   ZERO_METADATA,
   ZERO_METADATA_HASH,
+  POINTER_METADATA_VERSION,
 } from './payments/evm/signatures.js';
 export type { SpendingAuthMessage, ReserveAuthMessage, SetOperatorMessage, SpendingAuthMetadata } from './payments/evm/signatures.js';
+export {
+  buildUsageManifest,
+  buildUsageManifestRecord,
+  computeUsageManifestPointer,
+  UsageManifestStore,
+  publishUsageManifestBestEffort,
+} from './payments/usage-manifest.js';
+export type {
+  UsageManifest,
+  UsageManifestPointer,
+  UsageManifestRecord,
+  UsageManifestRecordInput,
+  UsageManifestServiceTotals,
+} from './payments/usage-manifest.js';
 export { NatTraversal, type NatMapping, type NatTraversalResult } from './p2p/nat-traversal.js';
 export { BuyerPaymentManager } from './payments/buyer-payment-manager.js';
 export type { BuyerPaymentConfig } from './payments/buyer-payment-manager.js';

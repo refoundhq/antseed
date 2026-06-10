@@ -42,8 +42,11 @@ export {
   RESERVE_AUTH_TYPES,
   SET_OPERATOR_TYPES,
   computeMetadataHash,
+  computePointerMetadataHash,
   encodeMetadata,
+  encodePointerMetadata,
   METADATA_VERSION,
+  POINTER_METADATA_VERSION,
   computeChannelId,
   ZERO_METADATA,
   ZERO_METADATA_HASH,
@@ -68,7 +71,12 @@ export type { StoredChannel, StoredReceipt } from './channel-store.js';
 
 // Buyer payment manager
 export { BuyerPaymentManager } from './buyer-payment-manager.js';
-export type { BuyerPaymentConfig, PerRequestAuthResult } from './buyer-payment-manager.js';
+export type {
+  BuyerPaymentConfig,
+  NeedAuthHandlingOptions,
+  NeedAuthHandlingResult,
+  PerRequestAuthResult,
+} from './buyer-payment-manager.js';
 
 // Buyer payment negotiator (402 handling, SpendingAuth flow, cost tracking)
 export { BuyerPaymentNegotiator } from './buyer-payment-negotiator.js';
@@ -81,6 +89,21 @@ export type { SellerPaymentConfig } from './seller-payment-manager.js';
 // Pricing utilities
 export { computeCostUsdc, estimateCostFromBytes, estimateTokensFromBytes } from './pricing.js';
 export type { ServicePricing } from './pricing.js';
+
+export {
+  buildUsageManifest,
+  buildUsageManifestRecord,
+  computeUsageManifestPointer,
+  UsageManifestStore,
+  publishUsageManifestBestEffort,
+} from './usage-manifest.js';
+export type {
+  UsageManifest,
+  UsageManifestPointer,
+  UsageManifestRecord,
+  UsageManifestRecordInput,
+  UsageManifestServiceTotals,
+} from './usage-manifest.js';
 
 // Readiness checks
 export { checkSellerReadiness, checkBuyerReadiness } from './readiness.js';

@@ -17,6 +17,15 @@ contract AntseedStatsTest is Test {
 
     uint256 public tokenId;
 
+    event MetadataPointerRecorded(
+        uint256 indexed agentId,
+        address indexed buyer,
+        bytes32 indexed channelId,
+        bytes32 metadataHash,
+        bytes cid,
+        bytes32 usageRoot
+    );
+
     function setUp() public {
         registry = new AntseedRegistry();
         identityRegistry = new MockERC8004Registry();
@@ -78,6 +87,23 @@ contract AntseedStatsTest is Test {
         assertEq(buyerStats.totalInputTokens, 275);
         assertEq(buyerStats.totalOutputTokens, 130);
         assertEq(buyerStats.totalRequestCount, 7);
+    }
+
+    function test_recordMetadata_v2EmitsPointerOnly() public {
+        stats.setWriter(writer, true);
+
+        bytes memory metadata = abi.encode(uint256(2), bytes("bafkreihash"), bytes32(uint256(0x1234)));
+
+        vm.expectEmit(true, true, true, true);
+        emit MetadataPointerRecorded(tokenId, buyer, bytes32("chan-1"), keccak256(metadata), bytes("bafkreihash"), bytes32(uint256(0x1234)));
+
+        vm.prank(writer);
+        stats.recordMetadata(tokenId, buyer, bytes32("chan-1"), metadata);
+
+        IAntseedStats.BuyerMetadataStats memory buyerStats = stats.getBuyerMetadataStats(tokenId, buyer);
+        assertEq(buyerStats.totalInputTokens, 0);
+        assertEq(buyerStats.totalOutputTokens, 0);
+        assertEq(buyerStats.totalRequestCount, 0);
     }
 
     function test_recordMetadata_revert_invalidShape() public {

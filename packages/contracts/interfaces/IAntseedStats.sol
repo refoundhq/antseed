@@ -10,6 +10,7 @@ interface IAntseedStats {
     }
 
     function getBuyerMetadataStats(uint256 agentId, address buyer) external view returns (BuyerMetadataStats memory);
+
     function recordMetadata(
         uint256 agentId,
         address buyer,

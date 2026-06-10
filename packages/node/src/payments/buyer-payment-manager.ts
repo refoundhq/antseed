@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { type AbstractSigner } from 'ethers';
+import { type AbstractSigner, keccak256 } from 'ethers';
 import type { Identity } from '../p2p/identity.js';
 import type { PaymentMux } from '../p2p/payment-mux.js';
 import type {
@@ -14,6 +14,7 @@ import {
   makeChannelsDomain,
   computeMetadataHash,
   encodeMetadata,
+  encodePointerMetadata,
   ZERO_METADATA,
   ZERO_METADATA_HASH,
   computeChannelId,
@@ -60,6 +61,15 @@ export interface BuyerPaymentConfig {
 export interface PerRequestAuthResult {
   payload: SpendingAuthPayload;
   topUpNeeded: boolean;
+}
+
+export interface NeedAuthHandlingOptions {
+  usagePointerVerified?: boolean;
+}
+
+export interface NeedAuthHandlingResult {
+  signed: boolean;
+  signedUsagePointer: boolean;
 }
 
 /**
@@ -376,9 +386,10 @@ export class BuyerPaymentManager {
     cumulativeAmount: bigint,
     metadata: SpendingAuthMetadata,
     paymentMux: PaymentMux,
+    metadataOverride?: { metadataHash: string; encodedMetadata: string },
   ): Promise<void> {
-    const metadataHashHex = computeMetadataHash(metadata);
-    const encodedMetadata = encodeMetadata(metadata);
+    const metadataHashHex = metadataOverride?.metadataHash ?? computeMetadataHash(metadata);
+    const encodedMetadata = metadataOverride?.encodedMetadata ?? encodeMetadata(metadata);
     const metadataMsg: SpendingAuthMessage = {
       channelId: session.sessionId,
       cumulativeAmount,
@@ -822,11 +833,12 @@ export class BuyerPaymentManager {
     sellerPeerId: string,
     payload: NeedAuthPayload,
     paymentMux: PaymentMux,
-  ): Promise<void> {
+    options: NeedAuthHandlingOptions = {},
+  ): Promise<NeedAuthHandlingResult> {
     const session = this.getActiveSession(sellerPeerId);
     if (!session) {
       debugWarn(`[BuyerPayment] NeedAuth for unknown seller: ${sellerPeerId.slice(0, 12)}...`);
-      return;
+      return { signed: false, signedUsagePointer: false };
     }
 
     const buyerService = payload.requestId ? this._requestService.get(payload.requestId) : undefined;
@@ -839,7 +851,7 @@ export class BuyerPaymentManager {
       debugLog(
         `[BuyerPayment] NeedAuth stale: required=${requiredCumulativeAmount} <= current=${currentCumulative} — ignoring`,
       );
-      return;
+      return { signed: false, signedUsagePointer: false };
     }
     if (payload.requestId) this._requestService.delete(payload.requestId);
 
@@ -870,7 +882,7 @@ export class BuyerPaymentManager {
           debugWarn(
             `[BuyerPayment] NeedAuth: seller claimed cost ${sellerCost} exceeds ${this._costTolerance}x buyer estimate ${buyerEstimate} — rejecting`,
           );
-          return;
+          return { signed: false, signedUsagePointer: false };
         }
         debugLog(
           `[BuyerPayment] NeedAuth: seller cost=${sellerCost} buyer estimate=${buyerEstimate} (in=${sellerIn} cached=${sellerCached} out=${sellerOut}) — validated`,
@@ -901,7 +913,7 @@ export class BuyerPaymentManager {
         debugWarn(
           `[BuyerPayment] NeedAuth: maxSignable=${maxSignable} <= currentCumulative=${currentCumulative} — overdraft limit reached`,
         );
-        return;
+        return { signed: false, signedUsagePointer: false };
       }
     }
 
@@ -921,7 +933,7 @@ export class BuyerPaymentManager {
       debugWarn(
         `[BuyerPayment] NeedAuth: effectiveAmount=${effectiveAmount} <= currentCumulative=${currentCumulative} — cannot advance`,
       );
-      return;
+      return { signed: false, signedUsagePointer: false };
     }
 
     debugLog(`[BuyerPayment] NeedAuth: channel=${session.sessionId.slice(0, 18)}... required=${requiredCumulativeAmount} effective=${effectiveAmount}`);
@@ -936,13 +948,29 @@ export class BuyerPaymentManager {
       cumulativeRequestCount: prevMeta.cumulativeRequestCount + 1n,
     };
     this._metadata.set(sellerPeerId, newMeta);
+    const canSignUsagePointer = Boolean(payload.usageCid && payload.usageRoot)
+      && options.usagePointerVerified === true
+      && effectiveAmount === requiredCumulativeAmount;
+    const encodedPointerMetadata = canSignUsagePointer
+      ? encodePointerMetadata(payload.usageCid!, payload.usageRoot!)
+      : null;
 
     // Send via PaymentMux
     try {
-      await this._sendUpdatedSpendingAuth(session, sellerPeerId, effectiveAmount, newMeta, paymentMux);
+      await this._sendUpdatedSpendingAuth(
+        session,
+        sellerPeerId,
+        effectiveAmount,
+        newMeta,
+        paymentMux,
+        encodedPointerMetadata
+          ? { encodedMetadata: encodedPointerMetadata, metadataHash: keccak256(encodedPointerMetadata) }
+          : undefined,
+      );
       debugLog(`[BuyerPayment] NeedAuth responded: new cumulativeAmount=${effectiveAmount}`);
     } catch {
       debugLog(`[BuyerPayment] NeedAuth: connection closed before SpendingAuth could be sent`);
+      return { signed: false, signedUsagePointer: false };
     }
 
     // Send topUp AFTER the SpendingAuth so the seller processes the higher
@@ -954,6 +982,7 @@ export class BuyerPaymentManager {
     if (needsTopUp || this._needsTopUp(sellerPeerId)) {
       await this._topUpAfterSpendAuthBestEffort(sellerPeerId, paymentMux, 'handleNeedAuth');
     }
+    return { signed: true, signedUsagePointer: canSignUsagePointer };
   }
 
   // ── Reserve top-up ─────────────────────────────────────────────

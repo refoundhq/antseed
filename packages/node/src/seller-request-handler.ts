@@ -17,6 +17,11 @@ import { parseResponseUsage } from './utils/response-usage.js';
 import { computeCostUsdc, estimateTokensFromBytes, type ServicePricing } from './payments/pricing.js';
 import { debugLog, debugWarn } from './utils/debug.js';
 import { PAYMENT_CODE_CHANNEL_EXHAUSTED } from './types/protocol.js';
+import {
+  buildUsageManifestRecord,
+  publishUsageManifestBestEffort,
+  type UsageManifestStore,
+} from './payments/usage-manifest.js';
 
 export interface SellerRequestHandlerDeps {
   providers: Provider[];
@@ -24,6 +29,7 @@ export interface SellerRequestHandlerDeps {
   sessionTracker: SellerSessionTracker | null;
   channelsClient: ChannelsClient | null;
   announcer: PeerAnnouncer | null;
+  usageManifestStore?: UsageManifestStore | null;
   maxUploadBodyBytes?: number;
   emit: (event: string, ...args: unknown[]) => boolean;
 }
@@ -403,6 +409,17 @@ export class SellerRequestHandler {
 
             const accepted = spm.getAcceptedCumulative(session.sessionId);
             const requiredAmount = cumulativeSpend;
+            const service = this._extractRequestedService(request) ?? undefined;
+            const usagePointer = this._writeUsageManifestBestEffort({
+              channelId: session.sessionId,
+              buyerPeerId,
+              request,
+              responseBody,
+              service,
+              costUsdc,
+              cumulativeSpend,
+              usage,
+            });
             debugLog(`[SellerHandler] Sending NeedAuth: cost=${costUsdc} cumulative=${cumulativeSpend} required=${requiredAmount}`);
             this._sendNeedAuthBestEffort(paymentMux, {
               channelId: session.sessionId,
@@ -415,7 +432,8 @@ export class SellerRequestHandler {
               outputTokens: String(usage.outputTokens),
               cachedInputTokens: String(usage.cachedInputTokens),
               freshInputTokens: String(usage.freshInputTokens),
-              service: this._extractRequestedService(request) ?? undefined,
+              service,
+              ...(usagePointer ? { usageCid: usagePointer.cid, usageRoot: usagePointer.usageRoot } : {}),
             }, buyerPeerId, 'post-response');
           }
         }
@@ -653,6 +671,43 @@ export class SellerRequestHandler {
       debugWarn(
         `[SellerHandler] NeedAuth send skipped (${phase}) for ${buyerPeerId.slice(0, 12)}...: ${err instanceof Error ? err.message : err}`,
       );
+    }
+  }
+
+  private _writeUsageManifestBestEffort(input: {
+    channelId: string;
+    buyerPeerId: string;
+    request: SerializedHttpRequest;
+    responseBody: Uint8Array;
+    service?: string;
+    costUsdc: bigint;
+    cumulativeSpend: bigint;
+    usage: ReturnType<typeof parseResponseUsage>;
+  }): { cid: string; usageRoot: string } | null {
+    const store = this._deps.usageManifestStore;
+    if (!store) return null;
+    try {
+      const record = buildUsageManifestRecord({
+        requestId: input.request.requestId,
+        service: input.service,
+        costUsdc: input.costUsdc,
+        cumulativeCostUsdc: input.cumulativeSpend,
+        inputTokens: input.usage.inputTokens,
+        cachedInputTokens: input.usage.cachedInputTokens,
+        freshInputTokens: input.usage.freshInputTokens,
+        outputTokens: input.usage.outputTokens,
+        inputBody: input.request.body,
+        outputBody: input.responseBody,
+      });
+      const pointer = store.append(input.channelId, record);
+      publishUsageManifestBestEffort(pointer);
+      return { cid: pointer.cid, usageRoot: pointer.usageRoot };
+    } catch (err) {
+      debugWarn(
+        `[SellerHandler] Usage manifest skipped for ${input.buyerPeerId.slice(0, 12)}...: ` +
+        `${err instanceof Error ? err.message : err}`,
+      );
+      return null;
     }
   }
 

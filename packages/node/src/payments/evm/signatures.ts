@@ -59,6 +59,7 @@ export interface SpendingAuthMetadata {
 }
 
 export const METADATA_VERSION = 1n;
+export const POINTER_METADATA_VERSION = 2n;
 
 export function encodeMetadata(metadata: SpendingAuthMetadata): string {
   const coder = AbiCoder.defaultAbiCoder();
@@ -70,6 +71,16 @@ export function encodeMetadata(metadata: SpendingAuthMetadata): string {
 
 export function computeMetadataHash(metadata: SpendingAuthMetadata): string {
   return keccak256(encodeMetadata(metadata));
+}
+
+export function encodePointerMetadata(cid: string | Uint8Array, usageRoot: string): string {
+  const coder = AbiCoder.defaultAbiCoder();
+  const cidBytes = typeof cid === 'string' ? new TextEncoder().encode(cid) : cid;
+  return coder.encode(['uint256', 'bytes', 'bytes32'], [POINTER_METADATA_VERSION, cidBytes, usageRoot]);
+}
+
+export function computePointerMetadataHash(cid: string | Uint8Array, usageRoot: string): string {
+  return keccak256(encodePointerMetadata(cid, usageRoot));
 }
 
 export const ZERO_METADATA: SpendingAuthMetadata = {

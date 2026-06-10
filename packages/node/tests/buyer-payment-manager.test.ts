@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomBytes } from 'node:crypto';
-import { AbiCoder, Wallet } from 'ethers';
+import { AbiCoder, getBytes, keccak256, Wallet } from 'ethers';
 import { BuyerPaymentManager, type BuyerPaymentConfig } from '../src/payments/buyer-payment-manager.js';
 import { ChannelStore } from '../src/payments/channel-store.js';
 import type { PaymentMux } from '../src/p2p/payment-mux.js';
@@ -492,6 +492,50 @@ describe('BuyerPaymentManager', () => {
     expect(mux.sentSpendingAuths.length).toBe(1);
     const sent = mux.sentSpendingAuths[0] as Record<string, unknown>;
     expect(sent.cumulativeAmount).toBe('50000');
+  });
+
+  it('handleNeedAuth signs verified usage pointer metadata', async () => {
+    const sellerPeerId = fakePeerId('seller-needauth-pointer');
+    const channelId = await manager.authorizeSpending(sellerPeerId, mux, 10_000n, TEST_PRICING);
+    mux.sentSpendingAuths.length = 0;
+
+    const result = await manager.handleNeedAuth(sellerPeerId, {
+      channelId,
+      requiredCumulativeAmount: '50000',
+      currentAcceptedCumulative: '0',
+      deposit: '1000000',
+      usageCid: 'bafkreihash',
+      usageRoot: '0x' + '11'.repeat(32),
+    }, mux, { usagePointerVerified: true });
+
+    expect(result).toEqual({ signed: true, signedUsagePointer: true });
+    const sent = mux.sentSpendingAuths[0] as Record<string, string>;
+    const coder = AbiCoder.defaultAbiCoder();
+    const [version, cidBytes, usageRoot] = coder.decode(['uint256', 'bytes', 'bytes32'], sent.metadata);
+    expect(version).toBe(2n);
+    expect(new TextDecoder().decode(getBytes(cidBytes as string))).toBe('bafkreihash');
+    expect(usageRoot).toBe('0x' + '11'.repeat(32));
+    expect(sent.metadataHash).toBe(keccak256(sent.metadata));
+  });
+
+  it('handleNeedAuth keeps legacy metadata for unverified usage pointers', async () => {
+    const sellerPeerId = fakePeerId('seller-needauth-unverified-pointer');
+    const channelId = await manager.authorizeSpending(sellerPeerId, mux, 10_000n, TEST_PRICING);
+    mux.sentSpendingAuths.length = 0;
+
+    const result = await manager.handleNeedAuth(sellerPeerId, {
+      channelId,
+      requiredCumulativeAmount: '50000',
+      currentAcceptedCumulative: '0',
+      deposit: '1000000',
+      usageCid: 'bafkreihash',
+      usageRoot: '0x' + '11'.repeat(32),
+    }, mux, { usagePointerVerified: false });
+
+    expect(result).toEqual({ signed: true, signedUsagePointer: false });
+    const sent = mux.sentSpendingAuths[0] as Record<string, string>;
+    const [version] = AbiCoder.defaultAbiCoder().decode(['uint256', 'uint256', 'uint256', 'uint256'], sent.metadata);
+    expect(version).toBe(1n);
   });
 
   it('handleNeedAuth caps at reserve ceiling', async () => {

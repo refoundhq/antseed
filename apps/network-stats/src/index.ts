@@ -7,6 +7,7 @@ import { NetworkPoller } from './poller.js';
 import { createServer } from './server.js';
 import { SqliteStore } from './store.js';
 import { MetadataIndexer } from './indexer.js';
+import { UsageManifestFetcher } from './usage-manifest-fetcher.js';
 
 const PORT = parseInt(process.env['PORT'] ?? '4000', 10);
 const CACHE_PATH = process.env['CACHE_PATH'];
@@ -39,6 +40,7 @@ if (chainConfig.statsContractAddress && typeof chainConfig.statsDeployBlock === 
   indexer = new MetadataIndexer({
     store,
     statsClient,
+    usageManifestFetcher: new UsageManifestFetcher(),
     chainId: CHAIN_ID,
     contractAddress: chainConfig.statsContractAddress.toLowerCase(),
     deployBlock: chainConfig.statsDeployBlock,

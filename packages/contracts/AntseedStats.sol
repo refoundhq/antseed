@@ -37,8 +37,18 @@ contract AntseedStats is IAntseedStats, Ownable {
         uint256 requestCount
     );
 
+    event MetadataPointerRecorded(
+        uint256 indexed agentId,
+        address indexed buyer,
+        bytes32 indexed channelId,
+        bytes32 metadataHash,
+        bytes cid,
+        bytes32 usageRoot
+    );
+
     // ─── Custom Errors ──────────────────────────────────────────────
     error InvalidAddress();
+    error InvalidMetadata();
     error NotAuthorized();
 
     // ─── Constructor ────────────────────────────────────────────────
@@ -59,7 +69,16 @@ contract AntseedStats is IAntseedStats, Ownable {
         if (!writers[msg.sender]) revert NotAuthorized();
         if (buyer == address(0)) revert InvalidAddress();
 
-        (uint256 cumulativeInputTokens, uint256 cumulativeOutputTokens, uint256 cumulativeRequestCount) = _decodeMetadata(metadata);
+        uint256 version = _decodeVersion(metadata);
+        if (version == 2) {
+            (, bytes memory cid, bytes32 usageRoot) = abi.decode(metadata, (uint256, bytes, bytes32));
+            emit MetadataPointerRecorded(agentId, buyer, channelId, keccak256(metadata), cid, usageRoot);
+            return;
+        }
+        if (version != 1) revert InvalidMetadata();
+
+        (uint256 cumulativeInputTokens, uint256 cumulativeOutputTokens, uint256 cumulativeRequestCount) =
+            _decodeV1Metadata(metadata);
 
         ChannelMetadataSnapshot storage snapshot = _channelSnapshots[channelId];
         if (
@@ -96,7 +115,12 @@ contract AntseedStats is IAntseedStats, Ownable {
     }
 
     // ─── Internal Helpers ───────────────────────────────────────────
-    function _decodeMetadata(bytes calldata metadata)
+    function _decodeVersion(bytes calldata metadata) internal pure returns (uint256 version) {
+        if (metadata.length < 32) revert InvalidMetadata();
+        version = abi.decode(metadata[:32], (uint256));
+    }
+
+    function _decodeV1Metadata(bytes calldata metadata)
         internal
         pure
         returns (uint256 cumulativeInputTokens, uint256 cumulativeOutputTokens, uint256 cumulativeRequestCount)

@@ -277,12 +277,12 @@ export class BuyerRequestHandler {
       if (result.action === 'return') return result.response;
       startTime = Date.now();
       const retriedResponse = await executeRequest();
-      negotiator.estimateCostFromResponse(peer, retriedResponse, requestedService);
+      negotiator.estimateCostFromResponse(peer, retriedResponse, requestedService, req);
       return retriedResponse;
     }
 
     if (negotiator) {
-      negotiator.estimateCostFromResponse(peer, response, requestedService);
+      negotiator.estimateCostFromResponse(peer, response, requestedService, req);
     }
 
     return response;

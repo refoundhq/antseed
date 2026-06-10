@@ -1,5 +1,5 @@
 import Database from 'better-sqlite3';
-import type { DecodedMetadataRecorded } from '@antseed/node';
+import type { DecodedMetadataPointerRecorded, DecodedMetadataRecorded, UsageManifest } from '@antseed/node';
 
 export interface SellerTotals {
   totalRequests: bigint;
@@ -126,6 +126,47 @@ export class SqliteStore {
         last_block INTEGER NOT NULL,
         last_block_timestamp INTEGER,
         PRIMARY KEY (chain_id, contract_address)
+      );
+
+      CREATE TABLE IF NOT EXISTS usage_manifest_pointers (
+        chain_id TEXT NOT NULL,
+        contract_address TEXT NOT NULL,
+        tx_hash TEXT NOT NULL,
+        log_index INTEGER NOT NULL,
+        agent_id INTEGER NOT NULL,
+        buyer TEXT NOT NULL,
+        channel_id TEXT NOT NULL,
+        cid TEXT NOT NULL,
+        cid_bytes TEXT NOT NULL,
+        usage_root TEXT NOT NULL,
+        block_number INTEGER NOT NULL,
+        processed_at INTEGER,
+        PRIMARY KEY (chain_id, contract_address, tx_hash, log_index)
+      );
+
+      CREATE TABLE IF NOT EXISTS seller_service_totals (
+        agent_id INTEGER NOT NULL,
+        service TEXT NOT NULL,
+        total_cost_usdc TEXT NOT NULL DEFAULT '0',
+        total_input_tokens TEXT NOT NULL DEFAULT '0',
+        total_cached_input_tokens TEXT NOT NULL DEFAULT '0',
+        total_fresh_input_tokens TEXT NOT NULL DEFAULT '0',
+        total_output_tokens TEXT NOT NULL DEFAULT '0',
+        total_request_count TEXT NOT NULL DEFAULT '0',
+        PRIMARY KEY (agent_id, service)
+      );
+
+      CREATE TABLE IF NOT EXISTS seller_channel_service_totals (
+        agent_id INTEGER NOT NULL,
+        channel_id TEXT NOT NULL,
+        service TEXT NOT NULL,
+        total_cost_usdc TEXT NOT NULL DEFAULT '0',
+        total_input_tokens TEXT NOT NULL DEFAULT '0',
+        total_cached_input_tokens TEXT NOT NULL DEFAULT '0',
+        total_fresh_input_tokens TEXT NOT NULL DEFAULT '0',
+        total_output_tokens TEXT NOT NULL DEFAULT '0',
+        total_request_count TEXT NOT NULL DEFAULT '0',
+        PRIMARY KEY (agent_id, channel_id, service)
       );
     `);
 
@@ -307,6 +348,201 @@ export class SqliteStore {
         newCheckpointTimestamp ?? null,
       );
     })();
+  }
+
+  applyUsageManifest(
+    chainId: string,
+    contractAddress: string,
+    event: DecodedMetadataPointerRecorded,
+    manifest: UsageManifest,
+    blockTimestamp?: number | null,
+  ): void {
+    this.db.transaction(() => {
+      if (event.agentId > BigInt(Number.MAX_SAFE_INTEGER)) {
+        console.warn(`[store] agentId ${event.agentId} exceeds MAX_SAFE_INTEGER — skipping usage manifest`);
+        return;
+      }
+      const agentId = Number(event.agentId);
+      const buyer = event.buyer.toLowerCase();
+      const channelId = event.channelId.toLowerCase();
+      const now = Math.floor(Date.now() / 1000);
+      if (manifest.version !== 1 || manifest.channelId.toLowerCase() !== channelId) {
+        throw new Error(`usage manifest does not match pointer channel ${channelId}`);
+      }
+
+      const inserted = this.db.prepare(
+        `INSERT OR IGNORE INTO usage_manifest_pointers
+          (chain_id, contract_address, tx_hash, log_index, agent_id, buyer, channel_id,
+           cid, cid_bytes, usage_root, block_number, processed_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
+      ).run(
+        chainId,
+        contractAddress.toLowerCase(),
+        event.txHash.toLowerCase(),
+        event.logIndex,
+        agentId,
+        buyer,
+        channelId,
+        event.cid,
+        event.cidBytes,
+        event.usageRoot.toLowerCase(),
+        event.blockNumber,
+      );
+
+      if (inserted.changes === 0) {
+        const row = this.db.prepare(
+          `SELECT processed_at FROM usage_manifest_pointers
+           WHERE chain_id = ? AND contract_address = ? AND tx_hash = ? AND log_index = ?`,
+        ).get(chainId, contractAddress.toLowerCase(), event.txHash.toLowerCase(), event.logIndex) as { processed_at: number | null } | undefined;
+        if (row?.processed_at != null) return;
+      }
+
+      const existingChannel = this._selectChannel.get(agentId, channelId);
+      const prevChannelInput = existingChannel ? BigInt(existingChannel.total_input_tokens) : 0n;
+      const prevChannelOutput = existingChannel ? BigInt(existingChannel.total_output_tokens) : 0n;
+      const prevChannelCount = existingChannel ? BigInt(existingChannel.total_request_count) : 0n;
+      const nextChannelInput = BigInt(manifest.totals.inputTokens);
+      const nextChannelOutput = BigInt(manifest.totals.outputTokens);
+      const nextChannelCount = BigInt(manifest.totals.requestCount);
+      if (nextChannelInput < prevChannelInput || nextChannelOutput < prevChannelOutput || nextChannelCount < prevChannelCount) {
+        throw new Error(`usage manifest regression for channel ${channelId}`);
+      }
+
+      const deltaInput = nextChannelInput - prevChannelInput;
+      const deltaOutput = nextChannelOutput - prevChannelOutput;
+      const deltaCount = nextChannelCount - prevChannelCount;
+      const eventTimestamp = blockTimestamp ?? null;
+
+      // v1 MetadataRecorded and v2 usage manifests are intended to be mutually
+      // exclusive per settlement/channel. If a deployment emits both for the
+      // same payment, token and settlement totals can double count unless the
+      // indexer is taught a deployment-specific de-dup policy.
+      const existingSeller = this._selectSeller.get(agentId);
+      this._upsertSeller.run(
+        agentId,
+        ((existingSeller ? BigInt(existingSeller.total_input_tokens) : 0n) + deltaInput).toString(),
+        ((existingSeller ? BigInt(existingSeller.total_output_tokens) : 0n) + deltaOutput).toString(),
+        ((existingSeller ? BigInt(existingSeller.total_request_count) : 0n) + deltaCount).toString(),
+        (existingSeller?.settlement_count ?? 0) + 1,
+        existingSeller?.first_settled_block ?? event.blockNumber,
+        event.blockNumber,
+        existingSeller?.first_seen_at ?? eventTimestamp,
+        eventTimestamp ?? existingSeller?.last_seen_at ?? null,
+        now,
+      );
+
+      const existingBuyer = this._selectBuyer.get(agentId, buyer);
+      this._upsertBuyer.run(
+        agentId,
+        buyer,
+        ((existingBuyer ? BigInt(existingBuyer.total_input_tokens) : 0n) + deltaInput).toString(),
+        ((existingBuyer ? BigInt(existingBuyer.total_output_tokens) : 0n) + deltaOutput).toString(),
+        ((existingBuyer ? BigInt(existingBuyer.total_request_count) : 0n) + deltaCount).toString(),
+        (existingBuyer?.settlement_count ?? 0) + 1,
+        existingBuyer?.first_settled_block ?? event.blockNumber,
+        event.blockNumber,
+      );
+
+      this._upsertChannel.run(
+        agentId,
+        channelId,
+        buyer,
+        nextChannelInput.toString(),
+        nextChannelOutput.toString(),
+        nextChannelCount.toString(),
+        (existingChannel?.settlement_count ?? 0) + 1,
+        existingChannel?.first_settled_block ?? event.blockNumber,
+        event.blockNumber,
+      );
+
+      for (const [service, totals] of Object.entries(manifest.services)) {
+        this._applyServiceManifestTotals(agentId, channelId, service, totals);
+      }
+
+      this.db.prepare(
+        `UPDATE usage_manifest_pointers
+         SET processed_at = ?
+         WHERE chain_id = ? AND contract_address = ? AND tx_hash = ? AND log_index = ?`,
+      ).run(now, chainId, contractAddress.toLowerCase(), event.txHash.toLowerCase(), event.logIndex);
+    })();
+  }
+
+  private _applyServiceManifestTotals(
+    agentId: number,
+    channelId: string,
+    service: string,
+    totals: UsageManifest['services'][string],
+  ): void {
+    const selectChannelService = this.db.prepare(
+      `SELECT total_cost_usdc, total_input_tokens, total_cached_input_tokens, total_fresh_input_tokens,
+              total_output_tokens, total_request_count
+       FROM seller_channel_service_totals
+       WHERE agent_id = ? AND channel_id = ? AND service = ?`,
+    );
+    const prev = selectChannelService.get(agentId, channelId, service) as {
+      total_cost_usdc: string;
+      total_input_tokens: string;
+      total_cached_input_tokens: string;
+      total_fresh_input_tokens: string;
+      total_output_tokens: string;
+      total_request_count: string;
+    } | undefined;
+
+    const next = {
+      cost: BigInt(totals.costUsdc),
+      input: BigInt(totals.inputTokens),
+      cached: BigInt(totals.cachedInputTokens),
+      fresh: BigInt(totals.freshInputTokens),
+      output: BigInt(totals.outputTokens),
+      count: BigInt(totals.requestCount),
+    };
+    const previous = {
+      cost: prev ? BigInt(prev.total_cost_usdc) : 0n,
+      input: prev ? BigInt(prev.total_input_tokens) : 0n,
+      cached: prev ? BigInt(prev.total_cached_input_tokens) : 0n,
+      fresh: prev ? BigInt(prev.total_fresh_input_tokens) : 0n,
+      output: prev ? BigInt(prev.total_output_tokens) : 0n,
+      count: prev ? BigInt(prev.total_request_count) : 0n,
+    };
+    if (
+      next.cost < previous.cost || next.input < previous.input || next.cached < previous.cached
+      || next.fresh < previous.fresh || next.output < previous.output || next.count < previous.count
+    ) {
+      throw new Error(`usage manifest regression for service ${service}`);
+    }
+
+    this.db.prepare(
+      `INSERT OR REPLACE INTO seller_channel_service_totals
+        (agent_id, channel_id, service, total_cost_usdc, total_input_tokens,
+         total_cached_input_tokens, total_fresh_input_tokens, total_output_tokens, total_request_count)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      agentId, channelId, service, next.cost.toString(), next.input.toString(),
+      next.cached.toString(), next.fresh.toString(), next.output.toString(), next.count.toString(),
+    );
+
+    const aggregate = this.db.prepare(
+      `SELECT total_cost_usdc, total_input_tokens, total_cached_input_tokens, total_fresh_input_tokens,
+              total_output_tokens, total_request_count
+       FROM seller_service_totals
+       WHERE agent_id = ? AND service = ?`,
+    ).get(agentId, service) as typeof prev;
+
+    this.db.prepare(
+      `INSERT OR REPLACE INTO seller_service_totals
+        (agent_id, service, total_cost_usdc, total_input_tokens, total_cached_input_tokens,
+         total_fresh_input_tokens, total_output_tokens, total_request_count)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      agentId,
+      service,
+      ((aggregate ? BigInt(aggregate.total_cost_usdc) : 0n) + next.cost - previous.cost).toString(),
+      ((aggregate ? BigInt(aggregate.total_input_tokens) : 0n) + next.input - previous.input).toString(),
+      ((aggregate ? BigInt(aggregate.total_cached_input_tokens) : 0n) + next.cached - previous.cached).toString(),
+      ((aggregate ? BigInt(aggregate.total_fresh_input_tokens) : 0n) + next.fresh - previous.fresh).toString(),
+      ((aggregate ? BigInt(aggregate.total_output_tokens) : 0n) + next.output - previous.output).toString(),
+      ((aggregate ? BigInt(aggregate.total_request_count) : 0n) + next.count - previous.count).toString(),
+    );
   }
 
   /** Returns last indexed block + block timestamp, or null if no checkpoint. */

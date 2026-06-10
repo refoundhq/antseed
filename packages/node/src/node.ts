@@ -63,6 +63,7 @@ import {
   StakingClient,
   ChannelStore,
   CHANNEL_STATUS,
+  UsageManifestStore,
 } from "./payments/index.js";
 import { debugLog, debugWarn } from "./utils/debug.js";
 import { parsePublicAddress } from "./discovery/public-address.js";
@@ -240,6 +241,8 @@ export class AntseedNode extends EventEmitter {
   private _buyerHandler: BuyerRequestHandler | null = null;
   /** Seller-side payment manager (initialized when seller has payment config). */
   private _sellerPaymentManager: SellerPaymentManager | null = null;
+  /** Seller-side cumulative usage manifests for buyer-verified stats pointers. */
+  private _usageManifestStore: UsageManifestStore | null = null;
   /** Shared channel store for payment persistence. */
   private _channelStore: ChannelStore | null = null;
   /** Periodic timeout checker interval. */
@@ -1193,6 +1196,7 @@ export class AntseedNode extends EventEmitter {
       sessionTracker: this._sessionTracker,
       channelsClient: this._channelsClient,
       announcer: this._announcer,
+      usageManifestStore: this._usageManifestStore,
       maxUploadBodyBytes: this._config.maxUploadBodyBytes,
       emit: (event, ...args) => this.emit(event, ...args),
     });
@@ -1278,7 +1282,7 @@ export class AntseedNode extends EventEmitter {
           this._depositsClient,
           this._channelsClient,
           this._channelStore,
-          {},
+          { usageManifestStore: new UsageManifestStore(join(paymentsDir, "buyer-usage-manifests")) },
           this,
           this._sellerAddressResolver ?? undefined,
         );
@@ -1417,6 +1421,10 @@ export class AntseedNode extends EventEmitter {
 
     // Initialize ChannelStore for persistent payment channels (shared instance)
     const paymentsDir = join(dataDir, "payments");
+    if (this._config.role === 'seller' && !this._usageManifestStore) {
+      this._usageManifestStore = new UsageManifestStore(join(paymentsDir, "usage-manifests"));
+      debugLog("[Node] UsageManifestStore initialized");
+    }
     if (!this._channelStore) {
       try {
         this._channelStore = new ChannelStore(paymentsDir);

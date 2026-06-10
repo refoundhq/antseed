@@ -3,7 +3,7 @@ import type { PeerConnection } from '../p2p/connection-manager.js';
 import { PaymentMux } from '../p2p/payment-mux.js';
 import type { PeerInfo, PeerId } from '../types/peer.js';
 import type { SerializedHttpRequest, SerializedHttpResponse } from '../types/http.js';
-import { PAYMENT_CODE_CHANNEL_EXHAUSTED, type PaymentRequiredPayload } from '../types/protocol.js';
+import { PAYMENT_CODE_CHANNEL_EXHAUSTED, type NeedAuthPayload, type PaymentRequiredPayload } from '../types/protocol.js';
 import type { BuyerPaymentManager } from './buyer-payment-manager.js';
 import type { DepositsClient } from './evm/deposits-client.js';
 import type { ChannelsClient } from './evm/channels-client.js';
@@ -16,8 +16,17 @@ import { SellerAuthorizationError } from '../discovery/seller-address-resolver.j
 import { parseResponseUsage } from '../utils/response-usage.js';
 import { computeCostUsdc, type ServicePricing } from './pricing.js';
 import { formatUsdc } from './usdc-utils.js';
+import {
+  buildUsageManifest,
+  buildUsageManifestRecord,
+  computeUsageManifestPointer,
+  type UsageManifestStore,
+  type UsageManifestRecord,
+} from './usage-manifest.js';
 
-export interface BuyerNegotiatorConfig {}
+export interface BuyerNegotiatorConfig {
+  usageManifestStore?: UsageManifestStore | null;
+}
 
 /** Emitter interface — subset of EventEmitter used by the negotiator. */
 export interface NegotiationEmitter {
@@ -40,6 +49,18 @@ interface LastResponseCost {
   outputContent: Uint8Array;
   latencyMs: number;
   service?: string;
+}
+
+interface UsageObservation {
+  requestId: string;
+  service?: string;
+  costUsdc: bigint;
+  inputTokens: number;
+  cachedInputTokens: number;
+  freshInputTokens: number;
+  outputTokens: number;
+  inputBody: Uint8Array;
+  outputBody: Uint8Array;
 }
 
 function parsePaymentRequiredBody(body: Uint8Array): Record<string, unknown> | null {
@@ -73,6 +94,7 @@ export class BuyerPaymentNegotiator {
   private readonly _channelStore: ChannelStore | null;
   private readonly _identity: Identity;
   private readonly _emit: NegotiationEmitter;
+  private readonly _usageManifestStore: UsageManifestStore | null;
   private readonly _sellerAddressResolver?: SellerAddressResolver;
 
   /** Tracks which seller peers the buyer has already negotiated payment for. */
@@ -95,6 +117,9 @@ export class BuyerPaymentNegotiator {
   private readonly _muxes = new Map<PeerId, PaymentMux>();
   /** In-flight NeedAuth handlers keyed by seller peerId. */
   private readonly _pendingNeedAuth = new Map<string, Promise<void>>();
+  private readonly _usageObservations = new Map<string, UsageObservation>();
+  private readonly _usageObservationWaiters = new Map<string, Array<(value: UsageObservation | null) => void>>();
+  private readonly _verifiedUsageRecordsByChannel = new Map<string, UsageManifestRecord[]>();
 
   constructor(
     identity: Identity,
@@ -102,7 +127,7 @@ export class BuyerPaymentNegotiator {
     depositsClient: DepositsClient | null,
     channelsClient: ChannelsClient | null,
     channelStore: ChannelStore | null,
-    _config: BuyerNegotiatorConfig,
+    config: BuyerNegotiatorConfig,
     emitter: NegotiationEmitter,
     sellerAddressResolver?: SellerAddressResolver,
   ) {
@@ -112,6 +137,7 @@ export class BuyerPaymentNegotiator {
     this._channelsClient = channelsClient;
     this._channelStore = channelStore;
     this._emit = emitter;
+    this._usageManifestStore = config.usageManifestStore ?? null;
     this._sellerAddressResolver = sellerAddressResolver;
   }
 
@@ -143,7 +169,7 @@ export class BuyerPaymentNegotiator {
     });
 
     pmux.onNeedAuth((payload) => {
-      const p = this._bpm.handleNeedAuth(peerId, payload, pmux);
+      const p = this.handleNeedAuth(peerId, payload, pmux);
       this._pendingNeedAuth.set(peerId, p);
       p.finally(() => {
         if (this._pendingNeedAuth.get(peerId) === p) this._pendingNeedAuth.delete(peerId);
@@ -442,7 +468,12 @@ export class BuyerPaymentNegotiator {
     }
   }
 
-  estimateCostFromResponse(peer: PeerInfo, response: SerializedHttpResponse, service?: string): void {
+  estimateCostFromResponse(
+    peer: PeerInfo,
+    response: SerializedHttpResponse,
+    service?: string,
+    request?: SerializedHttpRequest,
+  ): void {
     // Prefer session pricing (from PaymentRequired negotiation, includes service-specific rates)
     // over peer-level defaults which may be different from the actual service pricing.
     const sessionPricing = this._bpm.getSessionPricing(peer.peerId, service);
@@ -479,6 +510,20 @@ export class BuyerPaymentNegotiator {
     );
 
     this._bpm.recordAndPersistTokens(peer.peerId, usage.inputTokens, usage.outputTokens);
+
+    if (request?.requestId) {
+      this._recordUsageObservation(peer.peerId, {
+        requestId: request.requestId,
+        service,
+        costUsdc,
+        inputTokens: usage.inputTokens,
+        cachedInputTokens: usage.cachedInputTokens,
+        freshInputTokens: usage.freshInputTokens,
+        outputTokens: usage.outputTokens,
+        inputBody: request.body,
+        outputBody: response.body,
+      });
+    }
   }
 
   // parseCostHeaders removed — cost data now flows through NeedAuth on PaymentMux.
@@ -591,6 +636,7 @@ export class BuyerPaymentNegotiator {
     this._lockedPeers.delete(peerId);
     this._firstRequestSent.delete(peerId);
     this._lastResponseCost.delete(peerId);
+    this._clearUsageStateForPeer(peerId);
   }
 
   /** Wait for in-flight NeedAuth handlers to complete (settlement safety). */
@@ -614,6 +660,117 @@ export class BuyerPaymentNegotiator {
     this._pendingPaymentRequired.clear();
     this._bufferedPaymentRequired.clear();
     this._negotiationLocks.clear();
+    this._usageObservations.clear();
+    for (const waiters of this._usageObservationWaiters.values()) {
+      for (const resolve of waiters) resolve(null);
+    }
+    this._usageObservationWaiters.clear();
+    this._verifiedUsageRecordsByChannel.clear();
+  }
+
+  async handleNeedAuth(peerId: PeerId, payload: NeedAuthPayload, pmux: PaymentMux): Promise<void> {
+    let verifiedRecord: UsageManifestRecord | null = null;
+    if (payload.usageCid || payload.usageRoot) {
+      verifiedRecord = await this._verifyUsagePointer(peerId, payload);
+      if (!verifiedRecord) {
+        debugWarn(
+          `[BuyerNegotiator] Usage pointer verification failed for ${peerId.slice(0, 12)}...; signing legacy metadata only`,
+        );
+      }
+    }
+
+    const result = await this._bpm.handleNeedAuth(peerId, payload, pmux, {
+      usagePointerVerified: verifiedRecord !== null,
+    });
+    if (result.signed && verifiedRecord) {
+      this._commitVerifiedUsageRecord(payload.channelId, verifiedRecord);
+    }
+  }
+
+  private _recordUsageObservation(peerId: PeerId, observation: UsageObservation): void {
+    const key = this._usageObservationKey(peerId, observation.requestId);
+    this._usageObservations.set(key, observation);
+    const waiters = this._usageObservationWaiters.get(key);
+    if (!waiters) return;
+    this._usageObservationWaiters.delete(key);
+    for (const resolve of waiters) resolve(observation);
+  }
+
+  private async _verifyUsagePointer(peerId: PeerId, payload: NeedAuthPayload): Promise<UsageManifestRecord | null> {
+    if (!payload.requestId || !payload.usageCid || !payload.usageRoot) return null;
+    const key = this._usageObservationKey(peerId, payload.requestId);
+    const observation = await this._waitForUsageObservation(key, 2_000);
+    this._usageObservations.delete(key);
+    if (!observation) return null;
+
+    const record = buildUsageManifestRecord({
+      requestId: observation.requestId,
+      service: observation.service,
+      costUsdc: BigInt(payload.lastRequestCost ?? observation.costUsdc),
+      cumulativeCostUsdc: BigInt(payload.requiredCumulativeAmount),
+      inputTokens: observation.inputTokens,
+      cachedInputTokens: observation.cachedInputTokens,
+      freshInputTokens: observation.freshInputTokens,
+      outputTokens: observation.outputTokens,
+      inputBody: observation.inputBody,
+      outputBody: observation.outputBody,
+    });
+    const previous = this._getVerifiedUsageRecords(payload.channelId);
+    const pointer = computeUsageManifestPointer(buildUsageManifest(payload.channelId, [...previous, record]));
+    const rootMatches = pointer.usageRoot.toLowerCase() === payload.usageRoot.toLowerCase();
+    const cidMatches = pointer.cid === payload.usageCid;
+    return rootMatches && cidMatches ? record : null;
+  }
+
+  private async _waitForUsageObservation(key: string, timeoutMs: number): Promise<UsageObservation | null> {
+    const existing = this._usageObservations.get(key);
+    if (existing) return existing;
+    return await new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        const waiters = this._usageObservationWaiters.get(key)?.filter((entry) => entry !== wrapped);
+        if (waiters && waiters.length > 0) this._usageObservationWaiters.set(key, waiters);
+        else this._usageObservationWaiters.delete(key);
+        resolve(null);
+      }, timeoutMs);
+      const wrapped = (value: UsageObservation | null): void => {
+        clearTimeout(timer);
+        resolve(value);
+      };
+      const waiters = this._usageObservationWaiters.get(key) ?? [];
+      waiters.push(wrapped);
+      this._usageObservationWaiters.set(key, waiters);
+    });
+  }
+
+  private _commitVerifiedUsageRecord(channelId: string, record: UsageManifestRecord): void {
+    const records = this._getVerifiedUsageRecords(channelId);
+    records.push(record);
+    this._verifiedUsageRecordsByChannel.set(channelId, records);
+    this._usageManifestStore?.replace(channelId, records);
+  }
+
+  private _getVerifiedUsageRecords(channelId: string): UsageManifestRecord[] {
+    const existing = this._verifiedUsageRecordsByChannel.get(channelId);
+    if (existing) return existing;
+    const records = this._usageManifestStore?.getRecords(channelId) ?? [];
+    this._verifiedUsageRecordsByChannel.set(channelId, records);
+    return records;
+  }
+
+  private _clearUsageStateForPeer(peerId: PeerId): void {
+    const prefix = `${peerId}:`;
+    for (const key of this._usageObservations.keys()) {
+      if (key.startsWith(prefix)) this._usageObservations.delete(key);
+    }
+    for (const [key, waiters] of this._usageObservationWaiters) {
+      if (!key.startsWith(prefix)) continue;
+      this._usageObservationWaiters.delete(key);
+      for (const resolve of waiters) resolve(null);
+    }
+  }
+
+  private _usageObservationKey(peerId: PeerId, requestId: string): string {
+    return `${peerId}:${requestId}`;
   }
 
   /**

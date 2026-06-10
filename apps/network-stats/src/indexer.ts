@@ -1,10 +1,12 @@
 import { ethers } from 'ethers';
 import type { StatsClient } from '@antseed/node';
 import type { SqliteStore } from './store.js';
+import type { UsageManifestFetcher } from './usage-manifest-fetcher.js';
 
 export interface MetadataIndexerOptions {
   store: SqliteStore;
-  statsClient: Pick<StatsClient, 'getMetadataRecordedEvents' | 'getBlockNumber'>;
+  statsClient: Pick<StatsClient, 'getMetadataRecordedEvents' | 'getMetadataPointerRecordedEvents' | 'getBlockNumber'>;
+  usageManifestFetcher?: UsageManifestFetcher;
   chainId: string;              // e.g. 'base-mainnet'
   contractAddress: string;      // lowercased externally — indexer stores as-is
   deployBlock: number;          // one-time seed for cold start
@@ -23,7 +25,8 @@ function logError(err: unknown): void {
 
 export class MetadataIndexer {
   private readonly _store: SqliteStore;
-  private readonly _statsClient: Pick<StatsClient, 'getMetadataRecordedEvents' | 'getBlockNumber'>;
+  private readonly _statsClient: Pick<StatsClient, 'getMetadataRecordedEvents' | 'getMetadataPointerRecordedEvents' | 'getBlockNumber'>;
+  private readonly _usageManifestFetcher: UsageManifestFetcher | undefined;
   private readonly _chainId: string;
   private readonly _contractAddress: string;
   private readonly _deployBlock: number;
@@ -45,6 +48,7 @@ export class MetadataIndexer {
 
     this._store = options.store;
     this._statsClient = options.statsClient;
+    this._usageManifestFetcher = options.usageManifestFetcher;
     this._chainId = options.chainId;
     this._contractAddress = options.contractAddress;
     this._deployBlock = options.deployBlock;
@@ -106,14 +110,18 @@ export class MetadataIndexer {
 
       const toBlock = Math.min(safeTo, fromBlock + this._maxBlocksPerTick - 1);
 
-      const events = await this._statsClient.getMetadataRecordedEvents({ fromBlock, toBlock });
+      const [events, pointerEvents] = await Promise.all([
+        this._statsClient.getMetadataRecordedEvents({ fromBlock, toBlock }),
+        this._statsClient.getMetadataPointerRecordedEvents({ fromBlock, toBlock }),
+      ]);
 
       // Fetch block timestamps for each distinct block that carried an event,
       // so applyBatch can stamp first_seen_at with on-chain wall clock. Only
       // distinct blocks matter — a block with N events costs one getBlock call.
       let blockTimestamps: Map<number, number> | undefined;
-      if (this._provider && events.length > 0) {
-        const uniqueBlocks = Array.from(new Set(events.map((e) => e.blockNumber)));
+      const eventBlocks = [...events.map((e) => e.blockNumber), ...pointerEvents.map((e) => e.blockNumber)];
+      if (this._provider && eventBlocks.length > 0) {
+        const uniqueBlocks = Array.from(new Set(eventBlocks));
         const blocks = await Promise.all(uniqueBlocks.map((b) => this._provider!.getBlock(b)));
         blockTimestamps = new Map();
         for (let i = 0; i < uniqueBlocks.length; i++) {
@@ -145,7 +153,26 @@ export class MetadataIndexer {
         newCheckpointTimestamp,
       );
 
-      console.log(`[indexer] ${fromBlock}..${toBlock} events=${events.length}`);
+      if (this._usageManifestFetcher) {
+        for (const event of pointerEvents) {
+          try {
+            const manifest = await this._usageManifestFetcher.fetch(event.cid, event.usageRoot);
+            this._store.applyUsageManifest(
+              this._chainId,
+              this._contractAddress,
+              event,
+              manifest,
+              blockTimestamps?.get(event.blockNumber) ?? null,
+            );
+          } catch (err) {
+            console.error(
+              `[indexer] usage manifest skipped cid=${event.cid}: ${err instanceof Error ? err.message : err}`,
+            );
+          }
+        }
+      }
+
+      console.log(`[indexer] ${fromBlock}..${toBlock} events=${events.length} pointers=${pointerEvents.length}`);
     } catch (err) {
       console.error('[indexer] tick error:', err);
     } finally {

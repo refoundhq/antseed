@@ -109,5 +109,7 @@ export function decodeNeedAuth(data: Uint8Array): NeedAuthPayload {
   if (typeof obj.cachedInputTokens === 'string') result.cachedInputTokens = obj.cachedInputTokens;
   if (typeof obj.freshInputTokens === 'string') result.freshInputTokens = obj.freshInputTokens;
   if (typeof obj.service === 'string') result.service = obj.service;
+  if (typeof obj.usageCid === 'string') result.usageCid = obj.usageCid;
+  if (typeof obj.usageRoot === 'string') result.usageRoot = obj.usageRoot;
   return result;
 }

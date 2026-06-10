@@ -21,8 +21,22 @@ export interface DecodedMetadataRecorded {
   requestCount: bigint; // delta
 }
 
+export interface DecodedMetadataPointerRecorded {
+  blockNumber: number;
+  txHash: string;
+  logIndex: number;
+  agentId: bigint;
+  buyer: string;
+  channelId: string;
+  metadataHash: string;
+  cid: string;
+  cidBytes: string;
+  usageRoot: string;
+}
+
 const STATS_ABI = [
   'event MetadataRecorded(uint256 indexed agentId, address indexed buyer, bytes32 indexed channelId, bytes32 metadataHash, uint256 inputTokens, uint256 outputTokens, uint256 requestCount)',
+  'event MetadataPointerRecorded(uint256 indexed agentId, address indexed buyer, bytes32 indexed channelId, bytes32 metadataHash, bytes cid, bytes32 usageRoot)',
 ] as const;
 
 export class StatsClient extends BaseEvmClient {
@@ -71,7 +85,55 @@ export class StatsClient extends BaseEvmClient {
     return out;
   }
 
+  async getMetadataPointerRecordedEvents(params: {
+    fromBlock: number;
+    toBlock: number;
+  }): Promise<DecodedMetadataPointerRecorded[]> {
+    const iface = new ethers.Interface(STATS_ABI);
+    const topic = iface.getEvent('MetadataPointerRecorded')!.topicHash;
+
+    const logs = await this._provider.getLogs({
+      address: this._contractAddress,
+      fromBlock: params.fromBlock,
+      toBlock: params.toBlock,
+      topics: [topic],
+    });
+
+    const out: DecodedMetadataPointerRecorded[] = [];
+    for (const log of logs) {
+      const parsed = iface.parseLog({ topics: [...log.topics], data: log.data });
+      if (!parsed || parsed.name !== 'MetadataPointerRecorded') continue;
+      const cidBytes = parsed.args[4] as string;
+      out.push({
+        blockNumber: log.blockNumber,
+        txHash: log.transactionHash,
+        logIndex: log.index,
+        agentId: parsed.args[0] as bigint,
+        buyer: (parsed.args[1] as string).toLowerCase(),
+        channelId: parsed.args[2] as string,
+        metadataHash: parsed.args[3] as string,
+        cid: decodeCid(cidBytes),
+        cidBytes,
+        usageRoot: parsed.args[5] as string,
+      });
+    }
+    out.sort((a, b) =>
+      a.blockNumber !== b.blockNumber ? a.blockNumber - b.blockNumber : a.logIndex - b.logIndex,
+    );
+    return out;
+  }
+
   async getBlockNumber(): Promise<number> {
     return this._provider.getBlockNumber();
   }
+}
+
+function decodeCid(cidBytes: string): string {
+  try {
+    const bytes = ethers.getBytes(cidBytes);
+    const decoded = new TextDecoder().decode(bytes);
+    // Advisory display value only; indexers should preserve cidBytes as canonical.
+    if (/^[\x21-\x7e]+$/.test(decoded)) return decoded;
+  } catch { /* fall through */ }
+  return cidBytes;
 }

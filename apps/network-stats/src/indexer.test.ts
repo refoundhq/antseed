@@ -5,6 +5,11 @@ import type { DecodedMetadataRecorded } from '@antseed/node';
 import { SqliteStore } from './store.js';
 import { MetadataIndexer } from './indexer.js';
 
+type MockStatsClient = Pick<
+  import('@antseed/node').StatsClient,
+  'getMetadataRecordedEvents' | 'getMetadataPointerRecordedEvents' | 'getBlockNumber'
+>;
+
 // ── helpers ──────────────────────────────────────────────────────────────────
 
 function makeMockClient(opts: {
@@ -12,7 +17,7 @@ function makeMockClient(opts: {
   events?: DecodedMetadataRecorded[];
   throwOnFetch?: boolean;
 }): {
-  client: Pick<import('@antseed/node').StatsClient, 'getMetadataRecordedEvents' | 'getBlockNumber'>;
+  client: MockStatsClient;
   fetchCalls: Array<{ fromBlock: number; toBlock: number }>;
 } {
   const fetchCalls: Array<{ fromBlock: number; toBlock: number }> = [];
@@ -24,6 +29,9 @@ function makeMockClient(opts: {
       fetchCalls.push(p);
       if (opts.throwOnFetch) throw new Error('forced');
       return opts.events ?? [];
+    },
+    async getMetadataPointerRecordedEvents() {
+      return [];
     },
   };
   return { client, fetchCalls };

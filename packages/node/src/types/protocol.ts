@@ -136,4 +136,8 @@ export interface NeedAuthPayload {
   freshInputTokens?: string;
   /** Service/model name for service-specific pricing validation. */
   service?: string;
+  /** CID for a buyer-verifiable off-chain usage manifest. */
+  usageCid?: string;
+  /** 0x-prefixed sha256 root of the cumulative usage manifest. */
+  usageRoot?: string;
 }

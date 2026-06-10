@@ -49,8 +49,11 @@ describe('SqliteStore', () => {
     assert.deepEqual(tables, [
       'indexer_checkpoint',
       'seller_buyer_totals',
+      'seller_channel_service_totals',
       'seller_channel_totals',
       'seller_metadata_totals',
+      'seller_service_totals',
+      'usage_manifest_pointers',
     ]);
     store.close();
   });
@@ -283,4 +286,3 @@ describe('SqliteStore', () => {
     store.close();
   });
 });
-
