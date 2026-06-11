@@ -40,6 +40,7 @@ interface LastResponseCost {
   outputContent: Uint8Array;
   latencyMs: number;
   service?: string;
+  requestId?: string;
 }
 
 function parsePaymentRequiredBody(body: Uint8Array): Record<string, unknown> | null {
@@ -210,10 +211,11 @@ export class BuyerPaymentNegotiator {
     const reportedOutputTokens = lastCost?.outputTokens;
     const reportedCachedInputTokens = lastCost?.cachedInputTokens;
     const service = lastCost?.service;
+    const requestId = lastCost?.requestId;
     try {
       const { payload, topUpNeeded } = await this._bpm.signPerRequestAuth(
         peer.peerId,
-        { inputBytes, outputBytes, sellerClaimedCost, reportedInputTokens, reportedOutputTokens, reportedCachedInputTokens, service },
+        { inputBytes, outputBytes, sellerClaimedCost, reportedInputTokens, reportedOutputTokens, reportedCachedInputTokens, service, requestId },
       );
       pmux.sendSpendingAuth(payload);
       // Release held content to free memory — no longer needed after signing
@@ -442,7 +444,7 @@ export class BuyerPaymentNegotiator {
     }
   }
 
-  estimateCostFromResponse(peer: PeerInfo, response: SerializedHttpResponse, service?: string): void {
+  estimateCostFromResponse(peer: PeerInfo, response: SerializedHttpResponse, service?: string, requestId?: string): void {
     // Prefer session pricing (from PaymentRequired negotiation, includes service-specific rates)
     // over peer-level defaults which may be different from the actual service pricing.
     const sessionPricing = this._bpm.getSessionPricing(peer.peerId, service);
@@ -471,6 +473,7 @@ export class BuyerPaymentNegotiator {
       outputContent: response.body,
       latencyMs: 0,
       service,
+      requestId,
     });
 
     debugLog(
