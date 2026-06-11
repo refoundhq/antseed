@@ -247,7 +247,7 @@ contract AntseedEmissionsGateTest is Test {
         bytes32 programId = keccak256("recognized-seller-usage-v1");
         _deployGate(4);
 
-        sellerPools = new AntseedSellerPools(address(realRegistry));
+        sellerPools = new AntseedSellerPools(address(realRegistry), 0, 0, 0);
         usageAccounting.setSellerPools(address(sellerPools));
         sellerUsageRewards =
             new AntseedSellerUsageRewards(address(programs), address(sellerPools), address(usageAccounting), programId);
@@ -282,7 +282,7 @@ contract AntseedEmissionsGateTest is Test {
         bytes32 programId = keccak256("recognized-seller-usage-v1");
         _deployGate(4);
 
-        sellerPools = new AntseedSellerPools(address(realRegistry));
+        sellerPools = new AntseedSellerPools(address(realRegistry), 0, 0, 0);
         usageAccounting.setSellerPools(address(sellerPools));
         sellerUsageRewards =
             new AntseedSellerUsageRewards(address(programs), address(sellerPools), address(usageAccounting), programId);
@@ -316,7 +316,7 @@ contract AntseedEmissionsGateTest is Test {
         bytes32 programId = keccak256("recognized-seller-usage-v1");
         _deployGate(4);
 
-        sellerPools = new AntseedSellerPools(address(realRegistry));
+        sellerPools = new AntseedSellerPools(address(realRegistry), 0, 0, 0);
         usageAccounting.setSellerPools(address(sellerPools));
         sellerUsageRewards =
             new AntseedSellerUsageRewards(address(programs), address(sellerPools), address(usageAccounting), programId);
@@ -348,7 +348,7 @@ contract AntseedEmissionsGateTest is Test {
         bytes32 programId = keccak256("recognized-seller-usage-v1");
         _deployGate(4);
 
-        sellerPools = new AntseedSellerPools(address(realRegistry));
+        sellerPools = new AntseedSellerPools(address(realRegistry), 0, 0, 0);
         usageAccounting.setSellerPools(address(sellerPools));
         sellerUsageRewards =
             new AntseedSellerUsageRewards(address(programs), address(sellerPools), address(usageAccounting), programId);
@@ -382,7 +382,7 @@ contract AntseedEmissionsGateTest is Test {
         bytes32 programId = keccak256("recognized-seller-usage-v1");
         _deployGate(5);
 
-        sellerPools = new AntseedSellerPools(address(realRegistry));
+        sellerPools = new AntseedSellerPools(address(realRegistry), 0, 0, 0);
         usageAccounting.setSellerPools(address(sellerPools));
         sellerUsageRewards =
             new AntseedSellerUsageRewards(address(programs), address(sellerPools), address(usageAccounting), programId);
@@ -529,7 +529,7 @@ contract AntseedEmissionsGateTest is Test {
     function test_usageAccountingTracksBuyerAgentRatiosByEpoch() public {
         _deployGate(4);
 
-        sellerPools = new AntseedSellerPools(address(realRegistry));
+        sellerPools = new AntseedSellerPools(address(realRegistry), 0, 0, 0);
         usageAccounting.setSellerPools(address(sellerPools));
         _createSellerPool(sellerPools, seller, 5_000, keccak256("seller"));
         _createSellerPool(sellerPools, otherSeller, 5_000, keccak256("other-seller"));
@@ -586,7 +586,7 @@ contract AntseedEmissionsGateTest is Test {
     function test_usageAccountingRequiresMinimumAccountedPoolPower() public {
         _deployGate(4);
 
-        sellerPools = new AntseedSellerPools(address(realRegistry));
+        sellerPools = new AntseedSellerPools(address(realRegistry), 0, 0, 0);
         usageAccounting.setSellerPools(address(sellerPools));
         _createSellerPool(sellerPools, seller, 5_000, keccak256("seller"));
 
@@ -622,7 +622,7 @@ contract AntseedEmissionsGateTest is Test {
     function test_usageAccountingGasSnapshotsRecordUsageCases() public {
         _deployGate(4);
 
-        sellerPools = new AntseedSellerPools(address(realRegistry));
+        sellerPools = new AntseedSellerPools(address(realRegistry), 0, 0, 0);
         usageAccounting.setSellerPools(address(sellerPools));
         _createSellerPool(sellerPools, seller, 5_000, keccak256("seller"));
         _createSellerPool(sellerPools, otherSeller, 5_000, keccak256("other-seller"));
@@ -653,7 +653,7 @@ contract AntseedEmissionsGateTest is Test {
         bytes32 programId = keccak256("recognized-seller-usage-v1");
         _deployGate(4);
 
-        sellerPools = new AntseedSellerPools(address(realRegistry));
+        sellerPools = new AntseedSellerPools(address(realRegistry), 0, 0, 0);
         usageAccounting.setSellerPools(address(sellerPools));
         sellerUsageRewards =
             new AntseedSellerUsageRewards(address(programs), address(sellerPools), address(usageAccounting), programId);
@@ -681,7 +681,7 @@ contract AntseedEmissionsGateTest is Test {
     function test_pointsPolicyCanZeroOrScaleSellerPoolPoints() public {
         _deployGate(4);
 
-        sellerPools = new AntseedSellerPools(address(realRegistry));
+        sellerPools = new AntseedSellerPools(address(realRegistry), 0, 0, 0);
         usageAccounting.setSellerPools(address(sellerPools));
         address poolSeller = _createSellerPool(sellerPools, seller, 5_000, keccak256("terms"));
 
@@ -709,7 +709,7 @@ contract AntseedEmissionsGateTest is Test {
     function test_poolWeightedPointsAreSavedUncapped() public {
         _deployGate(4);
 
-        sellerPools = new AntseedSellerPools(address(realRegistry));
+        sellerPools = new AntseedSellerPools(address(realRegistry), 0, 0, 0);
         usageAccounting.setSellerPools(address(sellerPools));
 
         uint256 honestStake = 1_000_000 ether;
@@ -752,12 +752,11 @@ contract AntseedEmissionsGateTest is Test {
         uint16 sellerProgramShareBps = 1;
         _deployGate(4);
 
-        sellerPools = new AntseedSellerPools(address(realRegistry));
+        sellerPools = new AntseedSellerPools(address(realRegistry), 10_000, 2_000, 500);
         usageAccounting.setSellerPools(address(sellerPools));
         sellerUsageRewards =
             new AntseedSellerUsageRewards(address(programs), address(sellerPools), address(usageAccounting), programId);
         sellerPools.setRewardStaker(address(sellerUsageRewards), true);
-        sellerPools.setApyCap(10_000, 52);
         programs.setRewardProgram(programId, address(sellerUsageRewards), address(0), sellerProgramShareBps, 4, 0, true);
 
         deal(address(token), seller, 1_000_000 ether);
@@ -805,12 +804,11 @@ contract AntseedEmissionsGateTest is Test {
         bytes32 programId = keccak256("recognized-seller-usage-v1");
         _deployGate(4);
 
-        sellerPools = new AntseedSellerPools(address(realRegistry));
+        sellerPools = new AntseedSellerPools(address(realRegistry), 10_000, 2_000, 500);
         usageAccounting.setSellerPools(address(sellerPools));
         sellerUsageRewards =
             new AntseedSellerUsageRewards(address(programs), address(sellerPools), address(usageAccounting), programId);
         sellerPools.setRewardStaker(address(sellerUsageRewards), true);
-        sellerPools.setApyCap(10_000, 52);
         programs.setRewardProgram(programId, address(sellerUsageRewards), address(0), 7_000, 4, 0, true);
 
         deal(address(token), otherSeller, 100 ether);
@@ -845,7 +843,7 @@ contract AntseedEmissionsGateTest is Test {
 
         _deployGate(4);
 
-        sellerPools = new AntseedSellerPools(address(realRegistry));
+        sellerPools = new AntseedSellerPools(address(realRegistry), 10_000, 2_000, 500);
         usageAccounting.setSellerPools(address(sellerPools));
         sellerUsageRewards = new AntseedSellerUsageRewards(
             address(programs), address(sellerPools), address(usageAccounting), sellerPoolProgramId
@@ -853,7 +851,6 @@ contract AntseedEmissionsGateTest is Test {
         buyerUsageRewards = new AntseedBuyerUsageRewards(address(programs), address(realRegistry), buyerProgramId);
         buyerUsageRewards.setUsageAccounting(address(usageAccounting));
         sellerPools.setRewardStaker(address(sellerUsageRewards), true);
-        sellerPools.setApyCap(10_000, 52);
         programs.setRewardProgram(sellerPoolProgramId, address(sellerUsageRewards), address(0), 7_000, 4, 0, true);
         programs.setRewardProgram(buyerProgramId, address(buyerUsageRewards), address(0), 500, 4, 0, true);
 
@@ -956,7 +953,7 @@ contract AntseedEmissionsGateTest is Test {
 
         _deployGate(4);
 
-        sellerPools = new AntseedSellerPools(address(realRegistry));
+        sellerPools = new AntseedSellerPools(address(realRegistry), 10_000, 2_000, 500);
         usageAccounting.setSellerPools(address(sellerPools));
         sellerUsageRewards = new AntseedSellerUsageRewards(
             address(programs), address(sellerPools), address(usageAccounting), sellerPoolProgramId
@@ -964,7 +961,6 @@ contract AntseedEmissionsGateTest is Test {
         buyerUsageRewards = new AntseedBuyerUsageRewards(address(programs), address(realRegistry), buyerProgramId);
         buyerUsageRewards.setUsageAccounting(address(usageAccounting));
         sellerPools.setRewardStaker(address(sellerUsageRewards), true);
-        sellerPools.setApyCap(10_000, 52);
         programs.setRewardProgram(sellerPoolProgramId, address(sellerUsageRewards), address(0), 7_000, 4, 0, true);
         programs.setRewardProgram(buyerProgramId, address(buyerUsageRewards), address(0), 500, 4, 0, true);
 
@@ -1054,7 +1050,7 @@ contract AntseedEmissionsGateTest is Test {
     function test_stakeCreatedDuringEpochDoesNotEarnUntilNextEpoch() public {
         _deployGate(4);
 
-        sellerPools = new AntseedSellerPools(address(realRegistry));
+        sellerPools = new AntseedSellerPools(address(realRegistry), 0, 0, 0);
         usageAccounting.setSellerPools(address(sellerPools));
         address poolSeller = _createSellerPool(sellerPools, seller, 5_000, keccak256("terms"));
 
@@ -1074,7 +1070,7 @@ contract AntseedEmissionsGateTest is Test {
         address secondBuyer = address(0x21);
         _deployGate(4);
 
-        sellerPools = new AntseedSellerPools(address(realRegistry));
+        sellerPools = new AntseedSellerPools(address(realRegistry), 0, 0, 0);
         usageAccounting.setSellerPools(address(sellerPools));
         _createSellerPool(sellerPools, seller, 5_000, keccak256("terms"));
 
@@ -1108,7 +1104,7 @@ contract AntseedEmissionsGateTest is Test {
         address secondBuyer = address(0x21);
         _deployGate(3);
 
-        sellerPools = new AntseedSellerPools(address(realRegistry));
+        sellerPools = new AntseedSellerPools(address(realRegistry), 0, 0, 0);
         usageAccounting.setSellerPools(address(sellerPools));
 
         buyerUsageRewards = new AntseedBuyerUsageRewards(address(programs), address(realRegistry), programId);
@@ -1229,7 +1225,7 @@ contract AntseedEmissionsGateTest is Test {
         bytes32 programId = keccak256("recognized-seller-operator-v1");
         _deployGate(4);
 
-        sellerPools = new AntseedSellerPools(address(realRegistry));
+        sellerPools = new AntseedSellerPools(address(realRegistry), 0, 0, 0);
         usageAccounting.setSellerPools(address(sellerPools));
         sellerOperatorUsageRewards = new AntseedSellerOperatorUsageRewards(
             address(programs), address(realRegistry), address(usageAccounting), programId
@@ -1260,7 +1256,7 @@ contract AntseedEmissionsGateTest is Test {
         address newOwner = address(0x1111);
         _deployGate(4);
 
-        sellerPools = new AntseedSellerPools(address(realRegistry));
+        sellerPools = new AntseedSellerPools(address(realRegistry), 0, 0, 0);
         usageAccounting.setSellerPools(address(sellerPools));
         sellerOperatorUsageRewards = new AntseedSellerOperatorUsageRewards(
             address(programs), address(realRegistry), address(usageAccounting), programId
@@ -1294,7 +1290,7 @@ contract AntseedEmissionsGateTest is Test {
         bytes32 poolProgramId = keccak256("recognized-seller-pool-v1");
         _deployGate(4);
 
-        sellerPools = new AntseedSellerPools(address(realRegistry));
+        sellerPools = new AntseedSellerPools(address(realRegistry), 0, 0, 0);
         usageAccounting.setSellerPools(address(sellerPools));
         sellerOperatorUsageRewards = new AntseedSellerOperatorUsageRewards(
             address(programs), address(realRegistry), address(usageAccounting), operatorProgramId
@@ -1490,7 +1486,7 @@ contract AntseedEmissionsGateTest is Test {
         bytes32 programId = keccak256("recognized-seller-usage-v1");
         _deployGate(4);
 
-        sellerPools = new AntseedSellerPools(address(realRegistry));
+        sellerPools = new AntseedSellerPools(address(realRegistry), 0, 0, 0);
         usageAccounting.setSellerPools(address(sellerPools));
         sellerUsageRewards =
             new AntseedSellerUsageRewards(address(programs), address(sellerPools), address(usageAccounting), programId);
@@ -1520,7 +1516,7 @@ contract AntseedEmissionsGateTest is Test {
         bytes32 programId = keccak256("recognized-seller-usage-v1");
         _deployGate(4);
 
-        sellerPools = new AntseedSellerPools(address(realRegistry));
+        sellerPools = new AntseedSellerPools(address(realRegistry), 0, 0, 0);
         usageAccounting.setSellerPools(address(sellerPools));
         sellerUsageRewards =
             new AntseedSellerUsageRewards(address(programs), address(sellerPools), address(usageAccounting), programId);
@@ -1567,7 +1563,7 @@ contract AntseedEmissionsGateTest is Test {
         bytes32 programId = keccak256("recognized-seller-usage-v1");
         _deployGate(4);
 
-        sellerPools = new AntseedSellerPools(address(realRegistry));
+        sellerPools = new AntseedSellerPools(address(realRegistry), 0, 0, 0);
         usageAccounting.setSellerPools(address(sellerPools));
         sellerUsageRewards =
             new AntseedSellerUsageRewards(address(programs), address(sellerPools), address(usageAccounting), programId);
@@ -1627,7 +1623,7 @@ contract AntseedEmissionsGateTest is Test {
     function test_sellerUsageRewardsAdminAndPause() public {
         bytes32 programId = keccak256("recognized-seller-usage-v1");
         _deployGate(5);
-        sellerPools = new AntseedSellerPools(address(realRegistry));
+        sellerPools = new AntseedSellerPools(address(realRegistry), 0, 0, 0);
         sellerUsageRewards =
             new AntseedSellerUsageRewards(address(programs), address(sellerPools), address(usageAccounting), programId);
 

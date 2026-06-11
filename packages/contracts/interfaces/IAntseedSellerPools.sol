@@ -48,7 +48,8 @@ interface IAntseedSellerPools {
         uint256 maxSlashBps,
         uint256 minEarlyExitSlashBps
     );
-    event ApyCapSet(uint256 maxApyBps, uint256 epochsPerYear);
+    event ApyDecayScheduled(uint256 indexed startEpoch);
+    event ApyCapOverrideScheduled(uint256 indexed fromEpoch, uint256 capBps);
     event BootstrapConfigSet(uint256 cap, uint256 weightBps);
     event RestakedRewardWeightBonusSet(uint256 bonusBps);
     event MoveWeightPenaltySet(uint256 penaltyBps);

@@ -59,14 +59,37 @@ contract AntseedSellerPools is IAntseedSellerPools, ERC721, Ownable2Step, Reentr
     IAntseedSellerRewardsPool public sellerRewardsPool;
     IERC20 public immutable antsToken;
 
+    // ─── Deterministic Bootstrap APY Cap (fixed at deployment) ───────
+    // During the bootstrap period the reward APY cap is a pure function of
+    // the epoch:
+    //   cap(e) = apyStartBps                      while decay has not started
+    //   cap(e) = max(apyFloorBps,
+    //                apyStartBps - apyDecayPerEpochBps * (e - apyDecayStartEpoch))
+    // The parameters are immutable; the only owner action during bootstrap is
+    // the one-time, future-epoch-only `startApyDecay`. After the decay has
+    // fully landed on the floor, the cap becomes adjustable via
+    // `setApyCapBps` — but only for future epochs, so the bootstrap curve and
+    // every already-earned epoch are immutable on-chain.
+    uint256 public constant EPOCHS_PER_YEAR = 52;
+    uint256 public immutable apyStartBps; // 0 = uncapped
+    uint256 public immutable apyFloorBps;
+    uint256 public immutable apyDecayPerEpochBps;
+    uint256 public apyDecayStartEpoch; // 0 = decay not started
+
+    struct ApyCapOverride {
+        uint64 fromEpoch;
+        uint16 capBps; // 0 = uncapped
+    }
+
+    // Post-bootstrap cap overrides, append-only, future epochs only.
+    ApyCapOverride[] public apyCapOverrides;
+
     // ─── Configurable Parameters ─────────────────────────────────────
     uint256 public minStakeEpochs = 1;
     uint256 public maxStakeEpochs = 52;
     uint256 public stakeActivationDelay = 1;
     uint256 public maxSlashBps = 5_000;
     uint256 public minEarlyExitSlashBps = 500;
-    uint256 public maxApyBps = 0;
-    uint256 public epochsPerYear = 52;
     uint256 public bootstrapCommitmentCap = 1_000_000e18;
     uint256 public bootstrapWeightBps = 5_000;
     uint256 public restakedRewardWeightBonusBps = 500;
@@ -124,12 +147,20 @@ contract AntseedSellerPools is IAntseedSellerPools, ERC721, Ownable2Step, Reentr
     }
 
     // ─── Constructor ─────────────────────────────────────────────────
-    constructor(address _registry) ERC721("Locked Antseed Stake", "lANTS") Ownable(msg.sender) {
+    constructor(address _registry, uint256 _apyStartBps, uint256 _apyFloorBps, uint256 _apyDecayPerEpochBps)
+        ERC721("Locked Antseed Stake", "lANTS")
+        Ownable(msg.sender)
+    {
         if (_registry == address(0)) revert InvalidAddress();
+        if (_apyStartBps > MAX_APY_BPS_CAP || _apyFloorBps > _apyStartBps) revert InvalidValue();
+        if (_apyStartBps != _apyFloorBps && _apyDecayPerEpochBps == 0) revert InvalidValue();
         registry = IAntseedRegistry(_registry);
         address token = registry.antsToken();
         if (token == address(0)) revert InvalidAddress();
         antsToken = IERC20(token);
+        apyStartBps = _apyStartBps;
+        apyFloorBps = _apyFloorBps;
+        apyDecayPerEpochBps = _apyDecayPerEpochBps;
     }
 
     // ─── Epoch Helpers ────────────────────────────────────────────────
@@ -482,8 +513,49 @@ contract AntseedSellerPools is IAntseedSellerPools, ERC721, Ownable2Step, Reentr
         Position memory position = positions[positionId];
         if (position.owner == address(0)) revert InvalidPosition();
         if (positionWeightAtEpoch(positionId, epoch) == 0) return 0;
-        if (maxApyBps == 0) return type(uint256).max;
-        return (position.weightAmount * maxApyBps) / (BPS_DENOMINATOR * epochsPerYear);
+        uint256 capBps = apyCapBpsAtEpoch(epoch);
+        if (capBps == 0) return type(uint256).max;
+        return (position.weightAmount * capBps) / (BPS_DENOMINATOR * EPOCHS_PER_YEAR);
+    }
+
+    /**
+     * @notice APY cap in bps for a given epoch. A post-bootstrap override
+     *         covering the epoch wins; otherwise the cap is a pure function of
+     *         the immutable deployment parameters and the one-time decay
+     *         anchor: flat `apyStartBps` until `apyDecayStartEpoch`, then
+     *         linear decay of `apyDecayPerEpochBps` per epoch down to
+     *         `apyFloorBps`. Returns 0 for uncapped.
+     */
+    function apyCapBpsAtEpoch(uint256 epoch) public view returns (uint256) {
+        uint256 overrideCount = apyCapOverrides.length;
+        for (uint256 i = overrideCount; i > 0; i--) {
+            ApyCapOverride memory capOverride = apyCapOverrides[i - 1];
+            if (capOverride.fromEpoch <= epoch) return capOverride.capBps;
+        }
+
+        uint256 startBps = apyStartBps;
+        if (startBps == 0) return 0;
+
+        uint256 decayStartEpoch = apyDecayStartEpoch;
+        if (decayStartEpoch == 0 || epoch < decayStartEpoch) return startBps;
+
+        uint256 reduction = apyDecayPerEpochBps * (epoch - decayStartEpoch);
+        uint256 maxReduction = startBps - apyFloorBps;
+        if (reduction >= maxReduction) return apyFloorBps;
+        return startBps - reduction;
+    }
+
+    /// @notice First epoch at which the bootstrap decay has fully landed on
+    ///         the floor. 0 while the decay has not been anchored yet.
+    function apyDecayEndEpoch() public view returns (uint256) {
+        uint256 decayStartEpoch = apyDecayStartEpoch;
+        if (decayStartEpoch == 0) return 0;
+        uint256 span = apyStartBps - apyFloorBps;
+        return decayStartEpoch + (span + apyDecayPerEpochBps - 1) / apyDecayPerEpochBps;
+    }
+
+    function apyCapOverrideCount() external view returns (uint256) {
+        return apyCapOverrides.length;
     }
 
     function poolActiveStakeAtEpoch(uint256 agentId, uint256 epoch) public view returns (uint256 activeStake) {
@@ -554,8 +626,9 @@ contract AntseedSellerPools is IAntseedSellerPools, ERC721, Ownable2Step, Reentr
         uint256 weight = bootstrapWeightAtEpoch(commitment.agentId, epoch);
         if (weight == 0) return 0;
         uint256 remainingEpochs = commitment.stakeEndEpoch - epoch;
-        if (maxApyBps == 0) return type(uint256).max;
-        return ((weight / remainingEpochs) * maxApyBps) / (BPS_DENOMINATOR * epochsPerYear);
+        uint256 capBps = apyCapBpsAtEpoch(epoch);
+        if (capBps == 0) return type(uint256).max;
+        return ((weight / remainingEpochs) * capBps) / (BPS_DENOMINATOR * EPOCHS_PER_YEAR);
     }
 
     function sellerBootstrapCommitment(address seller) public view returns (uint256) {
@@ -631,12 +704,54 @@ contract AntseedSellerPools is IAntseedSellerPools, ERC721, Ownable2Step, Reentr
         emit RewardStakerSet(rewardStaker, allowed);
     }
 
-    function setApyCap(uint256 apyBps, uint256 epochsYr) external onlyOwner {
-        if (apyBps > MAX_APY_BPS_CAP) revert InvalidValue();
-        if (apyBps != 0 && epochsYr == 0) revert InvalidValue();
-        maxApyBps = apyBps;
-        epochsPerYear = epochsYr;
-        emit ApyCapSet(apyBps, epochsYr);
+    /**
+     * @notice One-time, one-way switch that anchors the APY cap decay at a
+     *         FUTURE epoch. The decay parameters are immutable, so calling
+     *         this fixes the entire APY trajectory forever:
+     *         apyStartBps until `startEpoch`, then -apyDecayPerEpochBps per
+     *         epoch down to apyFloorBps. It cannot be re-aimed or undone.
+     */
+    function startApyDecay(uint256 startEpoch) external onlyOwner {
+        if (apyDecayStartEpoch != 0) revert InvalidValue();
+        if (apyStartBps == apyFloorBps) revert InvalidValue();
+        if (startEpoch <= currentEpoch()) revert InvalidValue();
+        apyDecayStartEpoch = startEpoch;
+        emit ApyDecayScheduled(startEpoch);
+    }
+
+    /**
+     * @notice Schedule a post-bootstrap APY cap (0 = uncapped). Overrides are
+     *         append-only and constrained so the immutable bootstrap curve and
+     *         all earned epochs can never be changed:
+     *           - an override only takes effect at a FUTURE epoch, and
+     *           - never before the bootstrap decay has fully landed on the
+     *             floor (when the deployment has a decay).
+     *         Re-scheduling the same pending fromEpoch overwrites it before it
+     *         activates.
+     */
+    function setApyCapBps(uint256 capBps, uint256 fromEpoch) external onlyOwner {
+        if (capBps > MAX_APY_BPS_CAP) revert InvalidValue();
+        if (fromEpoch <= currentEpoch()) revert InvalidValue();
+        if (apyStartBps != apyFloorBps) {
+            uint256 decayEndEpoch = apyDecayEndEpoch();
+            if (decayEndEpoch == 0 || fromEpoch < decayEndEpoch) revert InvalidValue();
+        }
+
+        ApyCapOverride memory capOverride =
+            ApyCapOverride({ fromEpoch: uint64(fromEpoch), capBps: uint16(capBps) });
+
+        uint256 count = apyCapOverrides.length;
+        if (count != 0) {
+            uint64 lastFromEpoch = apyCapOverrides[count - 1].fromEpoch;
+            if (fromEpoch < lastFromEpoch) revert InvalidValue();
+            if (fromEpoch == lastFromEpoch) {
+                apyCapOverrides[count - 1] = capOverride;
+                emit ApyCapOverrideScheduled(fromEpoch, capBps);
+                return;
+            }
+        }
+        apyCapOverrides.push(capOverride);
+        emit ApyCapOverrideScheduled(fromEpoch, capBps);
     }
 
     function setBootstrapConfig(uint256 cap, uint256 weightBps) external onlyOwner {

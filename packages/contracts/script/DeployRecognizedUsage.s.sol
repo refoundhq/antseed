@@ -51,8 +51,12 @@ interface IAntseedSellerRewardsPoolPolicyAdmin {
  *                                     verifier-rewards contract replaces it
  *                                     under a successor program id.
  *   SELLER_REWARDS_POOL               Optional existing locked seller rewards pool for bootstrap commitments.
- *   POOL_MAX_APY_BPS                  Reward APY cap in bps. Defaults to 1500 (15%). 0 disables.
- *   POOL_EPOCHS_PER_YEAR              Epochs per year for the APY cap. Defaults to 52.
+ *   POOL_APY_START_BPS                Initial APY cap, immutable at deploy. Defaults to 10000 (100%).
+ *   POOL_APY_FLOOR_BPS                Terminal APY cap after decay, immutable. Defaults to 2000 (20%).
+ *   POOL_APY_DECAY_PER_EPOCH_BPS      Linear decay per epoch, immutable. Defaults to 500 (5 points).
+ *   POOL_APY_DECAY_START_EPOCH        Epoch the decay begins. Defaults to 0 =
+ *                                     not started; fire it later with the
+ *                                     one-time startApyDecay(futureEpoch).
  *   BOOTSTRAP_COMMITMENT_CAP          Max locked seller rewards usable as bootstrap. Defaults to 1,000,000 ANTS.
  *   BOOTSTRAP_WEIGHT_BPS              Bootstrap effective weight. Defaults to 5000 (50%).
  *
@@ -117,8 +121,10 @@ contract DeployRecognizedUsage is Script {
         uint16 reserveShareBps = uint16(reserveShare);
         uint16 verificationShareBps = uint16(verificationShare);
         address sellerRewardsPool = vm.envOr("SELLER_REWARDS_POOL", address(0));
-        uint256 poolMaxApyBps = vm.envOr("POOL_MAX_APY_BPS", uint256(1_500));
-        uint256 poolEpochsPerYear = vm.envOr("POOL_EPOCHS_PER_YEAR", uint256(52));
+        uint256 poolApyStartBps = vm.envOr("POOL_APY_START_BPS", uint256(10_000));
+        uint256 poolApyFloorBps = vm.envOr("POOL_APY_FLOOR_BPS", uint256(2_000));
+        uint256 poolApyDecayPerEpochBps = vm.envOr("POOL_APY_DECAY_PER_EPOCH_BPS", uint256(500));
+        uint256 poolApyDecayStartEpoch = vm.envOr("POOL_APY_DECAY_START_EPOCH", uint256(0));
         uint256 bootstrapCommitmentCap = vm.envOr("BOOTSTRAP_COMMITMENT_CAP", uint256(1_000_000e18));
         uint256 bootstrapWeightBps = vm.envOr("BOOTSTRAP_WEIGHT_BPS", uint256(5_000));
         address teamWallet = registry.teamWallet();
@@ -150,14 +156,21 @@ contract DeployRecognizedUsage is Script {
         console.log("Effective Epoch:        ", effectiveEpoch);
         console.log("");
 
-        AntseedSellerPools sellerPools = new AntseedSellerPools(registryAddress);
+        // The APY cap trajectory is immutable from deployment:
+        //   cap(e) = max(floor, start - decayPerEpoch * (e - decayStartEpoch))
+        // The only lever is the one-time startApyDecay(futureEpoch) call.
+        AntseedSellerPools sellerPools =
+            new AntseedSellerPools(registryAddress, poolApyStartBps, poolApyFloorBps, poolApyDecayPerEpochBps);
         console.log("SellerPools:          ", address(sellerPools));
 
-        // Reward shaping: cap effective APY. Seller operator rewards are paid by a separate program.
-        sellerPools.setApyCap(poolMaxApyBps, poolEpochsPerYear);
+        if (poolApyDecayStartEpoch != 0) {
+            sellerPools.startApyDecay(poolApyDecayStartEpoch);
+        }
         sellerPools.setBootstrapConfig(bootstrapCommitmentCap, bootstrapWeightBps);
-        console.log("Pool max APY (bps):     ", poolMaxApyBps);
-        console.log("Pool epochs/year:       ", poolEpochsPerYear);
+        console.log("Pool APY start (bps):   ", poolApyStartBps);
+        console.log("Pool APY floor (bps):   ", poolApyFloorBps);
+        console.log("Pool APY decay (bps/ep):", poolApyDecayPerEpochBps);
+        console.log("Pool APY decay epoch:   ", poolApyDecayStartEpoch);
         console.log("Bootstrap cap:          ", bootstrapCommitmentCap);
         console.log("Bootstrap weight (bps): ", bootstrapWeightBps);
 
