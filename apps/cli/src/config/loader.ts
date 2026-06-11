@@ -182,6 +182,10 @@ function normalizeAgentDir(
   return fallback ? { agentDir: fallback } : {};
 }
 
+// Normalizes shape only (trim + lowercase domains). Invalid domains, unknown
+// methods, duplicates, and empty arrays are preserved so validateConfig can
+// reject them loudly instead of the loader silently dropping them — dropping
+// a typo'd methods entry would widen the claim to "all methods".
 function normalizeDomainVerification(
   value: unknown,
 ): DomainVerificationConfig[] | undefined {
@@ -189,17 +193,15 @@ function normalizeDomainVerification(
   const out: DomainVerificationConfig[] = [];
   for (const rawClaim of value) {
     if (!isRecord(rawClaim)) continue;
-    if (typeof rawClaim['domain'] !== 'string' || rawClaim['domain'].trim().length === 0) continue;
-    const domain = rawClaim['domain'].trim().toLowerCase();
+    const rawDomain = rawClaim['domain'];
+    const domain = typeof rawDomain === 'string' ? rawDomain.trim().toLowerCase() : '';
     const claim: DomainVerificationConfig = { domain };
     if (Array.isArray(rawClaim['methods'])) {
-      const methods = rawClaim['methods']
-        .filter((method): method is DomainVerificationMethod => method === 'dns-txt' || method === 'https-well-known');
-      if (methods.length > 0) claim.methods = Array.from(new Set(methods));
+      claim.methods = [...rawClaim['methods']] as DomainVerificationMethod[];
     }
     out.push(claim);
   }
-  return out.length > 0 ? out : undefined;
+  return out;
 }
 
 function cloneVerifications(
@@ -223,8 +225,10 @@ function normalizeVerifications(
     const cloned = cloneVerifications(fallback);
     return cloned ? { verifications: cloned } : {};
   }
+  // Keep the user-supplied object (even when empty or malformed) so
+  // validateConfig reports the problem instead of silently ignoring it.
   const domains = normalizeDomainVerification(value['domains']);
-  return domains ? { verifications: { domains } } : {};
+  return { verifications: { ...(domains !== undefined ? { domains } : {}) } };
 }
 
 function mergeSellerConfig(
