@@ -272,9 +272,6 @@ importers:
       '@antseed/node':
         specifier: workspace:*
         version: link:../../packages/node
-      '@antseed/ui':
-        specifier: workspace:*
-        version: link:../../packages/ui
       '@fastify/cors':
         specifier: ^10.0.0
         version: 10.1.0
@@ -285,6 +282,9 @@ importers:
         specifier: ^5.7.4
         version: 5.7.4
     devDependencies:
+      '@antseed/ui':
+        specifier: workspace:*
+        version: link:../../packages/ui
       '@metamask/sdk':
         specifier: ^0.34.0
         version: 0.34.0(bufferutil@4.1.0)(encoding@0.1.13)(utf-8-validate@5.0.10)
