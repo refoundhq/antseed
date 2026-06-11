@@ -35,6 +35,7 @@ export class BuyerUsageVerifier {
   private readonly _observations = new Map<string, UsageObservation>();
   private readonly _observationWaiters = new Map<string, Array<(value: UsageObservation | null) => void>>();
   private readonly _verifiedRecordsByChannel = new Map<string, UsageManifestRecord[]>();
+  private readonly _divergedChannels = new Set<string>();
 
   constructor(private readonly _store: UsageManifestStore | null = null) {}
 
@@ -56,7 +57,10 @@ export class BuyerUsageVerifier {
     const key = this._observationKey(peerId, payload.requestId);
     const observation = await this._waitForObservation(key, 2_000);
     this._observations.delete(key);
-    if (!observation) return null;
+    if (!observation) {
+      this._markDiverged(payload.channelId);
+      return null;
+    }
 
     const requiredCumulativeAmount = BigInt(payload.requiredCumulativeAmount);
     const record = buildUsageManifestRecord({
@@ -75,7 +79,10 @@ export class BuyerUsageVerifier {
     const pointer = computeUsageManifestPointer(buildUsageManifest(payload.channelId, [...previous, record]));
     const rootMatches = pointer.usageRoot.toLowerCase() === payload.usageRoot.toLowerCase();
     const cidMatches = pointer.cid === payload.usageCid;
-    if (!rootMatches || !cidMatches) return null;
+    if (!rootMatches || !cidMatches) {
+      this._markDiverged(payload.channelId);
+      return null;
+    }
 
     const encodedMetadata = encodePointerMetadata(payload.usageCid, payload.usageRoot);
     return {
@@ -91,6 +98,10 @@ export class BuyerUsageVerifier {
     records.push(record);
     this._verifiedRecordsByChannel.set(channelId, records);
     this._store?.replace(channelId, records);
+  }
+
+  isChannelDiverged(channelId: string): boolean {
+    return this._divergedChannels.has(channelId.toLowerCase());
   }
 
   clearPeer(peerId: PeerId): void {
@@ -112,6 +123,7 @@ export class BuyerUsageVerifier {
     }
     this._observationWaiters.clear();
     this._verifiedRecordsByChannel.clear();
+    this._divergedChannels.clear();
   }
 
   private _getVerifiedRecords(channelId: string): UsageManifestRecord[] {
@@ -144,5 +156,9 @@ export class BuyerUsageVerifier {
 
   private _observationKey(peerId: PeerId, requestId: string): string {
     return `${peerId}:${requestId}`;
+  }
+
+  private _markDiverged(channelId: string): void {
+    this._divergedChannels.add(channelId.toLowerCase());
   }
 }

@@ -649,8 +649,11 @@ export class BuyerPaymentNegotiator {
       : null;
     if (payload.usageCid || payload.usageRoot) {
       if (!verifiedPointer) {
+        const diverged = this._usageVerifier?.isChannelDiverged(payload.channelId) ?? false;
         debugWarn(
-          `[BuyerNegotiator] Usage pointer verification failed for ${peerId.slice(0, 12)}...; signing legacy metadata only`,
+          diverged
+            ? `[BuyerNegotiator] Usage manifest diverged for channel ${payload.channelId.slice(0, 18)}...; signing legacy metadata only`
+            : `[BuyerNegotiator] Usage pointer verification failed for ${peerId.slice(0, 12)}...; signing legacy metadata only`,
         );
       }
     }
