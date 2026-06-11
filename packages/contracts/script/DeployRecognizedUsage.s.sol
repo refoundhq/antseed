@@ -37,13 +37,19 @@ interface IAntseedSellerRewardsPoolPolicyAdmin {
  * Required env:
  *   DEPLOYER_PRIVATE_KEY   Owner/broadcaster key.
  *   ANTSEED_REGISTRY       Existing AntseedRegistry address.
+ *   VERIFICATION_WALLET    Recipient of the verification & incentives program.
  *
  * Optional env:
- *   SELLER_POOL_USAGE_PROGRAM_SHARE_BPS      Defaults to 6000.
+ *   SELLER_POOL_USAGE_PROGRAM_SHARE_BPS      Defaults to 4500.
  *   SELLER_OPERATOR_USAGE_PROGRAM_SHARE_BPS  Defaults to 500.
  *   BUYER_USAGE_PROGRAM_SHARE_BPS     Defaults to 500.
  *   TEAM_PROGRAM_SHARE_BPS            Defaults to 1500.
  *   RESERVE_PROGRAM_SHARE_BPS         Defaults to 1500.
+ *   VERIFICATION_PROGRAM_SHARE_BPS    Defaults to 1500. Funds network
+ *                                     verification and verifier incentives;
+ *                                     paid to VERIFICATION_WALLET until a
+ *                                     verifier-rewards contract replaces it
+ *                                     under a successor program id.
  *   SELLER_REWARDS_POOL               Optional existing locked seller rewards pool for bootstrap commitments.
  *   POOL_MAX_APY_BPS                  Reward APY cap in bps. Defaults to 1500 (15%). 0 disables.
  *   POOL_EPOCHS_PER_YEAR              Epochs per year for the APY cap. Defaults to 52.
@@ -68,6 +74,7 @@ contract DeployRecognizedUsage is Script {
     bytes32 public constant BUYER_USAGE_PROGRAM = keccak256("ANTSEED_BUYER_USAGE_V1");
     bytes32 public constant TEAM_PROGRAM = keccak256("ANTSEED_TEAM_V1");
     bytes32 public constant RESERVE_PROGRAM = keccak256("ANTSEED_RESERVE_V1");
+    bytes32 public constant VERIFICATION_PROGRAM = keccak256("ANTSEED_VERIFICATION_V1");
 
     function run() external {
         uint256 deployerPrivateKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
@@ -84,18 +91,23 @@ contract DeployRecognizedUsage is Script {
         require(existingEmissions != address(0), "existing emissions not set");
         require(existingChannels != address(0), "channels not set");
 
-        uint256 sellerPoolUsageShare = vm.envOr("SELLER_POOL_USAGE_PROGRAM_SHARE_BPS", uint256(6_000));
+        uint256 sellerPoolUsageShare = vm.envOr("SELLER_POOL_USAGE_PROGRAM_SHARE_BPS", uint256(4_500));
         uint256 sellerOperatorUsageShare = vm.envOr("SELLER_OPERATOR_USAGE_PROGRAM_SHARE_BPS", uint256(500));
         uint256 buyerUsageShare = vm.envOr("BUYER_USAGE_PROGRAM_SHARE_BPS", uint256(500));
         uint256 teamShare = vm.envOr("TEAM_PROGRAM_SHARE_BPS", uint256(1_500));
         uint256 reserveShare = vm.envOr("RESERVE_PROGRAM_SHARE_BPS", uint256(1_500));
+        uint256 verificationShare = vm.envOr("VERIFICATION_PROGRAM_SHARE_BPS", uint256(1_500));
+        address verificationWallet = vm.envAddress("VERIFICATION_WALLET");
+        require(verificationWallet != address(0), "verification wallet not set");
         require(sellerPoolUsageShare <= 10_000, "seller pool share too high");
         require(sellerOperatorUsageShare <= 10_000, "seller operator share too high");
         require(buyerUsageShare <= 10_000, "buyer usage share too high");
         require(teamShare <= 10_000, "team share too high");
         require(reserveShare <= 10_000, "reserve share too high");
+        require(verificationShare <= 10_000, "verification share too high");
         require(
-            sellerPoolUsageShare + sellerOperatorUsageShare + buyerUsageShare + teamShare + reserveShare <= 10_000,
+            sellerPoolUsageShare + sellerOperatorUsageShare + buyerUsageShare + teamShare + reserveShare
+                + verificationShare <= 10_000,
             "program shares exceed 100%"
         );
         uint16 sellerPoolUsageShareBps = uint16(sellerPoolUsageShare);
@@ -103,6 +115,7 @@ contract DeployRecognizedUsage is Script {
         uint16 buyerUsageShareBps = uint16(buyerUsageShare);
         uint16 teamShareBps = uint16(teamShare);
         uint16 reserveShareBps = uint16(reserveShare);
+        uint16 verificationShareBps = uint16(verificationShare);
         address sellerRewardsPool = vm.envOr("SELLER_REWARDS_POOL", address(0));
         uint256 poolMaxApyBps = vm.envOr("POOL_MAX_APY_BPS", uint256(1_500));
         uint256 poolEpochsPerYear = vm.envOr("POOL_EPOCHS_PER_YEAR", uint256(52));
@@ -220,6 +233,19 @@ contract DeployRecognizedUsage is Script {
         programs.setRewardProgram(
             RESERVE_PROGRAM, protocolReserve, protocolReserve, reserveShareBps, uint64(effectiveEpoch), 0, true
         );
+        // Network verification & verifier incentives. Fixed-recipient for now;
+        // when an on-chain verifier-rewards controller exists, deploy it under
+        // a successor program id and zero this share for future epochs
+        // (controller/recipient are immutable per program id).
+        programs.setRewardProgram(
+            VERIFICATION_PROGRAM,
+            verificationWallet,
+            verificationWallet,
+            verificationShareBps,
+            uint64(effectiveEpoch),
+            0,
+            true
+        );
 
         registry.setEmissions(address(usageAccounting));
         registry.setStaking(address(sellerRegistry));
@@ -242,8 +268,11 @@ contract DeployRecognizedUsage is Script {
         console.logBytes32(TEAM_PROGRAM);
         console.log("Reserve program:         ");
         console.logBytes32(RESERVE_PROGRAM);
+        console.log("Verification program:    ");
+        console.logBytes32(VERIFICATION_PROGRAM);
         console.log("Team program caller:     ", teamWallet);
         console.log("Reserve program caller:  ", protocolReserve);
+        console.log("Verification caller:     ", verificationWallet);
         console.log("");
         console.log("POST-DEPLOY CHECKLIST (manual):");
         console.log("- Sellers staked in legacy USDC staking stay eligible via the");

@@ -1447,6 +1447,45 @@ contract AntseedEmissionsGateTest is Test {
         programs.mintProgramEmission(teamProgramId, 4, teamWallet, 1 wei);
     }
 
+    function test_verificationProgramFitsDefaultSplitAndPaysItsWallet() public {
+        address verificationWallet = address(0x60);
+        _deployGate(5);
+
+        // Production default split: 45% seller pool, 5% operator, 5% buyer,
+        // 15% team, 15% reserve, 15% verification = 100%.
+        programs.setRewardProgram(keccak256("seller-pool"), address(this), address(0), 4_500, 4, 0, true);
+        programs.setRewardProgram(keccak256("seller-operator"), address(this), address(0), 500, 4, 0, true);
+        programs.setRewardProgram(keccak256("buyer"), address(this), address(0), 500, 4, 0, true);
+        programs.setRewardProgram(keccak256("team"), teamWallet, teamWallet, 1_500, 4, 0, true);
+        programs.setRewardProgram(keccak256("reserve"), reserveDest, reserveDest, 1_500, 4, 0, true);
+        bytes32 verificationProgramId = keccak256("verification");
+        programs.setRewardProgram(
+            verificationProgramId, verificationWallet, verificationWallet, 1_500, 4, 0, true
+        );
+
+        // No further share fits on top of the full split.
+        vm.expectRevert(AntseedEmissionPrograms.ProgramShareExceeded.selector);
+        programs.setRewardProgram(keccak256("extra"), address(this), address(0), 1, 4, 0, true);
+
+        uint256 verificationBudget = _programBudget(1_500, 4);
+
+        vm.prank(seller);
+        vm.expectRevert(AntseedEmissionPrograms.NotProgramController.selector);
+        programs.mintProgramEmission(verificationProgramId, 4, verificationWallet, 1 ether);
+
+        vm.prank(verificationWallet);
+        vm.expectRevert(AntseedEmissionPrograms.InvalidProgramRecipient.selector);
+        programs.mintProgramEmission(verificationProgramId, 4, seller, 1 ether);
+
+        vm.prank(verificationWallet);
+        programs.mintProgramEmission(verificationProgramId, 4, verificationWallet, verificationBudget);
+        assertEq(token.balanceOf(verificationWallet), verificationBudget);
+
+        vm.prank(verificationWallet);
+        vm.expectRevert(AntseedEmissionPrograms.ProgramBudgetExceeded.selector);
+        programs.mintProgramEmission(verificationProgramId, 4, verificationWallet, 1 wei);
+    }
+
     function test_sellerUsageRewardsDistributionValidation() public {
         bytes32 programId = keccak256("recognized-seller-usage-v1");
         _deployGate(4);
