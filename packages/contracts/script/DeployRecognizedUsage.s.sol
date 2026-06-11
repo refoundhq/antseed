@@ -24,15 +24,21 @@ interface IANTSTokenMintAuthorityAdmin {
     function setTransferWhitelist(address account, bool allowed) external;
 }
 
+interface IAntseedLegacyEmissionsClock {
+    function genesis() external view returns (uint256);
+    function EPOCH_DURATION() external view returns (uint256);
+}
+
 interface IAntseedSellerRewardsPoolPolicyAdmin {
     function setSellerClaimPolicy(address policy) external;
 }
 
 /**
  * @title DeployRecognizedUsage
- * @notice Deploys the seller-pool / recognized-usage stack and cuts the
- *         registry emissions pointer to usage accounting. ANTS mint authority
- *         is cut separately by pointing the token at AntseedEmissionsGate.
+ * @notice Deploys the seller-pool / recognized-usage stack, points ANTS mint
+ *         authority at AntseedEmissionsGate, and cuts the registry emissions
+ *         and staking pointers. All pointer flips happen at the end of the
+ *         broadcast so any partial run leaves the legacy stack fully working.
  *
  * Required env:
  *   DEPLOYER_PRIVATE_KEY   Owner/broadcaster key.
@@ -140,6 +146,16 @@ contract DeployRecognizedUsage is Script {
         uint256 genesis = gate.genesis();
         uint256 epochDuration = gate.epochDuration();
 
+        // SellerPools resolves epochs via registry.emissions(): the legacy
+        // clock until the pointer flip below, the gate's clock after. The
+        // startApyDecay future-only check below runs against the legacy
+        // clock, so the two clocks must agree.
+        require(
+            IAntseedLegacyEmissionsClock(existingEmissions).genesis() == genesis
+                && IAntseedLegacyEmissionsClock(existingEmissions).EPOCH_DURATION() == epochDuration,
+            "legacy emissions clock mismatch"
+        );
+
         console.log("=== AntSeed Recognized Usage Deployment ===");
         console.log("Deployer:               ", deployer);
         console.log("Registry:               ", registryAddress);
@@ -202,7 +218,6 @@ contract DeployRecognizedUsage is Script {
         console.log("BuyerUsageRewards:      ", address(buyerUsageRewards));
 
         gate.setEmissionController(address(programs));
-        IANTSTokenMintAuthorityAdmin(antsToken).setRegistry(address(gate));
         // SellerPools must be able to pay out withdrawals and slash to the dead
         // address even while ANTS transfers are globally disabled.
         IANTSTokenMintAuthorityAdmin(antsToken).setTransferWhitelist(address(sellerPools), true);
@@ -260,6 +275,11 @@ contract DeployRecognizedUsage is Script {
             true
         );
 
+        // Mint authority moves only after every program is configured: a
+        // broadcast that fails before this line leaves the legacy emissions
+        // path untouched, and one that fails after it leaves the new path
+        // fully mintable.
+        IANTSTokenMintAuthorityAdmin(antsToken).setRegistry(address(gate));
         registry.setEmissions(address(usageAccounting));
         registry.setStaking(address(sellerRegistry));
 

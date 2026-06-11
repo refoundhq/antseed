@@ -849,6 +849,21 @@ contract AntseedSellerPoolsTest is Test {
         assertEq(pools.apyCapBpsAtEpoch(23), 1_500);
     }
 
+    function test_apyCapOverrideRejectsEpochsBeyondUint64() public {
+        AntseedSellerPools prodPools = new AntseedSellerPools(address(registry), 10_000, 2_000, 500);
+        prodPools.startApyDecay(2);
+        vm.warp(block.timestamp + 20 * EPOCH_DURATION); // past decay end (18)
+
+        // 2^64 + 5 passes the future-only and ordering checks on the full
+        // uint256 but would store as epoch 5 — inside the bootstrap curve.
+        vm.expectRevert(IAntseedSellerPools.InvalidValue.selector);
+        prodPools.setApyCapBps(1, uint256(type(uint64).max) + 1 + 5);
+
+        // The uint64 boundary itself is a valid (if absurd) future epoch.
+        prodPools.setApyCapBps(1_000, type(uint64).max);
+        assertEq(prodPools.apyCapBpsAtEpoch(10), 6_000); // curve untouched
+    }
+
     function test_sellerRegistryLegacyStakeFallbackKeepsSellersEligible() public {
         MockLegacyStaking legacy = new MockLegacyStaking();
         AntseedSellerRegistry adapter =
@@ -870,6 +885,34 @@ contract AntseedSellerPoolsTest is Test {
         _stake(staker, agentId, 100 ether, 4);
         vm.warp(block.timestamp + EPOCH_DURATION);
         assertTrue(adapter.isStakedAboveMin(seller));
+    }
+
+    function test_sellerRegistryAgentHandoverSupersedesLegacyBinding() public {
+        MockLegacyStaking legacy = new MockLegacyStaking();
+        AntseedSellerRegistry adapter =
+            new AntseedSellerRegistry(address(registry), address(pools), address(legacy));
+
+        address oldSeller = address(0x600);
+        vm.prank(oldSeller);
+        uint256 soldAgentId = identityRegistry.register();
+        legacy.setAgent(oldSeller, soldAgentId);
+        assertEq(adapter.getAgentId(oldSeller), soldAgentId);
+
+        // The agent changes hands and the new owner registers it. The legacy
+        // binding must not keep the previous seller channel-eligible on the
+        // new owner's pool stake.
+        vm.prank(oldSeller);
+        identityRegistry.transferAgent(soldAgentId, newOwner);
+        vm.prank(newOwner);
+        adapter.registerSeller(soldAgentId);
+
+        assertEq(adapter.getAgentId(newOwner), soldAgentId);
+        assertEq(adapter.getAgentId(oldSeller), 0);
+
+        _stake(staker, soldAgentId, 100 ether, 4);
+        vm.warp(block.timestamp + EPOCH_DURATION);
+        assertTrue(adapter.isStakedAboveMin(newOwner));
+        assertFalse(adapter.isStakedAboveMin(oldSeller));
     }
 
     function _stake(address staker_, uint256 agentId_, uint256 amount, uint256 stakeEpochs)

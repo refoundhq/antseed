@@ -31,7 +31,7 @@ import { IAntseedStaking } from "../interfaces/IAntseedStaking.sol";
  *             id for routing and legacy compatibility. Economic pool ownership
  *             remains agent-id based in AntseedSellerPools.
  *           - If an agent changes hands, the new owner can register it and the
- *             old local seller binding is cleared.
+ *             old seller binding — local or legacy — is superseded.
  */
 contract AntseedSellerRegistry is IAntseedStaking, Ownable2Step {
     // ─── External Contracts ──────────────────────────────────────────
@@ -124,7 +124,15 @@ contract AntseedSellerRegistry is IAntseedStaking, Ownable2Step {
     function getAgentId(address seller) public view returns (uint256) {
         uint256 agentId = _sellerAgentId[seller];
         if (agentId != 0) return agentId;
-        return _legacyAgentId(seller);
+        agentId = _legacyAgentId(seller);
+        if (agentId == 0) return 0;
+        // A local registration by another seller (e.g. the buyer of the agent)
+        // supersedes the legacy binding. Without this, a seller who sold their
+        // agent would keep the binding — and channel eligibility funded by the
+        // new owner's pool stake — until they unstake from legacy staking.
+        address localSeller = agentSeller[agentId];
+        if (localSeller != address(0) && localSeller != seller) return 0;
+        return agentId;
     }
 
     // ═══════════════════════════════════════════════════════════════════

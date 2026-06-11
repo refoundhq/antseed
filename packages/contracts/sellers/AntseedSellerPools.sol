@@ -731,6 +731,9 @@ contract AntseedSellerPools is IAntseedSellerPools, ERC721, Ownable2Step, Reentr
      */
     function setApyCapBps(uint256 capBps, uint256 fromEpoch) external onlyOwner {
         if (capBps > MAX_APY_BPS_CAP) revert InvalidValue();
+        // Bound before the uint64 narrowing below: a wrapped fromEpoch would
+        // pass the future-only/ordering checks yet store a past epoch.
+        if (fromEpoch > type(uint64).max) revert InvalidValue();
         if (fromEpoch <= currentEpoch()) revert InvalidValue();
         if (apyStartBps != apyFloorBps) {
             uint256 decayEndEpoch = apyDecayEndEpoch();
