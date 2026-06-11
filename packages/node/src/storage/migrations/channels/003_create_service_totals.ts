@@ -17,9 +17,6 @@ export const migration: Migration = {
         PRIMARY KEY (session_id, service_id),
         FOREIGN KEY (session_id) REFERENCES payment_channels(session_id)
       );
-
-      CREATE INDEX IF NOT EXISTS idx_channel_service_totals_session
-        ON payment_channel_service_totals(session_id);
     `);
   },
 };

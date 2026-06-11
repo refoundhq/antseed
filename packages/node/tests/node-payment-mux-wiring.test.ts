@@ -63,6 +63,7 @@ describe('BuyerRequestHandler payment mux wiring', () => {
       peer,
       expect.objectContaining({ statusCode: 200 }),
       undefined,
+      'req-payment-mux',
     );
     expect(
       getOrCreatePaymentMux.mock.invocationCallOrder[0],
@@ -138,6 +139,7 @@ describe('BuyerRequestHandler payment mux wiring', () => {
       peer,
       expect.objectContaining({ statusCode: 200 }),
       undefined,
+      'req-relock',
     );
   });
 });

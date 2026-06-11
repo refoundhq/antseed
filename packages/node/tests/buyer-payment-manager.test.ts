@@ -679,6 +679,52 @@ describe('BuyerPaymentManager', () => {
     }]);
   });
 
+  it('handleNeedAuth does not double-count service totals for a request already counted by signPerRequestAuth', async () => {
+    const sellerPeerId = fakePeerId('seller-service-dedup');
+    const channelId = await manager.authorizeSpending(sellerPeerId, mux, 10_000n, TEST_PRICING);
+    manager.trackRequestService('req-dedup', 'gpt-5');
+
+    await manager.signPerRequestAuth(
+      sellerPeerId,
+      {
+        inputBytes: SAMPLE_INPUT,
+        outputBytes: SAMPLE_OUTPUT,
+        sellerClaimedCost: 100n,
+        reportedInputTokens: 1000n,
+        reportedCachedInputTokens: 200n,
+        reportedOutputTokens: 50n,
+        service: 'gpt-5',
+        requestId: 'req-dedup',
+      },
+    );
+
+    // Seller demands more headroom for the same request — must not re-count it.
+    mux.sentSpendingAuths.length = 0;
+    await manager.handleNeedAuth(sellerPeerId, {
+      channelId,
+      requestId: 'req-dedup',
+      requiredCumulativeAmount: '50000',
+      currentAcceptedCumulative: '0',
+      deposit: '1000000',
+      lastRequestCost: '100',
+      inputTokens: '1000',
+      cachedInputTokens: '200',
+      outputTokens: '50',
+    }, mux);
+
+    expect(mux.sentSpendingAuths.length).toBe(1);
+    const sent = mux.sentSpendingAuths[0] as Record<string, string>;
+    const services = decodeMetadataServices(sent.metadata);
+    expect(services).toEqual([{
+      serviceId: id('gpt-5'),
+      cumulativeAmount: 100n,
+      cumulativeInputTokens: 1000n,
+      cumulativeCachedInputTokens: 200n,
+      cumulativeOutputTokens: 50n,
+      cumulativeRequestCount: 1n,
+    }]);
+  });
+
   it('handleNeedAuth caps at reserve ceiling', async () => {
     const sellerPeerId = fakePeerId('seller-needauth-cap');
     // Reserve ceiling = 10_000 (initial suggested amount)

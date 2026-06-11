@@ -99,7 +99,7 @@ const SERVICE_METADATA_ABI_TYPE =
 export function encodeMetadata(metadata: SpendingAuthMetadata): string {
   const coder = AbiCoder.defaultAbiCoder();
   const services = [...(metadata.services ?? [])].sort((a, b) =>
-    a.serviceId.toLowerCase().localeCompare(b.serviceId.toLowerCase()),
+    a.serviceId < b.serviceId ? -1 : a.serviceId > b.serviceId ? 1 : 0,
   );
   return coder.encode(
     ['uint256', 'uint256', 'uint256', 'uint256', SERVICE_METADATA_ABI_TYPE],
