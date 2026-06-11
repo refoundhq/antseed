@@ -13,12 +13,18 @@ export const MAX_REGION_LENGTH = 32;
 export const MAX_DISPLAY_NAME_LENGTH = 64;
 export const MAX_DOMAIN_VERIFICATION_CLAIMS = 5;
 export const MAX_DOMAIN_LENGTH = 253;
+export const MAX_GITHUB_VERIFICATION_CLAIMS = 5;
+export const MAX_GITHUB_USERNAME_LENGTH = 39;
+export const MAX_GITHUB_REPOSITORY_LENGTH = 100;
 export const MAX_SERVICE_CATEGORIES_PER_SERVICE = 8;
 export const MAX_SERVICE_CATEGORY_LENGTH = 32;
 export const MAX_SERVICE_API_PROTOCOLS_PER_SERVICE = 4;
 const SERVICE_CATEGORY_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
 const DOMAIN_LABEL_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 const DOMAIN_VERIFICATION_METHODS = new Set<DomainVerificationMethod>(["dns-txt", "https-well-known"]);
+const GITHUB_USERNAME_PATTERN = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/;
+const GITHUB_REPOSITORY_PATTERN = /^[a-z0-9._-]+$/;
+const VERIFICATION_NAMESPACES = new Set(["domains", "github"]);
 const SERVICE_API_PROTOCOL_SET = new Set<string>(WELL_KNOWN_SERVICE_API_PROTOCOLS);
 
 function isValidDomainName(value: string): boolean {
@@ -27,6 +33,21 @@ function isValidDomainName(value: string): boolean {
   const labels = value.split(".");
   if (labels.length < 2) return false;
   return labels.every((label) => DOMAIN_LABEL_PATTERN.test(label));
+}
+
+function isValidGithubUsername(value: string): boolean {
+  return value.length > 0
+    && value.length <= MAX_GITHUB_USERNAME_LENGTH
+    && !value.includes("--")
+    && GITHUB_USERNAME_PATTERN.test(value);
+}
+
+function isValidGithubRepository(value: string): boolean {
+  return value.length > 0
+    && value.length <= MAX_GITHUB_REPOSITORY_LENGTH
+    && value !== "."
+    && value !== ".."
+    && GITHUB_REPOSITORY_PATTERN.test(value);
 }
 
 export interface ValidationError {
@@ -175,14 +196,62 @@ export function validateMetadata(metadata: PeerMetadata): ValidationError[] {
           }
         }
       }
-      const unknownKeys = Object.keys(metadata.verifications).filter((key) => key !== "domains");
+      const githubClaims = metadata.verifications.github;
+      if (githubClaims !== undefined) {
+        if (!Array.isArray(githubClaims)) {
+          errors.push({ field: "verifications.github", message: "Must be an array when provided" });
+        } else {
+          if (githubClaims.length === 0) {
+            errors.push({ field: "verifications.github", message: "Must not be empty when provided" });
+          }
+          if (githubClaims.length > MAX_GITHUB_VERIFICATION_CLAIMS) {
+            errors.push({
+              field: "verifications.github",
+              message: `GitHub verification claim count ${githubClaims.length} exceeds max ${MAX_GITHUB_VERIFICATION_CLAIMS}`,
+            });
+          }
+          const seen = new Set<string>();
+          for (let i = 0; i < githubClaims.length; i += 1) {
+            const claim = githubClaims[i];
+            if (!claim || typeof claim !== "object" || Array.isArray(claim)) {
+              errors.push({ field: `verifications.github[${i}]`, message: "GitHub verification claim must be an object" });
+              continue;
+            }
+            const username = typeof claim.username === "string" ? claim.username.trim().toLowerCase() : "";
+            if (!isValidGithubUsername(username)) {
+              errors.push({
+                field: `verifications.github[${i}].username`,
+                message: "Username must be a valid lower-case GitHub username",
+              });
+            }
+            if (claim.repository !== undefined) {
+              const repository = typeof claim.repository === "string" ? claim.repository.trim().toLowerCase() : "";
+              if (!isValidGithubRepository(repository)) {
+                errors.push({
+                  field: `verifications.github[${i}].repository`,
+                  message: "Repository must be a valid lower-case GitHub repository name",
+                });
+              }
+            }
+            const key = `${username}/${typeof claim.repository === "string" ? claim.repository.trim().toLowerCase() : ""}`;
+            if (seen.has(key)) {
+              errors.push({
+                field: `verifications.github[${i}]`,
+                message: "GitHub verification claims must be unique",
+              });
+            }
+            seen.add(key);
+          }
+        }
+      }
+      const unknownKeys = Object.keys(metadata.verifications).filter((key) => !VERIFICATION_NAMESPACES.has(key));
       for (const key of unknownKeys) {
         errors.push({
           field: `verifications.${key}`,
           message: "Unsupported verification namespace",
         });
       }
-      if (metadata.verifications.domains === undefined && unknownKeys.length === 0) {
+      if (domainClaims === undefined && githubClaims === undefined && unknownKeys.length === 0) {
         errors.push({
           field: "verifications",
           message: "Must include at least one verification namespace when provided",

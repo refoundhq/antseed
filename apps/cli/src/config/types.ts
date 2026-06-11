@@ -71,9 +71,21 @@ export interface DomainVerificationConfig {
   methods?: DomainVerificationMethod[];
 }
 
+export interface GithubVerificationConfig {
+  /** GitHub username to prove. */
+  username: string;
+  /**
+   * Public repository holding `antseed.json` at its root. Defaults to the
+   * profile repository `<username>/<username>` when omitted.
+   */
+  repository?: string;
+}
+
 export interface VerificationConfig {
   /** Domain ownership claims. */
   domains?: DomainVerificationConfig[];
+  /** GitHub account ownership claims. */
+  github?: GithubVerificationConfig[];
 }
 
 /**

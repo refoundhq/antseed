@@ -318,6 +318,50 @@ test('loadConfig rejects unknown domain verification methods instead of dropping
   );
 });
 
+test('loadConfig preserves seller verifications.github claims', async () => {
+  await withTempConfig(
+    JSON.stringify({
+      seller: {
+        verifications: {
+          github: [
+            { username: 'OctoCat' },
+            { username: 'hubber', repository: 'Antseed-Proofs' },
+          ],
+        },
+      },
+    }),
+    async (configPath) => {
+      const config = await loadConfig(configPath);
+      assert.deepEqual(config.seller.verifications, {
+        github: [
+          { username: 'octocat' },
+          { username: 'hubber', repository: 'antseed-proofs' },
+        ],
+      });
+    }
+  );
+});
+
+test('loadConfig rejects invalid github verification usernames', async () => {
+  await withTempConfig(
+    JSON.stringify({
+      seller: {
+        verifications: {
+          github: [
+            { username: '-invalid-' },
+          ],
+        },
+      },
+    }),
+    async (configPath) => {
+      await assert.rejects(
+        loadConfig(configPath),
+        /verifications\.github\[0\]\.username/,
+      );
+    }
+  );
+});
+
 test('loadConfig rejects empty seller verifications', async () => {
   await withTempConfig(
     JSON.stringify({

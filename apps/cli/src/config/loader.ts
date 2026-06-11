@@ -6,6 +6,7 @@ import type {
   AntseedConfig,
   DomainVerificationConfig,
   DomainVerificationMethod,
+  GithubVerificationConfig,
   SellerProviderConfig,
   SellerServiceConfig,
   TokenPricingUsdPerMillion,
@@ -204,6 +205,27 @@ function normalizeDomainVerification(
   return out;
 }
 
+// Same shape-only normalization contract as normalizeDomainVerification.
+function normalizeGithubVerification(
+  value: unknown,
+): GithubVerificationConfig[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const out: GithubVerificationConfig[] = [];
+  for (const rawClaim of value) {
+    if (!isRecord(rawClaim)) continue;
+    const rawUsername = rawClaim['username'];
+    const username = typeof rawUsername === 'string' ? rawUsername.trim().toLowerCase() : '';
+    const claim: GithubVerificationConfig = { username };
+    if (rawClaim['repository'] !== undefined) {
+      claim.repository = typeof rawClaim['repository'] === 'string'
+        ? rawClaim['repository'].trim().toLowerCase()
+        : '';
+    }
+    out.push(claim);
+  }
+  return out;
+}
+
 function cloneVerifications(
   value: AntseedConfig['seller']['verifications'],
 ): AntseedConfig['seller']['verifications'] {
@@ -214,7 +236,17 @@ function cloneVerifications(
       ...(claim.methods ? { methods: [...claim.methods] } : {}),
     }))
     : undefined;
-  return domains && domains.length > 0 ? { domains } : undefined;
+  const github = value.github
+    ? value.github.map((claim) => ({
+      username: claim.username,
+      ...(claim.repository !== undefined ? { repository: claim.repository } : {}),
+    }))
+    : undefined;
+  const cloned = {
+    ...(domains && domains.length > 0 ? { domains } : {}),
+    ...(github && github.length > 0 ? { github } : {}),
+  };
+  return Object.keys(cloned).length > 0 ? cloned : undefined;
 }
 
 function normalizeVerifications(
@@ -228,7 +260,13 @@ function normalizeVerifications(
   // Keep the user-supplied object (even when empty or malformed) so
   // validateConfig reports the problem instead of silently ignoring it.
   const domains = normalizeDomainVerification(value['domains']);
-  return { verifications: { ...(domains !== undefined ? { domains } : {}) } };
+  const github = normalizeGithubVerification(value['github']);
+  return {
+    verifications: {
+      ...(domains !== undefined ? { domains } : {}),
+      ...(github !== undefined ? { github } : {}),
+    },
+  };
 }
 
 function mergeSellerConfig(

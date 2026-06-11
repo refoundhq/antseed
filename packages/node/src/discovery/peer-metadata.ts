@@ -41,6 +41,16 @@ export interface DomainVerificationClaim {
   methods?: DomainVerificationMethod[];
 }
 
+export interface GithubVerificationClaim {
+  /** GitHub username, lower-case. */
+  username: string;
+  /**
+   * Public repository holding the proof file, lower-case. Defaults to the
+   * profile repository `<username>/<username>` when omitted.
+   */
+  repository?: string;
+}
+
 export interface PeerVerifications {
   /**
    * Domain ownership claims. Clients verify by checking a matching DNS TXT
@@ -48,6 +58,12 @@ export interface PeerVerifications {
    * `https://<domain>/.well-known/antseed.json`.
    */
   domains?: DomainVerificationClaim[];
+  /**
+   * GitHub account ownership claims. Clients verify by fetching
+   * `https://raw.githubusercontent.com/<username>/<repository>/HEAD/antseed.json`
+   * — the username in the URL path binds the proof to the account.
+   */
+  github?: GithubVerificationClaim[];
 }
 
 export interface PeerMetadata {

@@ -1,6 +1,15 @@
 import { resolveTxt } from "node:dns/promises";
 
 import type { DomainVerificationClaim, DomainVerificationMethod, PeerMetadata } from "./peer-metadata.js";
+import {
+  DEFAULT_VERIFICATION_TIMEOUT_MS,
+  MAX_VERIFICATION_PROOF_BYTES,
+  formatError,
+  normalizePeerId,
+  readBodyWithLimit,
+  withTimeout,
+  withTimeoutSignal,
+} from "./verification-utils.js";
 
 export const DOMAIN_VERIFICATION_TXT_PREFIX = "antseed-peer=";
 export const DOMAIN_VERIFICATION_TXT_NAME_PREFIX = "_antseed.";
@@ -36,14 +45,6 @@ interface WellKnownDomainProof {
 }
 
 const ALL_DOMAIN_VERIFICATION_METHODS: DomainVerificationMethod[] = ["dns-txt", "https-well-known"];
-const DEFAULT_VERIFICATION_TIMEOUT_MS = 3_000;
-// Proofs are tiny JSON documents; cap reads so a hostile domain can't stream
-// an unbounded body into the verifying client.
-const MAX_WELL_KNOWN_PROOF_BYTES = 4_096;
-
-function normalizePeerId(peerId: string): string {
-  return peerId.trim().toLowerCase().replace(/^0x/, "");
-}
 
 function normalizeDomain(domain: string): string {
   return domain.trim().toLowerCase();
@@ -56,37 +57,6 @@ function normalizeMethods(claim: DomainVerificationClaim): DomainVerificationMet
   return ALL_DOMAIN_VERIFICATION_METHODS.filter((method) => methods.includes(method));
 }
 
-function formatError(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
-
-function withTimeoutSignal(signal: AbortSignal | undefined, timeoutMs: number): {
-  signal: AbortSignal;
-  cleanup: () => void;
-} {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(new Error("domain verification timed out")), timeoutMs);
-  if (!signal) {
-    return {
-      signal: controller.signal,
-      cleanup: () => clearTimeout(timer),
-    };
-  }
-  const onAbort = () => controller.abort(signal.reason);
-  if (signal.aborted) {
-    onAbort();
-  } else {
-    signal.addEventListener("abort", onAbort, { once: true });
-  }
-  return {
-    signal: controller.signal,
-    cleanup: () => {
-      clearTimeout(timer);
-      signal.removeEventListener("abort", onAbort);
-    },
-  };
-}
-
 function txtRecordMatchesPeerId(record: string, peerId: string): boolean {
   return record
     .split(/\s+/)
@@ -94,50 +64,6 @@ function txtRecordMatchesPeerId(record: string, peerId: string): boolean {
       const [key, value] = part.split("=", 2);
       return key === DOMAIN_VERIFICATION_TXT_PREFIX.slice(0, -1) && normalizePeerId(value ?? "") === peerId;
     });
-}
-
-function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(message)), timeoutMs);
-    promise.then(
-      (value) => { clearTimeout(timer); resolve(value); },
-      (err: unknown) => { clearTimeout(timer); reject(err); },
-    );
-  });
-}
-
-async function readBodyWithLimit(response: Response, maxBytes: number): Promise<string> {
-  const contentLength = Number(response.headers.get("content-length") ?? "");
-  if (Number.isFinite(contentLength) && contentLength > maxBytes) {
-    throw new Error(`Proof body exceeds ${maxBytes} bytes`);
-  }
-  if (!response.body) {
-    const text = await response.text();
-    if (text.length > maxBytes) {
-      throw new Error(`Proof body exceeds ${maxBytes} bytes`);
-    }
-    return text;
-  }
-  const reader = response.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    total += value.byteLength;
-    if (total > maxBytes) {
-      await reader.cancel().catch(() => {});
-      throw new Error(`Proof body exceeds ${maxBytes} bytes`);
-    }
-    chunks.push(value);
-  }
-  const merged = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    merged.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return new TextDecoder().decode(merged);
 }
 
 async function verifyDnsTxt(
@@ -179,7 +105,7 @@ async function verifyWellKnown(
     if (!response.ok) {
       return { method: "https-well-known", verified: false, error: `HTTP ${response.status}` };
     }
-    const proof = JSON.parse(await readBodyWithLimit(response, MAX_WELL_KNOWN_PROOF_BYTES)) as WellKnownDomainProof;
+    const proof = JSON.parse(await readBodyWithLimit(response, MAX_VERIFICATION_PROOF_BYTES)) as WellKnownDomainProof;
     const proofPeerId = typeof proof.peerId === "string" ? normalizePeerId(proof.peerId) : "";
     const proofDomain = typeof proof.domain === "string" ? normalizeDomain(proof.domain) : domain;
     if (proof.type !== DOMAIN_VERIFICATION_WELL_KNOWN_TYPE) {

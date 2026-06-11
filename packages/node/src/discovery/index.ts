@@ -22,6 +22,7 @@ export {
   WELL_KNOWN_SERVICE_CATEGORIES,
   type DomainVerificationClaim,
   type DomainVerificationMethod,
+  type GithubVerificationClaim,
   type PeerMetadata,
   type PeerVerifications,
   type ProviderAnnouncement,
@@ -39,6 +40,16 @@ export {
   type DomainVerificationOptions,
   type DomainVerificationResult,
 } from './domain-verification.js';
+export {
+  GITHUB_VERIFICATION_PROOF_FILE,
+  GITHUB_VERIFICATION_PROOF_TYPE,
+  buildGithubVerificationProof,
+  buildGithubVerificationProofUrl,
+  verifyGithubVerificationClaim,
+  verifyPeerMetadataGithub,
+  type GithubVerificationOptions,
+  type GithubVerificationResult,
+} from './github-verification.js';
 export { parsePublicAddress, MAX_PUBLIC_ADDRESS_LENGTH, type ParsedPublicAddress } from './public-address.js';
 export { type MetadataResolver, type PeerEndpoint } from './metadata-resolver.js';
 export { HttpMetadataResolver, type HttpMetadataResolverConfig } from './http-metadata-resolver.js';

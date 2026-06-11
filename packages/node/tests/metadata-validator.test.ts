@@ -8,6 +8,7 @@ import {
   MAX_REGION_LENGTH,
   MAX_DISPLAY_NAME_LENGTH,
   MAX_DOMAIN_VERIFICATION_CLAIMS,
+  MAX_GITHUB_VERIFICATION_CLAIMS,
   MAX_PUBLIC_ADDRESS_LENGTH,
   MAX_SERVICE_CATEGORY_LENGTH,
   MAX_SERVICE_API_PROTOCOLS_PER_SERVICE,
@@ -550,6 +551,47 @@ describe('validateMetadata', () => {
       },
     }));
     expect(errors.some(e => e.field === "verifications.domains")).toBe(true);
+  });
+
+  it("accepts valid github verification claims", () => {
+    const errors = validateMetadata(validMetadata({
+      verifications: {
+        github: [
+          { username: "octocat" },
+          { username: "octocat", repository: "antseed-proofs" },
+        ],
+      },
+    }));
+    expect(errors.filter(e => e.field.startsWith("verifications"))).toHaveLength(0);
+  });
+
+  it("rejects malformed github verification claims", () => {
+    const errors = validateMetadata(validMetadata({
+      verifications: {
+        github: [
+          { username: "-bad-" },
+          { username: "double--hyphen" },
+          { username: "octocat", repository: "bad repo!" },
+          { username: "octocat" },
+          { username: "octocat" },
+        ],
+      },
+    }));
+    expect(errors.some(e => e.field === "verifications.github[0].username")).toBe(true);
+    expect(errors.some(e => e.field === "verifications.github[1].username")).toBe(true);
+    expect(errors.some(e => e.field === "verifications.github[2].repository")).toBe(true);
+    expect(errors.some(e => e.field === "verifications.github[4]")).toBe(true);
+  });
+
+  it("rejects too many github verification claims", () => {
+    const errors = validateMetadata(validMetadata({
+      verifications: {
+        github: Array.from({ length: MAX_GITHUB_VERIFICATION_CLAIMS + 1 }, (_, i) => ({
+          username: `user-${i}`,
+        })),
+      },
+    }));
+    expect(errors.some(e => e.field === "verifications.github")).toBe(true);
   });
 });
 
