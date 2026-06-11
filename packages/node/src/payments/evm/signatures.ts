@@ -1,4 +1,4 @@
-import { type AbstractSigner, type TypedDataDomain, AbiCoder, keccak256 } from 'ethers';
+import { type AbstractSigner, type TypedDataDomain, AbiCoder, id, keccak256 } from 'ethers';
 
 // =========================================================================
 // EIP-712 Types — AntSeed SpendingAuth (cumulative payment authorization)
@@ -52,20 +52,69 @@ export interface SetOperatorMessage {
 // Metadata encoding
 // =========================================================================
 
+/**
+ * SpendingAuth metadata v2.
+ *
+ * ABI layout:
+ *   abi.encode(
+ *     uint256 version,
+ *     uint256 cumulativeInputTokens,
+ *     uint256 cumulativeOutputTokens,
+ *     uint256 cumulativeRequestCount,
+ *     ServiceTotal[] services
+ *   )
+ *
+ * The first four fields intentionally match v1 so legacy decoders can read
+ * aggregate token/request counters by decoding only those fields. Service
+ * entries are buyer-side attribution metadata for indexers: input tokens
+ * include cached input, with cached input broken out separately.
+ *
+ * Service cumulativeAmount values may be lower than the top-level
+ * cumulativeAmount because the buyer can sign reserve headroom, cap a
+ * per-request amount, or extend auth without attributing that delta to a
+ * specific service.
+ */
+
 export interface SpendingAuthMetadata {
   cumulativeInputTokens: bigint;
   cumulativeOutputTokens: bigint;
   cumulativeRequestCount: bigint;
+  services?: SpendingAuthServiceMetadata[];
 }
 
-export const METADATA_VERSION = 1n;
+export interface SpendingAuthServiceMetadata {
+  serviceId: string;
+  cumulativeAmount: bigint;
+  cumulativeInputTokens: bigint;
+  cumulativeCachedInputTokens: bigint;
+  cumulativeOutputTokens: bigint;
+  cumulativeRequestCount: bigint;
+}
+
+export const METADATA_VERSION = 2n;
+
+const SERVICE_METADATA_ABI_TYPE =
+  'tuple(bytes32 serviceId,uint256 cumulativeAmount,uint256 cumulativeInputTokens,uint256 cumulativeCachedInputTokens,uint256 cumulativeOutputTokens,uint256 cumulativeRequestCount)[]';
 
 export function encodeMetadata(metadata: SpendingAuthMetadata): string {
   const coder = AbiCoder.defaultAbiCoder();
-  return coder.encode(
-    ['uint256', 'uint256', 'uint256', 'uint256'],
-    [METADATA_VERSION, metadata.cumulativeInputTokens, metadata.cumulativeOutputTokens, metadata.cumulativeRequestCount],
+  const services = [...(metadata.services ?? [])].sort((a, b) =>
+    a.serviceId.toLowerCase().localeCompare(b.serviceId.toLowerCase()),
   );
+  return coder.encode(
+    ['uint256', 'uint256', 'uint256', 'uint256', SERVICE_METADATA_ABI_TYPE],
+    [
+      METADATA_VERSION,
+      metadata.cumulativeInputTokens,
+      metadata.cumulativeOutputTokens,
+      metadata.cumulativeRequestCount,
+      services,
+    ],
+  );
+}
+
+export function getServiceMetadataId(service: string): string {
+  return id(service.trim());
 }
 
 export function computeMetadataHash(metadata: SpendingAuthMetadata): string {
@@ -76,6 +125,7 @@ export const ZERO_METADATA: SpendingAuthMetadata = {
   cumulativeInputTokens: 0n,
   cumulativeOutputTokens: 0n,
   cumulativeRequestCount: 0n,
+  services: [],
 };
 
 export const ZERO_METADATA_HASH: string = computeMetadataHash(ZERO_METADATA);

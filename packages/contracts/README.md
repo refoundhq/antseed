@@ -88,6 +88,11 @@ ReserveAuth(bytes32 channelId, uint128 maxAmount, uint256 deadline)
 SpendingAuth(bytes32 channelId, uint256 cumulativeAmount, bytes32 metadataHash)
 ```
 
+`metadataHash` is the hash of buyer metadata bytes. Current metadata keeps the
+first four ABI fields stable for legacy decoders:
+`version, cumulativeInputTokens, cumulativeOutputTokens, cumulativeRequestCount`,
+then appends service attribution data for off-chain indexers.
+
 channelId = keccak256(abi.encode(buyer, seller, salt))
 
 **Owner functions:**
