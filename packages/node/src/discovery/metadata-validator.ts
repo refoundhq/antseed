@@ -1,22 +1,33 @@
-import type { PeerMetadata } from "./peer-metadata.js";
+import type { DomainVerificationMethod, PeerMetadata } from "./peer-metadata.js";
 import { METADATA_VERSION, WELL_KNOWN_SERVICE_API_PROTOCOLS } from "./peer-metadata.js";
 import { encodeMetadata } from "./metadata-codec.js";
 import { MAX_PUBLIC_ADDRESS_LENGTH, parsePublicAddress } from "./public-address.js";
 
-// v8 adds 21 bytes for the optional sellerContract field (1-byte flag + 20-byte
-// address). Bumped from 1000 so sellers already near the limit don't silently
-// fail validation when they enable a seller facade.
-export const MAX_METADATA_SIZE = 1024;
+// v9 adds signed domain verification claims. Keep enough room for several
+// normal hostnames while still bounding DHT-served metadata fetch payloads.
+export const MAX_METADATA_SIZE = 1400;
 export const MAX_PROVIDERS = 10;
 export const MAX_SERVICES_PER_PROVIDER = 20;
 export const MAX_SERVICE_NAME_LENGTH = 64;
 export const MAX_REGION_LENGTH = 32;
 export const MAX_DISPLAY_NAME_LENGTH = 64;
+export const MAX_DOMAIN_VERIFICATION_CLAIMS = 5;
+export const MAX_DOMAIN_LENGTH = 253;
 export const MAX_SERVICE_CATEGORIES_PER_SERVICE = 8;
 export const MAX_SERVICE_CATEGORY_LENGTH = 32;
 export const MAX_SERVICE_API_PROTOCOLS_PER_SERVICE = 4;
 const SERVICE_CATEGORY_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
+const DOMAIN_LABEL_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
+const DOMAIN_VERIFICATION_METHODS = new Set<DomainVerificationMethod>(["dns-txt", "https-well-known"]);
 const SERVICE_API_PROTOCOL_SET = new Set<string>(WELL_KNOWN_SERVICE_API_PROTOCOLS);
+
+function isValidDomainName(value: string): boolean {
+  if (value.length === 0 || value.length > MAX_DOMAIN_LENGTH) return false;
+  if (value.includes("..") || value.endsWith(".")) return false;
+  const labels = value.split(".");
+  if (labels.length < 2) return false;
+  return labels.every((label) => DOMAIN_LABEL_PATTERN.test(label));
+}
 
 export interface ValidationError {
   field: string;
@@ -92,6 +103,91 @@ export function validateMetadata(metadata: PeerMetadata): ValidationError[] {
   if (metadata.sellerContract !== undefined) {
     if (!/^[0-9a-f]{40}$/.test(metadata.sellerContract)) {
       errors.push({ field: "sellerContract", message: "Must be 40 lowercase hex chars" });
+    }
+  }
+
+  if (metadata.verifications !== undefined) {
+    if (!metadata.verifications || typeof metadata.verifications !== "object" || Array.isArray(metadata.verifications)) {
+      errors.push({ field: "verifications", message: "Must be an object when provided" });
+    } else {
+      const domainClaims = metadata.verifications.domains;
+      if (domainClaims !== undefined) {
+        if (!Array.isArray(domainClaims)) {
+          errors.push({ field: "verifications.domains", message: "Must be an array when provided" });
+        } else {
+          if (domainClaims.length === 0) {
+            errors.push({ field: "verifications.domains", message: "Must not be empty when provided" });
+          }
+          if (domainClaims.length > MAX_DOMAIN_VERIFICATION_CLAIMS) {
+            errors.push({
+              field: "verifications.domains",
+              message: `Domain verification claim count ${domainClaims.length} exceeds max ${MAX_DOMAIN_VERIFICATION_CLAIMS}`,
+            });
+          }
+          const domains = new Set<string>();
+          for (let i = 0; i < domainClaims.length; i += 1) {
+            const claim = domainClaims[i];
+            if (!claim || typeof claim !== "object" || Array.isArray(claim)) {
+              errors.push({ field: `verifications.domains[${i}]`, message: "Domain verification claim must be an object" });
+              continue;
+            }
+            const domain = typeof claim.domain === "string" ? claim.domain.trim().toLowerCase() : "";
+            if (!isValidDomainName(domain)) {
+              errors.push({
+                field: `verifications.domains[${i}].domain`,
+                message: "Domain must be a lower-case hostname with at least two labels",
+              });
+            } else if (domains.has(domain)) {
+              errors.push({
+                field: `verifications.domains[${i}].domain`,
+                message: "Domain verification claims must be unique",
+              });
+            }
+            domains.add(domain);
+
+            if (claim.methods !== undefined) {
+              if (!Array.isArray(claim.methods) || claim.methods.length === 0) {
+                errors.push({
+                  field: `verifications.domains[${i}].methods`,
+                  message: "Methods must be a non-empty string array when provided",
+                });
+              } else {
+                const methods = new Set<string>();
+                for (let j = 0; j < claim.methods.length; j += 1) {
+                  const method = claim.methods[j];
+                  if (typeof method !== "string" || !DOMAIN_VERIFICATION_METHODS.has(method as DomainVerificationMethod)) {
+                    errors.push({
+                      field: `verifications.domains[${i}].methods[${j}]`,
+                      message: "Unsupported domain verification method",
+                    });
+                    continue;
+                  }
+                  if (methods.has(method)) {
+                    errors.push({
+                      field: `verifications.domains[${i}].methods[${j}]`,
+                      message: "Domain verification methods must be unique per claim",
+                    });
+                  }
+                  methods.add(method);
+                }
+              }
+            }
+          }
+        }
+      }
+      const unknownKeys = Object.keys(metadata.verifications).filter((key) => key !== "domains");
+      for (const key of unknownKeys) {
+        errors.push({
+          field: `verifications.${key}`,
+          message: "Unsupported verification namespace",
+        });
+      }
+      if (metadata.verifications.domains === undefined && unknownKeys.length === 0) {
+        errors.push({
+          field: "verifications",
+          message: "Must include at least one verification namespace when provided",
+        });
+      }
     }
   }
 

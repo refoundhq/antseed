@@ -4,6 +4,8 @@ import { homedir } from 'node:os';
 import type {
   HierarchicalPricingConfig,
   AntseedConfig,
+  DomainVerificationConfig,
+  DomainVerificationMethod,
   SellerProviderConfig,
   SellerServiceConfig,
   TokenPricingUsdPerMillion,
@@ -180,6 +182,51 @@ function normalizeAgentDir(
   return fallback ? { agentDir: fallback } : {};
 }
 
+function normalizeDomainVerification(
+  value: unknown,
+): DomainVerificationConfig[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const out: DomainVerificationConfig[] = [];
+  for (const rawClaim of value) {
+    if (!isRecord(rawClaim)) continue;
+    if (typeof rawClaim['domain'] !== 'string' || rawClaim['domain'].trim().length === 0) continue;
+    const domain = rawClaim['domain'].trim().toLowerCase();
+    const claim: DomainVerificationConfig = { domain };
+    if (Array.isArray(rawClaim['methods'])) {
+      const methods = rawClaim['methods']
+        .filter((method): method is DomainVerificationMethod => method === 'dns-txt' || method === 'https-well-known');
+      if (methods.length > 0) claim.methods = Array.from(new Set(methods));
+    }
+    out.push(claim);
+  }
+  return out.length > 0 ? out : undefined;
+}
+
+function cloneVerifications(
+  value: AntseedConfig['seller']['verifications'],
+): AntseedConfig['seller']['verifications'] {
+  if (!value) return undefined;
+  const domains = value.domains
+    ? value.domains.map((claim) => ({
+      domain: claim.domain,
+      ...(claim.methods ? { methods: [...claim.methods] } : {}),
+    }))
+    : undefined;
+  return domains && domains.length > 0 ? { domains } : undefined;
+}
+
+function normalizeVerifications(
+  value: unknown,
+  fallback?: AntseedConfig['seller']['verifications'],
+): { verifications: NonNullable<AntseedConfig['seller']['verifications']> } | Record<string, never> {
+  if (!isRecord(value)) {
+    const cloned = cloneVerifications(fallback);
+    return cloned ? { verifications: cloned } : {};
+  }
+  const domains = normalizeDomainVerification(value['domains']);
+  return domains ? { verifications: { domains } } : {};
+}
+
 function mergeSellerConfig(
   defaults: AntseedConfig['seller'],
   value: unknown
@@ -192,6 +239,7 @@ function mergeSellerConfig(
       publicAddress: defaults.publicAddress,
       ...(typeof defaults.maxUploadBodyBytes === 'number' ? { maxUploadBodyBytes: defaults.maxUploadBodyBytes } : {}),
       ...(defaults.agentDir ? { agentDir: defaults.agentDir } : {}),
+      ...(normalizeVerifications(undefined, defaults.verifications)),
     };
   }
 
@@ -206,6 +254,7 @@ function mergeSellerConfig(
     publicAddress: typeof value['publicAddress'] === 'string'
       ? value['publicAddress']
       : defaults.publicAddress,
+    ...(normalizeVerifications(value['verifications'], defaults.verifications)),
     ...(typeof value['maxUploadBodyBytes'] === 'number'
       ? { maxUploadBodyBytes: value['maxUploadBodyBytes'] }
       : typeof defaults.maxUploadBodyBytes === 'number'

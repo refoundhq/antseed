@@ -29,10 +29,26 @@ export { OFFICIAL_BOOTSTRAP_NODES, mergeBootstrapNodes, toBootstrapConfig } from
 export {
   WELL_KNOWN_SERVICE_CATEGORIES,
   WELL_KNOWN_SERVICE_API_PROTOCOLS,
+  type DomainVerificationClaim,
+  type DomainVerificationMethod,
   type ServiceApiProtocol,
   type PeerMetadata,
+  type PeerVerifications,
   type ProviderAnnouncement,
 } from './discovery/peer-metadata.js';
+export {
+  DOMAIN_VERIFICATION_TXT_PREFIX,
+  DOMAIN_VERIFICATION_TXT_NAME_PREFIX,
+  DOMAIN_VERIFICATION_WELL_KNOWN_PATH,
+  DOMAIN_VERIFICATION_WELL_KNOWN_TYPE,
+  buildDomainVerificationTxtValue,
+  buildDomainVerificationWellKnownProof,
+  verifyDomainVerificationClaim,
+  verifyPeerMetadataDomains,
+  type DomainVerificationAttemptResult,
+  type DomainVerificationOptions,
+  type DomainVerificationResult,
+} from './discovery/domain-verification.js';
 export { MetadataServer, type MetadataServerConfig } from './discovery/metadata-server.js';
 export { parsePublicAddress, MAX_PUBLIC_ADDRESS_LENGTH, type ParsedPublicAddress } from './discovery/public-address.js';
 export { MeteringStorage } from './metering/storage.js';

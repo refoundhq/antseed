@@ -1,4 +1,6 @@
 import type {
+  DomainVerificationConfig,
+  DomainVerificationMethod,
   HierarchicalPricingConfig,
   AntseedConfig,
   SellerProviderConfig,
@@ -7,6 +9,10 @@ import type {
 
 const SERVICE_CATEGORY_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
 const MAX_PUBLIC_ADDRESS_LENGTH = 255;
+const MAX_DOMAIN_VERIFICATION_CLAIMS = 5;
+const MAX_DOMAIN_LENGTH = 253;
+const DOMAIN_LABEL_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
+const DOMAIN_VERIFICATION_METHODS = new Set<DomainVerificationMethod>(['dns-txt', 'https-well-known']);
 const MIN_SELLER_UPLOAD_BODY_BYTES = 1024 * 1024;
 const MIN_BUYER_PEER_REFRESH_INTERVAL_MS = 1_000;
 export const MIN_BUYER_METADATA_FETCH_TIMEOUT_MS = 100;
@@ -126,6 +132,84 @@ function parsePublicAddress(value: string): { host: string; port: number } | nul
   return { host, port };
 }
 
+function isValidDomainName(value: string): boolean {
+  if (value.length === 0 || value.length > MAX_DOMAIN_LENGTH) return false;
+  if (value.includes('..') || value.endsWith('.')) return false;
+  const labels = value.split('.');
+  if (labels.length < 2) return false;
+  return labels.every((label) => DOMAIN_LABEL_PATTERN.test(label));
+}
+
+function validateDomainVerification(
+  path: string,
+  claims: DomainVerificationConfig[] | undefined,
+  errors: string[],
+): void {
+  if (claims === undefined) return;
+  if (!Array.isArray(claims)) {
+    errors.push(`${path} must be an array when provided`);
+    return;
+  }
+  if (claims.length === 0) {
+    errors.push(`${path} must be a non-empty array when provided`);
+    return;
+  }
+  if (claims.length > MAX_DOMAIN_VERIFICATION_CLAIMS) {
+    errors.push(`${path} must contain at most ${MAX_DOMAIN_VERIFICATION_CLAIMS} claims`);
+  }
+  const domains = new Set<string>();
+  for (let i = 0; i < claims.length; i += 1) {
+    const claim = claims[i];
+    const claimPath = `${path}[${i}]`;
+    const domain = typeof claim?.domain === 'string' ? claim.domain.trim().toLowerCase() : '';
+    if (!isValidDomainName(domain)) {
+      errors.push(`${claimPath}.domain must be a lower-case hostname with at least two labels`);
+    } else if (domains.has(domain)) {
+      errors.push(`${claimPath}.domain is duplicated`);
+    }
+    domains.add(domain);
+
+    if (claim?.methods !== undefined) {
+      if (!Array.isArray(claim.methods) || claim.methods.length === 0) {
+        errors.push(`${claimPath}.methods must be a non-empty array when provided`);
+      } else {
+        const methods = new Set<string>();
+        for (let j = 0; j < claim.methods.length; j += 1) {
+          const method = claim.methods[j];
+          if (typeof method !== 'string' || !DOMAIN_VERIFICATION_METHODS.has(method as DomainVerificationMethod)) {
+            errors.push(`${claimPath}.methods[${j}] must be "dns-txt" or "https-well-known"`);
+            continue;
+          }
+          if (methods.has(method)) {
+            errors.push(`${claimPath}.methods[${j}] is duplicated`);
+          }
+          methods.add(method);
+        }
+      }
+    }
+  }
+}
+
+function validateVerifications(
+  path: string,
+  verifications: AntseedConfig['seller']['verifications'],
+  errors: string[],
+): void {
+  if (verifications === undefined) return;
+  if (!verifications || typeof verifications !== 'object' || Array.isArray(verifications)) {
+    errors.push(`${path} must be an object when provided`);
+    return;
+  }
+  validateDomainVerification(`${path}.domains`, verifications.domains, errors);
+  const unknownKeys = Object.keys(verifications).filter((key) => key !== 'domains');
+  for (const key of unknownKeys) {
+    errors.push(`${path}.${key} is not a supported verification namespace`);
+  }
+  if (verifications.domains === undefined && unknownKeys.length === 0) {
+    errors.push(`${path} must include at least one verification namespace when provided`);
+  }
+}
+
 /**
  * Validate the full config and return all issues.
  */
@@ -190,6 +274,8 @@ export function validateConfig(config: AntseedConfig): string[] {
       errors.push('seller.publicAddress must be in the form "host:port" with a valid port');
     }
   }
+
+  validateVerifications('seller.verifications', config.seller.verifications, errors);
 
   return errors;
 }

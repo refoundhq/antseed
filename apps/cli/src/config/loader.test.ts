@@ -276,6 +276,28 @@ test('loadConfig preserves seller publicAddress override', async () => {
   );
 });
 
+test('loadConfig preserves seller verifications.domains claims', async () => {
+  await withTempConfig(
+    JSON.stringify({
+      seller: {
+        verifications: {
+          domains: [
+            { domain: 'Example.COM', methods: ['https-well-known', 'dns-txt'] },
+          ],
+        },
+      },
+    }),
+    async (configPath) => {
+      const config = await loadConfig(configPath);
+      assert.deepEqual(config.seller.verifications, {
+        domains: [
+          { domain: 'example.com', methods: ['https-well-known', 'dns-txt'] },
+        ],
+      });
+    }
+  );
+});
+
 test('loadConfig preserves seller maxUploadBodyBytes setting', async () => {
   await withTempConfig(
     JSON.stringify({
