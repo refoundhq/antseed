@@ -249,10 +249,19 @@ function encodeBody(metadata: PeerMetadata): Uint8Array {
           : undefined,
       }))
       .filter((claim) => claim.domain.length > 0)
-      .sort((a, b) => a.domain.localeCompare(b.domain));
+      // Code-unit sort, not localeCompare: buyers verify signatures by
+      // re-encoding decoded metadata, so claim order must not depend on the
+      // verifier's locale.
+      .sort((a, b) => (a.domain < b.domain ? -1 : a.domain > b.domain ? 1 : 0));
+    if (claims.length > 255) {
+      throw new Error(`Too many domain verification claims (${claims.length})`);
+    }
     parts.push(new Uint8Array([claims.length]));
     for (const claim of claims) {
       const domainBytes = new TextEncoder().encode(claim.domain);
+      if (domainBytes.length > 255) {
+        throw new Error(`Domain verification claim too long (${domainBytes.length} bytes)`);
+      }
       parts.push(new Uint8Array([domainBytes.length]));
       parts.push(domainBytes);
       const methods = claim.methods

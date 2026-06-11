@@ -298,6 +298,42 @@ test('loadConfig preserves seller verifications.domains claims', async () => {
   );
 });
 
+test('loadConfig rejects unknown domain verification methods instead of dropping them', async () => {
+  await withTempConfig(
+    JSON.stringify({
+      seller: {
+        verifications: {
+          domains: [
+            { domain: 'example.com', methods: ['dns-text'] },
+          ],
+        },
+      },
+    }),
+    async (configPath) => {
+      await assert.rejects(
+        loadConfig(configPath),
+        /verifications\.domains\[0\]\.methods\[0\]/,
+      );
+    }
+  );
+});
+
+test('loadConfig rejects empty seller verifications', async () => {
+  await withTempConfig(
+    JSON.stringify({
+      seller: {
+        verifications: { domains: [] },
+      },
+    }),
+    async (configPath) => {
+      await assert.rejects(
+        loadConfig(configPath),
+        /verifications\.domains/,
+      );
+    }
+  );
+});
+
 test('loadConfig preserves seller maxUploadBodyBytes setting', async () => {
   await withTempConfig(
     JSON.stringify({

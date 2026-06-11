@@ -42,8 +42,9 @@ describe("domain verification", () => {
       { domain: "example.com", methods: ["https-well-known"] },
       PEER_ID,
       {
-        fetch: async (input) => {
+        fetch: async (input, init) => {
           expect(String(input)).toBe("https://example.com/.well-known/antseed.json");
+          expect(init?.redirect).toBe("error");
           return new Response(JSON.stringify({
             type: DOMAIN_VERIFICATION_WELL_KNOWN_TYPE,
             peerId: PEER_ID,
@@ -55,6 +56,33 @@ describe("domain verification", () => {
 
     expect(result.verified).toBe(true);
     expect(result.method).toBe("https-well-known");
+  });
+
+  it("rejects oversized well-known proof bodies", async () => {
+    const result = await verifyDomainVerificationClaim(
+      { domain: "example.com", methods: ["https-well-known"] },
+      PEER_ID,
+      {
+        fetch: async () => new Response(`"${"x".repeat(64 * 1024)}"`, { status: 200 }),
+      },
+    );
+
+    expect(result.verified).toBe(false);
+    expect(result.attempts[0]?.error).toMatch(/exceeds/);
+  });
+
+  it("times out hung DNS TXT lookups", async () => {
+    const result = await verifyDomainVerificationClaim(
+      { domain: "example.com", methods: ["dns-txt"] },
+      PEER_ID,
+      {
+        timeoutMs: 20,
+        resolveTxt: () => new Promise(() => {}),
+      },
+    );
+
+    expect(result.verified).toBe(false);
+    expect(result.attempts[0]?.error).toMatch(/timed out/);
   });
 
   it("reports failed attempts when proofs do not match", async () => {

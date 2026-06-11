@@ -12,6 +12,7 @@ import {
 import type { PeerOffering } from "../types/capability.js";
 import type { DomainVerificationClaim, DomainVerificationMethod, PeerMetadata, PeerVerifications, ProviderAnnouncement } from "./peer-metadata.js";
 import { METADATA_VERSION } from "./peer-metadata.js";
+import { MAX_DOMAIN_LENGTH, MAX_DOMAIN_VERIFICATION_CLAIMS } from "./metadata-validator.js";
 
 import type { ServiceApiProtocol } from "../types/service-api.js";
 import { isKnownServiceApiProtocol } from "../types/service-api.js";
@@ -196,7 +197,7 @@ export class PeerAnnouncer {
     const methodOrder: DomainVerificationMethod[] = ["dns-txt", "https-well-known"];
     for (const claim of claims) {
       const normalizedDomain = claim.domain.trim().toLowerCase();
-      if (!normalizedDomain || seen.has(normalizedDomain)) continue;
+      if (!normalizedDomain || normalizedDomain.length > MAX_DOMAIN_LENGTH || seen.has(normalizedDomain)) continue;
       seen.add(normalizedDomain);
       const methods = claim.methods
         ? methodOrder.filter((method) => claim.methods!.includes(method))
@@ -206,7 +207,10 @@ export class PeerAnnouncer {
         ...(methods && methods.length > 0 ? { methods } : {}),
       });
     }
-    return domains.length > 0 ? { domains: domains.sort((a, b) => a.domain.localeCompare(b.domain)) } : undefined;
+    if (domains.length === 0) return undefined;
+    // Code-unit sort (matches the codec) so signed claim order is locale-independent.
+    domains.sort((a, b) => (a.domain < b.domain ? -1 : a.domain > b.domain ? 1 : 0));
+    return { domains: domains.slice(0, MAX_DOMAIN_VERIFICATION_CLAIMS) };
   }
 
   private async _buildSignedMetadata(includeOnChainReputation = true): Promise<PeerMetadata> {
