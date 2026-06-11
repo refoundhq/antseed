@@ -91,6 +91,10 @@ contract AntseedSellerPools is IAntseedSellerPools, ERC721, Ownable2Step, Reentr
         uint256 matchedAmount;
         uint64 startEpoch;
         uint64 stakeEndEpoch;
+        // bootstrapWeightBps snapshot taken at activation; matching must remove
+        // power at the same discount it was added with, even if the global
+        // config changes in between.
+        uint64 weightBps;
     }
 
     // ─── Position And Epoch Accounting ───────────────────────────────
@@ -205,7 +209,8 @@ contract AntseedSellerPools is IAntseedSellerPools, ERC721, Ownable2Step, Reentr
             amount: bootstrapAmount,
             matchedAmount: 0,
             startEpoch: uint64(startEpoch),
-            stakeEndEpoch: uint64(stakeEndEpoch)
+            stakeEndEpoch: uint64(stakeEndEpoch),
+            weightBps: uint64(bootstrapWeightBps)
         });
         bootstrapSellerByAgentId[agentId] = seller;
 
@@ -233,12 +238,18 @@ contract AntseedSellerPools is IAntseedSellerPools, ERC721, Ownable2Step, Reentr
         uint256 startEpoch = currentEpoch() + stakeActivationDelay;
         if (startEpoch >= commitment.stakeEndEpoch) revert StakeDurationOutOfBounds();
 
+        // Remove power at the activation-time discount (telescoping over
+        // matchedAmount so partial matches never remove more than was added),
+        // and never before the epoch the bootstrap power started at.
+        uint256 effectiveBefore = (commitment.matchedAmount * commitment.weightBps) / BPS_DENOMINATOR;
         commitment.matchedAmount += amount;
-        if (startEpoch < commitment.stakeEndEpoch) {
-            uint256 effectiveBootstrapAmount = (amount * bootstrapWeightBps) / BPS_DENOMINATOR;
-            _removePowerRange(commitment.agentId, startEpoch, commitment.stakeEndEpoch, effectiveBootstrapAmount);
+        uint256 effectiveBootstrapAmount =
+            (commitment.matchedAmount * commitment.weightBps) / BPS_DENOMINATOR - effectiveBefore;
+        uint256 removalStartEpoch = startEpoch < commitment.startEpoch ? commitment.startEpoch : startEpoch;
+        if (effectiveBootstrapAmount != 0 && removalStartEpoch < commitment.stakeEndEpoch) {
+            _removePowerRange(commitment.agentId, removalStartEpoch, commitment.stakeEndEpoch, effectiveBootstrapAmount);
             _removeBootstrapPowerRange(
-                commitment.agentId, startEpoch, commitment.stakeEndEpoch, effectiveBootstrapAmount
+                commitment.agentId, removalStartEpoch, commitment.stakeEndEpoch, effectiveBootstrapAmount
             );
         }
         antsToken.safeTransferFrom(msg.sender, address(this), amount);
@@ -289,6 +300,10 @@ contract AntseedSellerPools is IAntseedSellerPools, ERC721, Ownable2Step, Reentr
         if (position.withdrawn) revert AlreadyWithdrawn();
         if (position.closedAtEpoch != 0) revert PositionClosed();
 
+        // A position that has not activated yet (stakeActivationDelay > 1) added
+        // power only from stakeStartEpoch onward; never remove before that, and
+        // keep the original activation epoch instead of activating earlier.
+        if (effectiveEpoch < position.stakeStartEpoch) effectiveEpoch = position.stakeStartEpoch;
         if (effectiveEpoch >= position.stakeEndEpoch) revert StakeDurationOutOfBounds();
 
         position.closedAtEpoch = uint64(effectiveEpoch);
@@ -385,6 +400,9 @@ contract AntseedSellerPools is IAntseedSellerPools, ERC721, Ownable2Step, Reentr
         if (position.closedAtEpoch != 0) revert PositionClosed();
 
         uint256 effectiveCloseEpoch = epoch < position.stakeEndEpoch ? epoch + 1 : epoch;
+        // A position that has not activated yet (stakeActivationDelay > 1) added
+        // power only from stakeStartEpoch onward; never remove before that.
+        if (effectiveCloseEpoch < position.stakeStartEpoch) effectiveCloseEpoch = position.stakeStartEpoch;
         returnedAmount = position.amount;
 
         position.withdrawn = true;
@@ -595,9 +613,8 @@ contract AntseedSellerPools is IAntseedSellerPools, ERC721, Ownable2Step, Reentr
         uint256 _minEarlyExitSlashBps
     ) external onlyOwner {
         if (
-            _minStakeEpochs == 0 || _maxStakeEpochs < _minStakeEpochs || _maxStakeEpochs < maxStakeEpochs
-                || _maxStakeEpochs > MAX_STAKE_EPOCHS_CAP || _stakeActivationDelay == 0
-                || _stakeActivationDelay > MAX_STAKE_EPOCHS_CAP
+            _minStakeEpochs == 0 || _maxStakeEpochs < _minStakeEpochs || _maxStakeEpochs > MAX_STAKE_EPOCHS_CAP
+                || _stakeActivationDelay == 0 || _stakeActivationDelay > MAX_STAKE_EPOCHS_CAP
         ) revert InvalidValue();
         if (_maxSlashBps > BPS_DENOMINATOR || _minEarlyExitSlashBps > _maxSlashBps) revert InvalidValue();
         minStakeEpochs = _minStakeEpochs;

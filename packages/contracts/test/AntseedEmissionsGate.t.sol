@@ -449,6 +449,12 @@ contract AntseedEmissionsGateTest is Test {
         programs.setRewardProgram(programId, address(this), address(0), 1_000, 4, 0, true);
         assertEq(programs.programEpochBudget(programId, 4), _programBudget(1_000, 4));
 
+        // Renouncing the gate is blocked while the legacy-epoch mint window is
+        // still open; it must be closed first.
+        vm.expectRevert(AntseedEmissionsGate.LegacyEpochMintsStillEnabled.selector);
+        gate.renounceOwnership();
+
+        gate.disableLegacyEpochMints();
         gate.renounceOwnership();
         programs.renounceOwnership();
         assertEq(gate.owner(), address(0));
@@ -1037,8 +1043,11 @@ contract AntseedEmissionsGateTest is Test {
             uint256 washBuyerClaimable = washBuyerGross < washBuyerCap ? washBuyerGross : washBuyerCap;
             assertEq(buyerUsageRewards.pendingBuyerReward(washBuyer, 5), washBuyerClaimable);
 
+            address washOperator = address(0x50000);
+            deposits.setOperator(washBuyer, washOperator);
             buyerUsageRewards.claimBuyerReward(washBuyer, 5);
-            assertEq(token.balanceOf(washBuyer), washBuyerClaimable);
+            assertEq(token.balanceOf(washBuyer), 0);
+            assertEq(token.balanceOf(washOperator), washBuyerClaimable);
         }
     }
 
@@ -1153,8 +1162,18 @@ contract AntseedEmissionsGateTest is Test {
         assertEq(token.balanceOf(operator), buyerReward);
         assertEq(token.balanceOf(reserveDest), grossBuyerReward - buyerReward);
 
+        // A buyer without a resolvable Deposits operator can never be paid
+        // directly: the claim reverts (and stays claimable) until an operator
+        // is registered.
+        vm.expectRevert(AntseedBuyerUsageRewards.RewardRecipientUnavailable.selector);
         buyerUsageRewards.claimBuyerReward(secondBuyer, 4);
-        assertEq(token.balanceOf(secondBuyer), secondBuyerReward);
+        assertEq(token.balanceOf(secondBuyer), 0);
+
+        address secondOperator = address(0x22);
+        deposits.setOperator(secondBuyer, secondOperator);
+        buyerUsageRewards.claimBuyerReward(secondBuyer, 4);
+        assertEq(token.balanceOf(secondBuyer), 0);
+        assertEq(token.balanceOf(secondOperator), secondBuyerReward);
         assertEq(
             token.balanceOf(reserveDest),
             (grossBuyerReward - buyerReward) + (grossSecondBuyerReward - secondBuyerReward)

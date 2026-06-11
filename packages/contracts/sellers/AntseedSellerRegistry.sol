@@ -42,6 +42,15 @@ contract AntseedSellerRegistry is IAntseedStaking, Ownable2Step {
     // ─── Eligibility Config ──────────────────────────────────────────
     uint256 public minSellerPoolStake = 1;
 
+    /// @notice Migration switch: while true, sellers staked above min in the
+    ///         legacy USDC staking contract stay channel-eligible even without
+    ///         an active ANTS seller pool. Existing mainnet sellers cannot
+    ///         acquire pool stake at cutover (ANTS transfers may be disabled
+    ///         and new stake activates next epoch), so cutting registry.staking
+    ///         to this adapter without the fallback would brick all new
+    ///         channel creation. Disable once seller pools are seeded.
+    bool public legacyStakeEligibilityEnabled = true;
+
     // ─── Seller-Agent Bindings ───────────────────────────────────────
     mapping(address => uint256) private _sellerAgentId;
     mapping(uint256 => address) public agentSeller;
@@ -51,6 +60,7 @@ contract AntseedSellerRegistry is IAntseedStaking, Ownable2Step {
     event SellerPoolsSet(address indexed sellerPools);
     event LegacyStakingSet(address indexed legacyStaking);
     event MinSellerPoolStakeSet(uint256 minSellerPoolStake);
+    event LegacyStakeEligibilitySet(bool enabled);
     event SellerRegistered(address indexed seller, uint256 indexed agentId);
 
     // ─── Custom Errors ───────────────────────────────────────────────
@@ -107,7 +117,8 @@ contract AntseedSellerRegistry is IAntseedStaking, Ownable2Step {
 
     function isStakedAboveMin(address seller) external view returns (bool) {
         if (getAgentId(seller) == 0) return false;
-        return getStake(seller) >= minSellerPoolStake;
+        if (getStake(seller) >= minSellerPoolStake) return true;
+        return _legacyStakedAboveMin(seller);
     }
 
     function getAgentId(address seller) public view returns (uint256) {
@@ -150,9 +161,26 @@ contract AntseedSellerRegistry is IAntseedStaking, Ownable2Step {
         emit MinSellerPoolStakeSet(value);
     }
 
+    function setLegacyStakeEligibilityEnabled(bool enabled) external onlyOwner {
+        legacyStakeEligibilityEnabled = enabled;
+        emit LegacyStakeEligibilitySet(enabled);
+    }
+
     // ═══════════════════════════════════════════════════════════════════
     //                        INTERNAL HELPERS
     // ═══════════════════════════════════════════════════════════════════
+
+    function _legacyStakedAboveMin(address seller) internal view returns (bool) {
+        if (!legacyStakeEligibilityEnabled) return false;
+        IAntseedStaking legacy = legacyStaking;
+        if (address(legacy) == address(0)) return false;
+
+        try legacy.isStakedAboveMin(seller) returns (bool staked) {
+            return staked;
+        } catch {
+            return false;
+        }
+    }
 
     function _legacyAgentId(address seller) internal view returns (uint256) {
         IAntseedStaking legacy = legacyStaking;

@@ -25,8 +25,10 @@ import { IAntseedUsageAccounting } from "../interfaces/IAntseedUsageAccounting.s
  *           - The program share is configured on AntseedEmissionPrograms, so this
  *             same controller can start at 5% and later run at another share.
  *           - Rewards are minted lazily on claim for finalized epochs only.
- *           - If a buyer has a Deposits operator, the operator receives the
- *             reward; otherwise the buyer receives it directly.
+ *           - Rewards are always minted to the buyer's Deposits operator. The
+ *             buyer hot wallet itself never receives funds (protocol-wide
+ *             rule); claims for buyers without a resolvable operator revert
+ *             and can be retried once an operator exists.
  */
 contract AntseedBuyerUsageRewards is Ownable2Step, Pausable, ReentrancyGuard {
     // ─── Constants ───────────────────────────────────────────────────
@@ -61,6 +63,7 @@ contract AntseedBuyerUsageRewards is Ownable2Step, Pausable, ReentrancyGuard {
     error InvalidAddress();
     error AlreadyClaimed();
     error NothingToClaim();
+    error RewardRecipientUnavailable();
 
     // ─── Constructor ─────────────────────────────────────────────────
     constructor(address _emissionsAuthority, address _registry, bytes32 _programId) Ownable(msg.sender) {
@@ -176,13 +179,19 @@ contract AntseedBuyerUsageRewards is Ownable2Step, Pausable, ReentrancyGuard {
     }
 
     function _rewardRecipient(address buyer) internal view returns (address) {
+        // Iron rule: the buyer hot wallet never receives funds. If the
+        // operator cannot be resolved, revert (rolling back the claimed flag)
+        // so the claim can be retried once an operator is available.
         address depositsAddress = registry.deposits();
-        if (depositsAddress == address(0)) return buyer;
+        if (depositsAddress == address(0)) revert RewardRecipientUnavailable();
 
-        try IAntseedDeposits(depositsAddress).getOperator(buyer) returns (address operator) {
-            return operator == address(0) ? buyer : operator;
+        address operator;
+        try IAntseedDeposits(depositsAddress).getOperator(buyer) returns (address resolvedOperator) {
+            operator = resolvedOperator;
         } catch {
-            return buyer;
+            revert RewardRecipientUnavailable();
         }
+        if (operator == address(0)) revert RewardRecipientUnavailable();
+        return operator;
     }
 }

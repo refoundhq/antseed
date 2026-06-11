@@ -12,6 +12,27 @@ import { AntseedSellerRegistry } from "../sellers/AntseedSellerRegistry.sol";
 import { AntseedSellerPools } from "../sellers/AntseedSellerPools.sol";
 import { MockERC8004Registry } from "./mocks/MockERC8004Registry.sol";
 
+contract MockLegacyStaking {
+    mapping(address => uint256) public agentIds;
+    mapping(address => bool) public staked;
+
+    function setAgent(address seller, uint256 agentId) external {
+        agentIds[seller] = agentId;
+    }
+
+    function setStaked(address seller, bool value) external {
+        staked[seller] = value;
+    }
+
+    function getAgentId(address seller) external view returns (uint256) {
+        return agentIds[seller];
+    }
+
+    function isStakedAboveMin(address seller) external view returns (bool) {
+        return staked[seller];
+    }
+}
+
 contract AntseedSellerPoolsTest is Test {
     ANTSToken token;
     AntseedRegistry registry;
@@ -465,7 +486,7 @@ contract AntseedSellerPoolsTest is Test {
         vm.prank(seller);
         pools.activateBootstrapCommitment(agentId);
 
-        (uint256 commitmentAgentId, uint256 amount, uint256 matchedAmount, uint64 startEpoch, uint64 stakeEndEpoch) =
+        (uint256 commitmentAgentId, uint256 amount, uint256 matchedAmount, uint64 startEpoch, uint64 stakeEndEpoch,) =
             pools.bootstrapCommitments(seller);
         assertEq(commitmentAgentId, agentId);
         assertEq(amount, 1_000_000 ether);
@@ -539,7 +560,7 @@ contract AntseedSellerPoolsTest is Test {
         vm.prank(seller);
         pools.activateBootstrapCommitment(agentId);
 
-        (uint256 commitmentAgentId, uint256 amount, uint256 matchedAmount, uint64 startEpoch, uint64 stakeEndEpoch) =
+        (uint256 commitmentAgentId, uint256 amount, uint256 matchedAmount, uint64 startEpoch, uint64 stakeEndEpoch,) =
             pools.bootstrapCommitments(seller);
         assertEq(commitmentAgentId, agentId);
         assertEq(amount, 1_000_000 ether);
@@ -612,6 +633,125 @@ contract AntseedSellerPoolsTest is Test {
 
         pools.setPoolConfig(1, 52, 2, 5_000, 500);
         assertEq(pools.stakeActivationDelay(), 2);
+    }
+
+    function test_preActivationWithdrawDoesNotCorruptOtherStakersPower() public {
+        // Victim stakes with the default delay of 1: power on epochs [1, 5).
+        uint256 victimPositionId = _stake(staker, agentId, 1_000 ether, 4);
+
+        // Raise the activation delay, then a second staker stakes (power on
+        // epochs [2, 6)) and withdraws in the same epoch, before activation.
+        pools.setPoolConfig(1, 52, 2, 5_000, 500);
+        uint256 earlyExitPositionId = _stake(recipient, agentId, 100 ether, 4);
+
+        vm.prank(recipient);
+        pools.withdrawStake(earlyExitPositionId);
+
+        // The withdrawn position never had power at epoch 1; the victim's
+        // power and active stake there must be untouched, and epochs from the
+        // would-be activation onward only hold the victim's power.
+        assertEq(pools.poolWeightAtEpoch(agentId, 1), 4_000 ether);
+        assertEq(pools.poolActiveStakeAtEpoch(agentId, 1), 1_000 ether);
+        assertEq(pools.poolWeightAtEpoch(agentId, 2), 3_000 ether);
+        assertEq(pools.poolActiveStakeAtEpoch(agentId, 2), 1_000 ether);
+
+        // Full-remaining early exit slashes at the max rate.
+        assertEq(token.balanceOf(recipient), 50 ether);
+
+        // The victim can still exit later without an accounting underflow.
+        vm.warp(block.timestamp + EPOCH_DURATION);
+        vm.prank(staker);
+        pools.withdrawStake(victimPositionId);
+        assertEq(pools.poolWeightAtEpoch(agentId, 2), 0);
+    }
+
+    function test_preActivationMoveKeepsActivationEpochAndPower() public {
+        pools.setPoolConfig(1, 52, 2, 5_000, 500);
+        uint256 positionId = _stake(staker, agentId, 100 ether, 4);
+
+        // Moving before activation must not start the new position earlier
+        // than the original activation epoch (no activation-delay bypass) and
+        // must remove exactly the power that was added.
+        vm.prank(staker);
+        uint256 newPositionId = pools.moveStake(positionId, otherAgentId);
+
+        (,,,, uint64 startEpoch, uint64 stakeEndEpoch,,) = pools.positions(newPositionId);
+        assertEq(startEpoch, 2);
+        assertEq(stakeEndEpoch, 6);
+
+        assertEq(pools.poolWeightAtEpoch(agentId, 1), 0);
+        assertEq(pools.poolWeightAtEpoch(agentId, 2), 0);
+        assertEq(pools.poolWeightAtEpoch(otherAgentId, 1), 0);
+        assertEq(pools.poolWeightAtEpoch(otherAgentId, 2), 400 ether);
+        assertEq(pools.poolActiveStakeAtEpoch(otherAgentId, 2), 100 ether);
+    }
+
+    function test_bootstrapMatchUsesActivationWeightSnapshot() public {
+        sellerRewardsPool.recordLockedReward(seller, 1_000_000 ether);
+        token.mint(address(sellerRewardsPool), 1_000_000 ether);
+
+        vm.prank(seller);
+        pools.activateBootstrapCommitment(agentId);
+
+        // Changing the global bootstrap weight after activation must not
+        // change what matching removes; removal uses the activation snapshot.
+        pools.setBootstrapConfig(1_000_000e18, 9_000);
+
+        vm.warp(block.timestamp + EPOCH_DURATION);
+        token.mint(seller, 1_000_000 ether);
+        token.enableTransfers();
+        vm.startPrank(seller);
+        token.approve(address(pools), 1_000_000 ether);
+        pools.matchBootstrapCommitment(400_000 ether);
+        vm.stopPrank();
+
+        vm.warp(block.timestamp + EPOCH_DURATION);
+        // Same expectation as with an unchanged config: (1M - 400k) * 50% * (53 - 2).
+        assertEq(pools.bootstrapWeightAtEpoch(agentId, 2), 15_300_000 ether);
+
+        // Matching the full remainder removes the bootstrap power exactly,
+        // with no underflow and no residual dust. The current epoch's power
+        // stays frozen; removal applies from the next epoch onward.
+        vm.prank(seller);
+        pools.matchBootstrapCommitment(600_000 ether);
+        assertEq(pools.bootstrapWeightAtEpoch(agentId, 2), 15_300_000 ether);
+        assertEq(pools.bootstrapWeightAtEpoch(agentId, 3), 0);
+    }
+
+    function test_setPoolConfigCanLowerMaxStakeEpochs() public {
+        pools.setPoolConfig(1, 26, 1, 5_000, 500);
+        assertEq(pools.maxStakeEpochs(), 26);
+
+        token.mint(staker, 1 ether);
+        token.setTransferWhitelist(staker, true);
+        vm.startPrank(staker);
+        token.approve(address(pools), 1 ether);
+        vm.expectRevert(IAntseedSellerPools.StakeDurationOutOfBounds.selector);
+        pools.stake(agentId, 1 ether, 27);
+        vm.stopPrank();
+    }
+
+    function test_sellerRegistryLegacyStakeFallbackKeepsSellersEligible() public {
+        MockLegacyStaking legacy = new MockLegacyStaking();
+        AntseedSellerRegistry adapter =
+            new AntseedSellerRegistry(address(registry), address(pools), address(legacy));
+
+        legacy.setAgent(seller, agentId);
+        legacy.setStaked(seller, true);
+
+        // No seller pool exists, but the legacy USDC stake keeps the seller
+        // channel-eligible during the migration window.
+        assertEq(adapter.getStake(seller), 0);
+        assertTrue(adapter.isStakedAboveMin(seller));
+
+        adapter.setLegacyStakeEligibilityEnabled(false);
+        assertFalse(adapter.isStakedAboveMin(seller));
+
+        // Once the agent pool holds active ANTS stake, eligibility comes from
+        // the pool with the fallback disabled.
+        _stake(staker, agentId, 100 ether, 4);
+        vm.warp(block.timestamp + EPOCH_DURATION);
+        assertTrue(adapter.isStakedAboveMin(seller));
     }
 
     function _stake(address staker_, uint256 agentId_, uint256 amount, uint256 stakeEpochs)

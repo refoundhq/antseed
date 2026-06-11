@@ -268,12 +268,51 @@ contract AntseedUsageAccountingGasTest is Test {
         assertEq(buyerAgentEpoch.weightedPoints, 10 * poolPower);
         assertEq(agentEpoch.weightedPoints, 20 * poolPower);
 
-        usageAccounting.pause();
-        vm.expectRevert();
-        usageAccounting.accruePoints(keccak256("paused"), buyer, seller, 1);
-        usageAccounting.unpause();
-
         usageAccounting.setUsageRecorder(recorder, false);
         assertFalse(usageAccounting.usageRecorders(recorder));
+    }
+
+    function test_usageAccountingPausedAccrualsAreSkippedNotReverted() public {
+        // Pausing must not revert (the deployed AntseedChannels settle path
+        // calls accruals with no try/catch); paused accruals are skipped.
+        uint256 buyerPointsBefore = usageAccounting.totalBuyerPointsByEpoch(5);
+
+        usageAccounting.pause();
+        usageAccounting.accruePoints(keccak256("paused"), buyer, seller, 1);
+        usageAccounting.accrueSellerPoints(seller, 1);
+        (address pendingSeller,) = usageAccounting.pendingSellerAccrual();
+        assertEq(pendingSeller, address(0));
+        usageAccounting.accrueBuyerPoints(buyer, 1);
+        assertEq(usageAccounting.totalBuyerPointsByEpoch(5), buyerPointsBefore);
+        usageAccounting.unpause();
+
+        // After unpausing the legacy pair records normally again.
+        usageAccounting.accrueSellerPoints(seller, 7);
+        usageAccounting.accrueBuyerPoints(buyer, 7);
+        assertEq(usageAccounting.totalBuyerPointsByEpoch(5), buyerPointsBefore + 7);
+    }
+
+    function test_revertingPointsPolicySkipsRecordingInsteadOfBlockingSettlement() public {
+        uint256 buyerPointsBefore = usageAccounting.totalBuyerPointsByEpoch(5);
+
+        usageAccounting.setPointsPolicy(address(new RevertingPointsPolicy()));
+
+        // A broken policy must not bubble its revert into the Channels settle
+        // path; the usage record is skipped instead.
+        usageAccounting.accruePoints(keccak256("broken-policy"), buyer, seller, 10);
+        usageAccounting.accrueSellerPoints(seller, 10);
+        usageAccounting.accrueBuyerPoints(buyer, 10);
+        assertEq(usageAccounting.totalBuyerPointsByEpoch(5), buyerPointsBefore);
+
+        usageAccounting.setPointsPolicy(address(0));
+        usageAccounting.accrueSellerPoints(seller, 10);
+        usageAccounting.accrueBuyerPoints(buyer, 10);
+        assertEq(usageAccounting.totalBuyerPointsByEpoch(5), buyerPointsBefore + 10);
+    }
+}
+
+contract RevertingPointsPolicy is IAntseedPointsPolicy {
+    function points(bytes32, address, address, uint256) external pure returns (uint256, uint256) {
+        revert("policy broken");
     }
 }

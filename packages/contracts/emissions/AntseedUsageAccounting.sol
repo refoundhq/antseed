@@ -98,7 +98,17 @@ contract AntseedUsageAccounting is IAntseedUsageAccounting, Ownable2Step, Pausab
     //                        CORE — RECORD USAGE
     // ═══════════════════════════════════════════════════════════════════
 
-    function accrueSellerPoints(address seller, uint256 pointsDelta) external whenNotPaused onlyUsageRecorder {
+    // The accrual entrypoints are called inline by the deployed AntseedChannels
+    // settlement path with no try/catch. They must never revert for reasons
+    // outside the recorder's control, or pausing/misconfiguring this contract
+    // would block all USDC settlements and seller payouts network-wide. While
+    // paused, accruals are skipped (no usage recorded) instead of reverting.
+
+    function accrueSellerPoints(address seller, uint256 pointsDelta) external onlyUsageRecorder {
+        if (paused()) {
+            emit AccrualSkippedWhilePaused(seller, address(0), pointsDelta);
+            return;
+        }
         if (seller == address(0)) revert InvalidAddress();
         if (pointsDelta == 0) revert InvalidValue();
         if (pendingSellerAccrual.seller != address(0)) revert PendingSellerAccrualExists();
@@ -107,7 +117,12 @@ contract AntseedUsageAccounting is IAntseedUsageAccounting, Ownable2Step, Pausab
         emit LegacySellerAccrualPending(seller, currentEpoch(), pointsDelta);
     }
 
-    function accrueBuyerPoints(address buyer, uint256 pointsDelta) external whenNotPaused onlyUsageRecorder {
+    function accrueBuyerPoints(address buyer, uint256 pointsDelta) external onlyUsageRecorder {
+        if (paused()) {
+            delete pendingSellerAccrual;
+            emit AccrualSkippedWhilePaused(address(0), buyer, pointsDelta);
+            return;
+        }
         if (buyer == address(0)) revert InvalidAddress();
         if (pointsDelta == 0) revert InvalidValue();
 
@@ -121,9 +136,12 @@ contract AntseedUsageAccounting is IAntseedUsageAccounting, Ownable2Step, Pausab
 
     function accruePoints(bytes32 channelId, address buyer, address seller, uint256 pointsDelta)
         external
-        whenNotPaused
         onlyUsageRecorder
     {
+        if (paused()) {
+            emit AccrualSkippedWhilePaused(seller, buyer, pointsDelta);
+            return;
+        }
         _recordUsage(channelId, buyer, seller, pointsDelta);
     }
 
@@ -354,11 +372,18 @@ contract AntseedUsageAccounting is IAntseedUsageAccounting, Ownable2Step, Pausab
 
     function _policyPoints(bytes32 channelId, address buyer, address seller, uint256 rawPoints)
         internal
-        view
         returns (uint256 sellerPoints, uint256 buyerPoints)
     {
         IAntseedPointsPolicy policy = pointsPolicy;
         if (address(policy) == address(0)) return (rawPoints, rawPoints);
-        (sellerPoints, buyerPoints) = policy.points(channelId, buyer, seller, rawPoints);
+        // A broken or reverting policy must not block settlement. Skip the
+        // usage record (no emissions credit) rather than bubbling the revert
+        // into AntseedChannels' settle path.
+        try policy.points(channelId, buyer, seller, rawPoints) returns (uint256 policySellerPoints, uint256 policyBuyerPoints) {
+            return (policySellerPoints, policyBuyerPoints);
+        } catch {
+            emit PointsPolicyFailed(channelId, buyer, seller, rawPoints);
+            return (0, 0);
+        }
     }
 }

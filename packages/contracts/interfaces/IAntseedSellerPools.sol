@@ -149,5 +149,12 @@ interface IAntseedSellerPools {
     function bootstrapCommitments(address seller)
         external
         view
-        returns (uint256 agentId, uint256 amount, uint256 matchedAmount, uint64 startEpoch, uint64 stakeEndEpoch);
+        returns (
+            uint256 agentId,
+            uint256 amount,
+            uint256 matchedAmount,
+            uint64 startEpoch,
+            uint64 stakeEndEpoch,
+            uint64 weightBps
+        );
 }

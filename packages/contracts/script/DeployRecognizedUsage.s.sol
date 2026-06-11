@@ -21,6 +21,7 @@ interface IAntseedRegistryRecognizedUsageAdmin is IAntseedRegistry {
 
 interface IANTSTokenMintAuthorityAdmin {
     function setRegistry(address registry) external;
+    function setTransferWhitelist(address account, bool allowed) external;
 }
 
 interface IAntseedSellerRewardsPoolPolicyAdmin {
@@ -176,6 +177,9 @@ contract DeployRecognizedUsage is Script {
 
         gate.setEmissionController(address(programs));
         IANTSTokenMintAuthorityAdmin(antsToken).setRegistry(address(gate));
+        // SellerPools must be able to pay out withdrawals and slash to the dead
+        // address even while ANTS transfers are globally disabled.
+        IANTSTokenMintAuthorityAdmin(antsToken).setTransferWhitelist(address(sellerPools), true);
         buyerUsageRewards.setUsageAccounting(address(usageAccounting));
         if (sellerRewardsPool != address(0)) {
             sellerPools.setSellerRewardsPool(sellerRewardsPool);
@@ -240,5 +244,15 @@ contract DeployRecognizedUsage is Script {
         console.logBytes32(RESERVE_PROGRAM);
         console.log("Team program caller:     ", teamWallet);
         console.log("Reserve program caller:  ", protocolReserve);
+        console.log("");
+        console.log("POST-DEPLOY CHECKLIST (manual):");
+        console.log("- Sellers staked in legacy USDC staking stay eligible via the");
+        console.log("  SellerRegistry legacy fallback. Call setLegacyStakeEligibilityEnabled(false)");
+        console.log("  only after seller pools are seeded with ANTS stake.");
+        console.log("- Sellers cannot stake ANTS into pools until they are transfer-");
+        console.log("  whitelisted or transfers are enabled.");
+        console.log("- Audit legacy EmissionsV2 for unclaimed rewards: they can no longer");
+        console.log("  mint. If any exist, configure a capped legacy-epoch program, then");
+        console.log("  call gate.disableLegacyEpochMints(). If none, disable immediately.");
     }
 }

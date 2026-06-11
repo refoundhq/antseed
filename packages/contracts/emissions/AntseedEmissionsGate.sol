@@ -57,6 +57,7 @@ contract AntseedEmissionsGate is Ownable2Step, ReentrancyGuard {
     error EmissionControllerAlreadySet();
     error EpochEmissionExceeded();
     error LegacyEpochMintingDisabled();
+    error LegacyEpochMintsStillEnabled();
 
     // ─── Constructor ─────────────────────────────────────────────────
     constructor() Ownable(msg.sender) {
@@ -136,6 +137,14 @@ contract AntseedEmissionsGate is Ownable2Step, ReentrancyGuard {
         if (legacyEpochMintsDisabled) revert LegacyEpochMintingDisabled();
         legacyEpochMintsDisabled = true;
         emit LegacyEpochMintsDisabled();
+    }
+
+    /// @notice Renouncing with the legacy-epoch window still open would leave
+    ///         pre-effective epochs (already emitted by the legacy contracts)
+    ///         re-mintable forever. Close the window first.
+    function renounceOwnership() public override onlyOwner {
+        if (!legacyEpochMintsDisabled) revert LegacyEpochMintsStillEnabled();
+        super.renounceOwnership();
     }
 
     // ═══════════════════════════════════════════════════════════════════

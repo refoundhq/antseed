@@ -36,6 +36,8 @@ interface IAntseedUsageAccounting {
         uint256 weightedSellerPoints
     );
     event PendingSellerAccrualCleared(address indexed seller, uint256 pointsDelta);
+    event AccrualSkippedWhilePaused(address indexed seller, address indexed buyer, uint256 pointsDelta);
+    event PointsPolicyFailed(bytes32 indexed channelId, address indexed buyer, address indexed seller, uint256 rawPoints);
 
     error InvalidAddress();
     error InvalidValue();

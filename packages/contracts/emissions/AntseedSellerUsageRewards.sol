@@ -210,7 +210,7 @@ contract AntseedSellerUsageRewards is Ownable2Step, Pausable, ReentrancyGuard {
     function claimBootstrapRewards(uint256[] calldata epochs, address recipient) external nonReentrant whenNotPaused {
         if (recipient == address(0)) revert InvalidAddress();
 
-        (uint256 agentId,,,,) = sellerPools.bootstrapCommitments(msg.sender);
+        (uint256 agentId,,,,,) = sellerPools.bootstrapCommitments(msg.sender);
         if (agentId == 0) revert InvalidValue();
 
         uint256 totalClaimed;
@@ -255,7 +255,7 @@ contract AntseedSellerUsageRewards is Ownable2Step, Pausable, ReentrancyGuard {
         view
         returns (uint256 grossAmount, uint256 claimableAmount, uint256 burnedAmount)
     {
-        (uint256 agentId,,,,) = sellerPools.bootstrapCommitments(seller);
+        (uint256 agentId,,,,,) = sellerPools.bootstrapCommitments(seller);
         (grossAmount, claimableAmount, burnedAmount) = _bootstrapReward(seller, agentId, epoch);
         burnedAmount = _previewBurnedAmount(epoch, burnedAmount);
     }
