@@ -219,6 +219,38 @@ describe('encodeMetadata / decodeMetadata', () => {
     });
   });
 
+  it("round-trips github verification claims", () => {
+    const original = makeMetadata({
+      verifications: {
+        github: [
+          { username: "Octocat", repository: "Proofs" },
+          { username: "hubber" },
+        ],
+      },
+    });
+    const decoded = decodeMetadata(encodeMetadata(original));
+    expect(decoded.verifications).toEqual({
+      github: [
+        { username: "hubber" },
+        { username: "octocat", repository: "proofs" },
+      ],
+    });
+  });
+
+  it("round-trips combined domain and github verification claims", () => {
+    const original = makeMetadata({
+      verifications: {
+        domains: [{ domain: "example.com", methods: ["dns-txt"] }],
+        github: [{ username: "octocat" }],
+      },
+    });
+    const decoded = decodeMetadata(encodeMetadata(original));
+    expect(decoded.verifications).toEqual({
+      domains: [{ domain: "example.com", methods: ["dns-txt"] }],
+      github: [{ username: "octocat" }],
+    });
+  });
+
   // v2/v3/v4/v5 roundtrip tests removed — pre-v6 format is rejected by the decoder.
 });
 

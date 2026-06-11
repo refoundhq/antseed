@@ -31,6 +31,7 @@ export {
   WELL_KNOWN_SERVICE_API_PROTOCOLS,
   type DomainVerificationClaim,
   type DomainVerificationMethod,
+  type GithubVerificationClaim,
   type ServiceApiProtocol,
   type PeerMetadata,
   type PeerVerifications,
@@ -49,6 +50,16 @@ export {
   type DomainVerificationOptions,
   type DomainVerificationResult,
 } from './discovery/domain-verification.js';
+export {
+  GITHUB_VERIFICATION_PROOF_FILE,
+  GITHUB_VERIFICATION_PROOF_TYPE,
+  buildGithubVerificationProof,
+  buildGithubVerificationProofUrl,
+  verifyGithubVerificationClaim,
+  verifyPeerMetadataGithub,
+  type GithubVerificationOptions,
+  type GithubVerificationResult,
+} from './discovery/github-verification.js';
 export { MetadataServer, type MetadataServerConfig } from './discovery/metadata-server.js';
 export { parsePublicAddress, MAX_PUBLIC_ADDRESS_LENGTH, type ParsedPublicAddress } from './discovery/public-address.js';
 export { MeteringStorage } from './metering/storage.js';

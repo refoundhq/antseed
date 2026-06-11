@@ -1,6 +1,7 @@
 import type {
   DomainVerificationConfig,
   DomainVerificationMethod,
+  GithubVerificationConfig,
   HierarchicalPricingConfig,
   AntseedConfig,
   SellerProviderConfig,
@@ -13,6 +14,12 @@ const MAX_DOMAIN_VERIFICATION_CLAIMS = 5;
 const MAX_DOMAIN_LENGTH = 253;
 const DOMAIN_LABEL_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 const DOMAIN_VERIFICATION_METHODS = new Set<DomainVerificationMethod>(['dns-txt', 'https-well-known']);
+const MAX_GITHUB_VERIFICATION_CLAIMS = 5;
+const MAX_GITHUB_USERNAME_LENGTH = 39;
+const MAX_GITHUB_REPOSITORY_LENGTH = 100;
+const GITHUB_USERNAME_PATTERN = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/;
+const GITHUB_REPOSITORY_PATTERN = /^[a-z0-9._-]+$/;
+const VERIFICATION_NAMESPACES = new Set(['domains', 'github']);
 const MIN_SELLER_UPLOAD_BODY_BYTES = 1024 * 1024;
 const MIN_BUYER_PEER_REFRESH_INTERVAL_MS = 1_000;
 export const MIN_BUYER_METADATA_FETCH_TIMEOUT_MS = 100;
@@ -190,6 +197,58 @@ function validateDomainVerification(
   }
 }
 
+function validateGithubVerification(
+  path: string,
+  claims: GithubVerificationConfig[] | undefined,
+  errors: string[],
+): void {
+  if (claims === undefined) return;
+  if (!Array.isArray(claims)) {
+    errors.push(`${path} must be an array when provided`);
+    return;
+  }
+  if (claims.length === 0) {
+    errors.push(`${path} must be a non-empty array when provided`);
+    return;
+  }
+  if (claims.length > MAX_GITHUB_VERIFICATION_CLAIMS) {
+    errors.push(`${path} must contain at most ${MAX_GITHUB_VERIFICATION_CLAIMS} claims`);
+  }
+  const seen = new Set<string>();
+  for (let i = 0; i < claims.length; i += 1) {
+    const claim = claims[i];
+    const claimPath = `${path}[${i}]`;
+    const username = typeof claim?.username === 'string' ? claim.username.trim().toLowerCase() : '';
+    if (
+      username.length === 0
+      || username.length > MAX_GITHUB_USERNAME_LENGTH
+      || username.includes('--')
+      || !GITHUB_USERNAME_PATTERN.test(username)
+    ) {
+      errors.push(`${claimPath}.username must be a valid GitHub username`);
+    }
+    const rawRepository = claim?.repository;
+    let repository = '';
+    if (rawRepository !== undefined) {
+      repository = typeof rawRepository === 'string' ? rawRepository.trim().toLowerCase() : '';
+      if (
+        repository.length === 0
+        || repository.length > MAX_GITHUB_REPOSITORY_LENGTH
+        || repository === '.'
+        || repository === '..'
+        || !GITHUB_REPOSITORY_PATTERN.test(repository)
+      ) {
+        errors.push(`${claimPath}.repository must be a valid GitHub repository name`);
+      }
+    }
+    const key = `${username}/${repository}`;
+    if (seen.has(key)) {
+      errors.push(`${claimPath} is duplicated`);
+    }
+    seen.add(key);
+  }
+}
+
 function validateVerifications(
   path: string,
   verifications: AntseedConfig['seller']['verifications'],
@@ -201,11 +260,12 @@ function validateVerifications(
     return;
   }
   validateDomainVerification(`${path}.domains`, verifications.domains, errors);
-  const unknownKeys = Object.keys(verifications).filter((key) => key !== 'domains');
+  validateGithubVerification(`${path}.github`, verifications.github, errors);
+  const unknownKeys = Object.keys(verifications).filter((key) => !VERIFICATION_NAMESPACES.has(key));
   for (const key of unknownKeys) {
     errors.push(`${path}.${key} is not a supported verification namespace`);
   }
-  if (verifications.domains === undefined && unknownKeys.length === 0) {
+  if (verifications.domains === undefined && verifications.github === undefined && unknownKeys.length === 0) {
     errors.push(`${path} must include at least one verification namespace when provided`);
   }
 }

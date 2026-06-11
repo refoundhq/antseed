@@ -1,4 +1,4 @@
-import type { DomainVerificationClaim, DomainVerificationMethod, PeerMetadata } from "./peer-metadata.js";
+import type { DomainVerificationClaim, DomainVerificationMethod, GithubVerificationClaim, PeerMetadata } from "./peer-metadata.js";
 import type { PeerOffering } from "../types/capability.js";
 import { hexToBytes, bytesToHex } from "../utils/hex.js";
 import { toPeerId } from "../types/peer.js";
@@ -36,6 +36,8 @@ const DOMAIN_VERIFICATION_METHODS_BY_ID: DomainVerificationMethod[] = ["dns-txt"
  * [sellerContractFlag:1][sellerContract:20] (v8+ only)
  * [domainVerificationCount:1][domainVerificationEntries...] (v9+ only)
  * domainVerificationEntry(v9+): [domainLen:1][domain:N][methodCount:1][methodIds...]
+ * [githubVerificationCount:1][githubVerificationEntries...] (v9+ only)
+ * githubVerificationEntry(v9+): [usernameLen:1][username:N][repoLen:1][repo:N] (repoLen 0 = profile repo)
  * [signature:65]
  */
 export function encodeMetadata(metadata: PeerMetadata): Uint8Array {
@@ -277,6 +279,31 @@ function encodeBody(metadata: PeerMetadata): Uint8Array {
         }
         parts.push(new Uint8Array([methodId]));
       }
+    }
+
+    const githubClaims = (metadata.verifications?.github ?? [])
+      .map((claim) => ({
+        username: claim.username.trim().toLowerCase(),
+        repository: claim.repository ? claim.repository.trim().toLowerCase() : "",
+      }))
+      .filter((claim) => claim.username.length > 0)
+      // Code-unit sort for the same locale-independence reason as domains.
+      .sort((a, b) => (a.username < b.username ? -1 : a.username > b.username ? 1
+        : a.repository < b.repository ? -1 : a.repository > b.repository ? 1 : 0));
+    if (githubClaims.length > 255) {
+      throw new Error(`Too many GitHub verification claims (${githubClaims.length})`);
+    }
+    parts.push(new Uint8Array([githubClaims.length]));
+    for (const claim of githubClaims) {
+      const usernameBytes = new TextEncoder().encode(claim.username);
+      const repositoryBytes = new TextEncoder().encode(claim.repository);
+      if (usernameBytes.length > 255 || repositoryBytes.length > 255) {
+        throw new Error("GitHub verification claim too long");
+      }
+      parts.push(new Uint8Array([usernameBytes.length]));
+      parts.push(usernameBytes);
+      parts.push(new Uint8Array([repositoryBytes.length]));
+      parts.push(repositoryBytes);
     }
   }
 
@@ -642,6 +669,36 @@ export function decodeMetadata(data: Uint8Array): PeerMetadata {
     }
   }
 
+  let githubVerifications: GithubVerificationClaim[] | undefined;
+  if (version >= DOMAIN_VERIFICATION_METADATA_VERSION) {
+    checkBounds(offset, 1, data.length - 65);
+    const githubVerificationCount = data[offset]!;
+    offset += 1;
+    if (githubVerificationCount > 0) {
+      githubVerifications = [];
+      for (let i = 0; i < githubVerificationCount; i += 1) {
+        checkBounds(offset, 1, data.length - 65);
+        const usernameLen = data[offset]!;
+        offset += 1;
+        checkBounds(offset, usernameLen, data.length - 65);
+        const username = new TextDecoder().decode(data.slice(offset, offset + usernameLen));
+        offset += usernameLen;
+
+        checkBounds(offset, 1, data.length - 65);
+        const repositoryLen = data[offset]!;
+        offset += 1;
+        checkBounds(offset, repositoryLen, data.length - 65);
+        const repository = new TextDecoder().decode(data.slice(offset, offset + repositoryLen));
+        offset += repositoryLen;
+
+        githubVerifications.push({
+          username,
+          ...(repository.length > 0 ? { repository } : {}),
+        });
+      }
+    }
+  }
+
   // offerings
   const PRICING_UNIT_REVERSE: Array<'token' | 'request' | 'minute' | 'task'> = ['token', 'request', 'minute', 'task'];
   let offerings: PeerOffering[] | undefined;
@@ -717,6 +774,11 @@ export function decodeMetadata(data: Uint8Array): PeerMetadata {
   const signatureBytes = data.slice(offset, offset + 65);
   const signature = bytesToHex(signatureBytes);
 
+  const verifications = {
+    ...(domainVerifications && domainVerifications.length > 0 ? { domains: domainVerifications } : {}),
+    ...(githubVerifications && githubVerifications.length > 0 ? { github: githubVerifications } : {}),
+  };
+
   return {
     peerId: toPeerId(peerId),
     version,
@@ -727,7 +789,7 @@ export function decodeMetadata(data: Uint8Array): PeerMetadata {
     ...(onChainChannelCount !== undefined ? { onChainChannelCount } : {}),
     ...(onChainGhostCount !== undefined ? { onChainGhostCount } : {}),
     ...(sellerContract ? { sellerContract } : {}),
-    ...(domainVerifications && domainVerifications.length > 0 ? { verifications: { domains: domainVerifications } } : {}),
+    ...(Object.keys(verifications).length > 0 ? { verifications } : {}),
     region,
     timestamp,
     signature,
