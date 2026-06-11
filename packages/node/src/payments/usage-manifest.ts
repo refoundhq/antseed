@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { keccak256 } from 'ethers';
 
 const encoder = new TextEncoder();
 const BASE32_ALPHABET = 'abcdefghijklmnopqrstuvwxyz234567';
@@ -29,6 +30,17 @@ export interface UsageManifestRecord {
   outputTokens: string;
   inputSha256: string;
   outputSha256: string;
+}
+
+export type UsageLeaf = UsageManifestRecord;
+
+export const ZERO_USAGE_ROOT = `0x${'00'.repeat(32)}`;
+
+export interface UsageLeafBatch {
+  version: 1;
+  prevRoot: string;
+  usageRoot: string;
+  leaves: UsageLeaf[];
 }
 
 export interface UsageManifestServiceTotals {
@@ -60,6 +72,13 @@ export interface UsageManifestPointer {
   usageRoot: string;
   bytes: Uint8Array;
   manifest: UsageManifest;
+}
+
+export interface UsageLeafBatchPointer {
+  cid: string;
+  usageRoot: string;
+  bytes: Uint8Array;
+  batch: UsageLeafBatch;
 }
 
 export function sha256Hex(bytes: Uint8Array): string {
@@ -146,6 +165,46 @@ export function canonicalJson(value: unknown): string {
   return `{${entries.map(([k, v]) => `${JSON.stringify(k)}:${canonicalJson(v)}`).join(',')}}`;
 }
 
+export function computeUsageLeafHash(leaf: UsageLeaf): Uint8Array {
+  return createHash('sha256').update(encoder.encode(canonicalJson(leaf))).digest();
+}
+
+export function extendUsageRoot(prevRoot: string, leaf: UsageLeaf): string {
+  const normalizedPrevRoot = normalizeBytes32(prevRoot);
+  const prev = Buffer.from(normalizedPrevRoot.slice(2), 'hex');
+  const leafHash = computeUsageLeafHash(leaf);
+  return keccak256(Buffer.concat([prev, leafHash]));
+}
+
+export function computeUsageRoot(prevRoot: string, leaves: UsageLeaf[]): string {
+  let root = normalizeBytes32(prevRoot);
+  for (const leaf of leaves) {
+    root = extendUsageRoot(root, leaf);
+  }
+  return root;
+}
+
+export function buildUsageLeafBatch(prevRoot: string, leaves: UsageLeaf[]): UsageLeafBatch {
+  const normalizedPrevRoot = normalizeBytes32(prevRoot);
+  return {
+    version: 1,
+    prevRoot: normalizedPrevRoot,
+    usageRoot: computeUsageRoot(normalizedPrevRoot, leaves),
+    leaves,
+  };
+}
+
+export function computeUsageLeafBatchPointer(batch: UsageLeafBatch): UsageLeafBatchPointer {
+  const bytes = encoder.encode(canonicalJson(batch));
+  const hash = createHash('sha256').update(bytes).digest();
+  return {
+    cid: rawSha256CidV1(hash),
+    usageRoot: normalizeBytes32(batch.usageRoot),
+    bytes,
+    batch,
+  };
+}
+
 export function computeUsageManifestPointer(manifest: UsageManifest): UsageManifestPointer {
   const bytes = encoder.encode(canonicalJson(manifest));
   const hash = createHash('sha256').update(bytes).digest();
@@ -160,6 +219,7 @@ export function computeUsageManifestPointer(manifest: UsageManifest): UsageManif
 
 export class UsageManifestStore {
   private readonly _records = new Map<string, UsageManifestRecord[]>();
+  private readonly _usageRoots = new Map<string, string>();
 
   constructor(private readonly _baseDir: string) {
     mkdirSync(_baseDir, { recursive: true });
@@ -167,6 +227,10 @@ export class UsageManifestStore {
 
   getRecords(channelId: string): UsageManifestRecord[] {
     return [...this._getRecords(channelId)];
+  }
+
+  getUsageRoot(channelId: string): string {
+    return this._getUsageRoot(channelId);
   }
 
   append(channelId: string, record: UsageManifestRecord): UsageManifestPointer {
@@ -186,6 +250,34 @@ export class UsageManifestStore {
 
   computePointer(channelId: string, records: UsageManifestRecord[] = this.getRecords(channelId)): UsageManifestPointer {
     return computeUsageManifestPointer(buildUsageManifest(channelId, records));
+  }
+
+  appendLeafBatch(channelId: string, batch: UsageLeafBatch): UsageLeafBatchPointer {
+    const currentRoot = this._getUsageRoot(channelId);
+    if (batch.prevRoot.toLowerCase() !== currentRoot.toLowerCase()) {
+      throw new Error(`usage leaf batch prevRoot ${batch.prevRoot} does not match current root ${currentRoot}`);
+    }
+    const computedRoot = computeUsageRoot(batch.prevRoot, batch.leaves);
+    if (computedRoot.toLowerCase() !== batch.usageRoot.toLowerCase()) {
+      throw new Error(`usage leaf batch root mismatch`);
+    }
+    const records = this._getRecords(channelId);
+    const dir = this._channelDir(channelId);
+    mkdirSync(dir, { recursive: true });
+    appendFileSync(join(dir, 'batches.jsonl'), `${JSON.stringify(batch)}\n`);
+    appendFileSync(join(dir, 'records.jsonl'), batch.leaves.map((leaf) => JSON.stringify(leaf)).join('\n') + (batch.leaves.length > 0 ? '\n' : ''));
+    writeFileSync(join(dir, 'latest-root'), batch.usageRoot);
+    this._usageRoots.set(channelId, batch.usageRoot);
+    records.push(...batch.leaves);
+    return this.writeLeafBatch(batch);
+  }
+
+  writeLeafBatch(batch: UsageLeafBatch): UsageLeafBatchPointer {
+    const pointer = computeUsageLeafBatchPointer(batch);
+    const dir = this._channelDir(batch.usageRoot);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, `${pointer.cid}.json`), pointer.bytes);
+    return pointer;
   }
 
   private _write(channelId: string, records: UsageManifestRecord[]): UsageManifestPointer {
@@ -222,9 +314,39 @@ export class UsageManifestStore {
     return records;
   }
 
+  private _getUsageRoot(channelId: string): string {
+    const existing = this._usageRoots.get(channelId);
+    if (existing) return existing;
+
+    const dir = this._channelDir(channelId);
+    const path = join(dir, 'latest-root');
+    let root = ZERO_USAGE_ROOT;
+    try {
+      const raw = readFileSync(path, 'utf8').trim();
+      root = normalizeBytes32(raw);
+    } catch {
+      const records = this._getRecords(channelId);
+      root = computeUsageRoot(ZERO_USAGE_ROOT, records);
+    }
+    this._usageRoots.set(channelId, root);
+    return root;
+  }
+
   private _channelDir(channelId: string): string {
     return join(this._baseDir, channelId.replace(/^0x/, ''));
   }
+}
+
+export function publishUsageLeafBatchBestEffort(pointer: UsageLeafBatchPointer): void {
+  const endpoint = process.env['ANTSEED_IPFS_API_URL'];
+  if (!endpoint || typeof fetch !== 'function') return;
+
+  const form = new FormData();
+  form.append('file', new Blob([pointer.bytes], { type: 'application/json' }), `${pointer.cid}.json`);
+  void fetch(`${endpoint.replace(/\/$/, '')}/api/v0/add?cid-version=1&raw-leaves=true&pin=true`, {
+    method: 'POST',
+    body: form,
+  }).catch(() => undefined);
 }
 
 export function publishUsageManifestBestEffort(pointer: UsageManifestPointer): void {
@@ -242,6 +364,13 @@ export function publishUsageManifestBestEffort(pointer: UsageManifestPointer): v
 function rawSha256CidV1(hash: Buffer): string {
   const cidBytes = Buffer.concat([Buffer.from([0x01, 0x55, 0x12, 0x20]), hash]);
   return `b${base32(cidBytes)}`;
+}
+
+function normalizeBytes32(value: string): string {
+  if (!/^0x[0-9a-fA-F]{64}$/.test(value)) {
+    throw new Error(`expected bytes32 hex value`);
+  }
+  return value.toLowerCase();
 }
 
 function base32(bytes: Uint8Array): string {

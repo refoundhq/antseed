@@ -71,21 +71,29 @@ export {
 export type { SpendingAuthMessage, ReserveAuthMessage, SetOperatorMessage, SpendingAuthMetadata } from './payments/evm/signatures.js';
 export {
   buildUsageManifest,
+  buildUsageLeafBatch,
   buildUsageManifestRecord,
+  computeUsageLeafBatchPointer,
   computeUsageManifestPointer,
+  computeUsageRoot,
   UsageManifestStore,
+  publishUsageLeafBatchBestEffort,
   publishUsageManifestBestEffort,
+  ZERO_USAGE_ROOT,
 } from './payments/usage-manifest.js';
 export { BuyerUsageVerifier } from './payments/buyer-usage-verifier.js';
 export { SellerUsageWriter } from './payments/seller-usage-writer.js';
 export type {
   UsageManifest,
+  UsageLeaf,
+  UsageLeafBatch,
+  UsageLeafBatchPointer,
   UsageManifestPointer,
   UsageManifestRecord,
   UsageManifestRecordInput,
   UsageManifestServiceTotals,
 } from './payments/usage-manifest.js';
-export type { UsageObservationInput, VerifiedUsagePointer } from './payments/buyer-usage-verifier.js';
+export type { PendingUsageBatch, UsageObservationInput } from './payments/buyer-usage-verifier.js';
 export type { SellerUsagePointer, SellerUsageWriteInput } from './payments/seller-usage-writer.js';
 export { NatTraversal, type NatMapping, type NatTraversalResult } from './p2p/nat-traversal.js';
 export { BuyerPaymentManager } from './payments/buyer-payment-manager.js';

@@ -65,6 +65,24 @@ export function decodeSpendingAuth(data: Uint8Array): SpendingAuthPayload {
   if (typeof obj.reserveSalt === 'string') result.reserveSalt = obj.reserveSalt;
   if (typeof obj.reserveMaxAmount === 'string') result.reserveMaxAmount = obj.reserveMaxAmount;
   if (typeof obj.reserveDeadline === 'number') result.reserveDeadline = obj.reserveDeadline;
+  if (typeof obj.usageCid === 'string') result.usageCid = obj.usageCid;
+  if (typeof obj.usageRoot === 'string') result.usageRoot = obj.usageRoot;
+  if (Array.isArray(obj.usageLeaves)) {
+    result.usageLeaves = obj.usageLeaves
+      .filter((entry): entry is Record<string, unknown> => typeof entry === 'object' && entry !== null && !Array.isArray(entry))
+      .map((entry) => ({
+        requestId: requireString(entry, 'requestId'),
+        ...(typeof entry.service === 'string' ? { service: entry.service } : {}),
+        costUsdc: requireString(entry, 'costUsdc'),
+        cumulativeCostUsdc: requireString(entry, 'cumulativeCostUsdc'),
+        inputTokens: requireString(entry, 'inputTokens'),
+        cachedInputTokens: requireString(entry, 'cachedInputTokens'),
+        freshInputTokens: requireString(entry, 'freshInputTokens'),
+        outputTokens: requireString(entry, 'outputTokens'),
+        inputSha256: requireString(entry, 'inputSha256'),
+        outputSha256: requireString(entry, 'outputSha256'),
+      }));
+  }
   return result;
 }
 

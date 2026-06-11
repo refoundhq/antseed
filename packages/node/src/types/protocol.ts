@@ -52,10 +52,29 @@ export interface SpendingAuthPayload {
   metadataHash: string;         // bytes32 hex
   metadata: string;             // hex-encoded abi.encode(version, inputTokens, outputTokens, requestCount)
   spendingAuthSig: string;      // EIP-712 SpendingAuth signature (covers amount + metadata)
+  /** Buyer-authored completed usage leaves covered by usageRoot. */
+  usageLeaves?: UsageAuthLeaf[];
+  /** CID of the published leaf batch covered by metadata version 2. */
+  usageCid?: string;
+  /** Chained usage root after applying usageLeaves. */
+  usageRoot?: string;
   // Only for initial reserve
   reserveSalt?: string;
   reserveMaxAmount?: string;
   reserveDeadline?: number;
+}
+
+export interface UsageAuthLeaf {
+  requestId: string;
+  service?: string;
+  costUsdc: string;
+  cumulativeCostUsdc: string;
+  inputTokens: string;
+  cachedInputTokens: string;
+  freshInputTokens: string;
+  outputTokens: string;
+  inputSha256: string;
+  outputSha256: string;
 }
 
 /**

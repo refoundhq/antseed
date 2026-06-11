@@ -1,12 +1,12 @@
 import { keccak256 } from 'ethers';
-import type { NeedAuthPayload } from '../types/protocol.js';
 import type { PeerId } from '../types/peer.js';
 import {
-  buildUsageManifest,
+  buildUsageLeafBatch,
   buildUsageManifestRecord,
-  computeUsageManifestPointer,
+  computeUsageLeafBatchPointer,
+  type UsageLeaf,
+  type UsageLeafBatch,
   type UsageManifestStore,
-  type UsageManifestRecord,
 } from './usage-manifest.js';
 import { encodePointerMetadata } from './evm/signatures.js';
 
@@ -14,6 +14,7 @@ export interface UsageObservationInput {
   requestId: string;
   service?: string;
   costUsdc: bigint;
+  cumulativeCostUsdc: bigint;
   inputTokens: number;
   cachedInputTokens: number;
   freshInputTokens: number;
@@ -22,52 +23,33 @@ export interface UsageObservationInput {
   outputBody: Uint8Array;
 }
 
-interface UsageObservation extends UsageObservationInput {}
-
-export interface VerifiedUsagePointer {
-  record: UsageManifestRecord;
+export interface PendingUsageBatch {
+  batch: UsageLeafBatch;
   encodedMetadata: string;
   metadataHash: string;
-  requiredCumulativeAmount: bigint;
+  usageRoot: string;
+  usageCid: string;
+  leaves: UsageLeaf[];
 }
 
 export class BuyerUsageVerifier {
-  private readonly _observations = new Map<string, UsageObservation>();
-  private readonly _observationWaiters = new Map<string, Array<(value: UsageObservation | null) => void>>();
-  private readonly _verifiedRecordsByChannel = new Map<string, UsageManifestRecord[]>();
-  private readonly _divergedChannels = new Set<string>();
+  private readonly _pendingLeavesByPeer = new Map<string, UsageLeaf[]>();
+  private readonly _usageRootsByChannel = new Map<string, string>();
 
   constructor(private readonly _store: UsageManifestStore | null = null) {}
 
   get pendingObservationCount(): number {
-    return this._observations.size;
+    let count = 0;
+    for (const leaves of this._pendingLeavesByPeer.values()) count += leaves.length;
+    return count;
   }
 
   recordObservation(peerId: PeerId, observation: UsageObservationInput): void {
-    const key = this._observationKey(peerId, observation.requestId);
-    this._observations.set(key, observation);
-    const waiters = this._observationWaiters.get(key);
-    if (!waiters) return;
-    this._observationWaiters.delete(key);
-    for (const resolve of waiters) resolve(observation);
-  }
-
-  async verifyPointer(peerId: PeerId, payload: NeedAuthPayload): Promise<VerifiedUsagePointer | null> {
-    if (!payload.requestId || !payload.usageCid || !payload.usageRoot) return null;
-    const key = this._observationKey(peerId, payload.requestId);
-    const observation = await this._waitForObservation(key, 2_000);
-    this._observations.delete(key);
-    if (!observation) {
-      this._markDiverged(payload.channelId);
-      return null;
-    }
-
-    const requiredCumulativeAmount = BigInt(payload.requiredCumulativeAmount);
-    const record = buildUsageManifestRecord({
+    const leaf = buildUsageManifestRecord({
       requestId: observation.requestId,
       service: observation.service,
-      costUsdc: BigInt(payload.lastRequestCost ?? observation.costUsdc),
-      cumulativeCostUsdc: requiredCumulativeAmount,
+      costUsdc: observation.costUsdc,
+      cumulativeCostUsdc: observation.cumulativeCostUsdc,
       inputTokens: observation.inputTokens,
       cachedInputTokens: observation.cachedInputTokens,
       freshInputTokens: observation.freshInputTokens,
@@ -75,90 +57,57 @@ export class BuyerUsageVerifier {
       inputBody: observation.inputBody,
       outputBody: observation.outputBody,
     });
-    const previous = this._getVerifiedRecords(payload.channelId);
-    const pointer = computeUsageManifestPointer(buildUsageManifest(payload.channelId, [...previous, record]));
-    const rootMatches = pointer.usageRoot.toLowerCase() === payload.usageRoot.toLowerCase();
-    const cidMatches = pointer.cid === payload.usageCid;
-    if (!rootMatches || !cidMatches) {
-      this._markDiverged(payload.channelId);
-      return null;
-    }
+    const pending = this._pendingLeavesByPeer.get(peerId) ?? [];
+    pending.push(leaf);
+    this._pendingLeavesByPeer.set(peerId, pending);
+  }
 
-    const encodedMetadata = encodePointerMetadata(payload.usageCid, payload.usageRoot);
+  buildPendingBatch(peerId: PeerId, channelId: string): PendingUsageBatch | null {
+    const leaves = this._pendingLeavesByPeer.get(peerId);
+    if (!leaves || leaves.length === 0) return null;
+    const prevRoot = this._getUsageRoot(channelId);
+    const batch = buildUsageLeafBatch(prevRoot, leaves);
+    const pointer = computeUsageLeafBatchPointer(batch);
+    const encodedMetadata = encodePointerMetadata(pointer.cid, pointer.usageRoot);
     return {
-      record,
+      batch,
       encodedMetadata,
       metadataHash: keccak256(encodedMetadata),
-      requiredCumulativeAmount,
+      usageRoot: pointer.usageRoot,
+      usageCid: pointer.cid,
+      leaves: [...leaves],
     };
   }
 
-  commit(channelId: string, record: UsageManifestRecord): void {
-    const records = this._getVerifiedRecords(channelId);
-    records.push(record);
-    this._verifiedRecordsByChannel.set(channelId, records);
-    this._store?.replace(channelId, records);
+  commitBatch(peerId: PeerId, channelId: string, batch: UsageLeafBatch): void {
+    this._store?.appendLeafBatch(channelId, batch);
+    this._usageRootsByChannel.set(channelId, batch.usageRoot);
+    const pending = this._pendingLeavesByPeer.get(peerId) ?? [];
+    const remaining = pending.slice(batch.leaves.length);
+    if (remaining.length > 0) this._pendingLeavesByPeer.set(peerId, remaining);
+    else this._pendingLeavesByPeer.delete(peerId);
   }
 
-  isChannelDiverged(channelId: string): boolean {
-    return this._divergedChannels.has(channelId.toLowerCase());
+  getCommittedCumulativeCost(channelId: string): bigint {
+    const records = this._store?.getRecords(channelId) ?? [];
+    const last = records.at(-1);
+    return last ? BigInt(last.cumulativeCostUsdc) : 0n;
   }
 
   clearPeer(peerId: PeerId): void {
-    const prefix = `${peerId}:`;
-    for (const key of this._observations.keys()) {
-      if (key.startsWith(prefix)) this._observations.delete(key);
-    }
-    for (const [key, waiters] of this._observationWaiters) {
-      if (!key.startsWith(prefix)) continue;
-      this._observationWaiters.delete(key);
-      for (const resolve of waiters) resolve(null);
-    }
+    this._pendingLeavesByPeer.delete(peerId);
   }
 
   cleanup(): void {
-    this._observations.clear();
-    for (const waiters of this._observationWaiters.values()) {
-      for (const resolve of waiters) resolve(null);
-    }
-    this._observationWaiters.clear();
-    this._verifiedRecordsByChannel.clear();
-    this._divergedChannels.clear();
+    this._pendingLeavesByPeer.clear();
+    this._usageRootsByChannel.clear();
   }
 
-  private _getVerifiedRecords(channelId: string): UsageManifestRecord[] {
-    const existing = this._verifiedRecordsByChannel.get(channelId);
+  private _getUsageRoot(channelId: string): string {
+    const existing = this._usageRootsByChannel.get(channelId);
     if (existing) return existing;
-    const records = this._store?.getRecords(channelId) ?? [];
-    this._verifiedRecordsByChannel.set(channelId, records);
-    return records;
-  }
-
-  private async _waitForObservation(key: string, timeoutMs: number): Promise<UsageObservation | null> {
-    const existing = this._observations.get(key);
-    if (existing) return existing;
-    return await new Promise((resolve) => {
-      const timer = setTimeout(() => {
-        const waiters = this._observationWaiters.get(key)?.filter((entry) => entry !== wrapped);
-        if (waiters && waiters.length > 0) this._observationWaiters.set(key, waiters);
-        else this._observationWaiters.delete(key);
-        resolve(null);
-      }, timeoutMs);
-      const wrapped = (value: UsageObservation | null): void => {
-        clearTimeout(timer);
-        resolve(value);
-      };
-      const waiters = this._observationWaiters.get(key) ?? [];
-      waiters.push(wrapped);
-      this._observationWaiters.set(key, waiters);
-    });
-  }
-
-  private _observationKey(peerId: PeerId, requestId: string): string {
-    return `${peerId}:${requestId}`;
-  }
-
-  private _markDiverged(channelId: string): void {
-    this._divergedChannels.add(channelId.toLowerCase());
+    const root = this._store?.getUsageRoot(channelId) ?? `0x${'00'.repeat(32)}`;
+    this._usageRootsByChannel.set(channelId, root);
+    return root;
   }
 }

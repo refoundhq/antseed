@@ -63,10 +63,13 @@ export interface PerRequestAuthResult {
 }
 
 export interface NeedAuthHandlingOptions {
-  verifiedMetadata?: {
+  usageMetadata?: {
     encodedMetadata: string;
     metadataHash: string;
     requiredCumulativeAmount: bigint;
+    usageCid: string;
+    usageRoot: string;
+    usageLeaves: SpendingAuthPayload['usageLeaves'];
   };
 }
 
@@ -389,7 +392,13 @@ export class BuyerPaymentManager {
     cumulativeAmount: bigint,
     metadata: SpendingAuthMetadata,
     paymentMux: PaymentMux,
-    metadataOverride?: { metadataHash: string; encodedMetadata: string },
+    metadataOverride?: {
+      metadataHash: string;
+      encodedMetadata: string;
+      usageCid?: string;
+      usageRoot?: string;
+      usageLeaves?: SpendingAuthPayload['usageLeaves'];
+    },
   ): Promise<void> {
     const metadataHashHex = metadataOverride?.metadataHash ?? computeMetadataHash(metadata);
     const encodedMetadata = metadataOverride?.encodedMetadata ?? encodeMetadata(metadata);
@@ -413,6 +422,9 @@ export class BuyerPaymentManager {
       metadataHash: metadataHashHex,
       metadata: encodedMetadata,
       spendingAuthSig,
+      ...(metadataOverride?.usageCid ? { usageCid: metadataOverride.usageCid } : {}),
+      ...(metadataOverride?.usageRoot ? { usageRoot: metadataOverride.usageRoot } : {}),
+      ...(metadataOverride?.usageLeaves ? { usageLeaves: metadataOverride.usageLeaves } : {}),
     });
   }
 
@@ -679,6 +691,13 @@ export class BuyerPaymentManager {
       reportedOutputTokens?: bigint;
       reportedCachedInputTokens?: bigint;
       service?: string;
+      usageMetadata?: {
+        encodedMetadata: string;
+        metadataHash: string;
+        usageCid: string;
+        usageRoot: string;
+        usageLeaves: SpendingAuthPayload['usageLeaves'];
+      };
     },
   ): Promise<PerRequestAuthResult> {
     const session = this.getActiveSession(sellerPeerId);
@@ -791,8 +810,8 @@ export class BuyerPaymentManager {
     );
 
     // Compute metadata hash and encode metadata
-    const metadataHashHex = computeMetadataHash(newMeta);
-    const encodedMetadata = encodeMetadata(newMeta);
+    const metadataHashHex = responseStats.usageMetadata?.metadataHash ?? computeMetadataHash(newMeta);
+    const encodedMetadata = responseStats.usageMetadata?.encodedMetadata ?? encodeMetadata(newMeta);
 
     // Sign EIP-712 SpendingAuth
     const channelsDomain = this._channelsDomain;
@@ -817,6 +836,9 @@ export class BuyerPaymentManager {
       metadataHash: metadataHashHex,
       metadata: encodedMetadata,
       spendingAuthSig,
+      ...(responseStats.usageMetadata?.usageCid ? { usageCid: responseStats.usageMetadata.usageCid } : {}),
+      ...(responseStats.usageMetadata?.usageRoot ? { usageRoot: responseStats.usageMetadata.usageRoot } : {}),
+      ...(responseStats.usageMetadata?.usageLeaves ? { usageLeaves: responseStats.usageMetadata.usageLeaves } : {}),
     };
 
     const topUpNeeded = this._needsTopUp(sellerPeerId);
@@ -951,10 +973,13 @@ export class BuyerPaymentManager {
       cumulativeRequestCount: prevMeta.cumulativeRequestCount + 1n,
     };
     this._metadata.set(sellerPeerId, newMeta);
-    const verifiedMetadata = options.verifiedMetadata?.requiredCumulativeAmount === effectiveAmount
+    const verifiedMetadata = options.usageMetadata?.requiredCumulativeAmount === effectiveAmount
       ? {
-          encodedMetadata: options.verifiedMetadata.encodedMetadata,
-          metadataHash: options.verifiedMetadata.metadataHash,
+          encodedMetadata: options.usageMetadata.encodedMetadata,
+          metadataHash: options.usageMetadata.metadataHash,
+          usageCid: options.usageMetadata.usageCid,
+          usageRoot: options.usageMetadata.usageRoot,
+          usageLeaves: options.usageMetadata.usageLeaves,
         }
       : null;
 

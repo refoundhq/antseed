@@ -82,7 +82,7 @@ export type {
 export { BuyerPaymentNegotiator } from './buyer-payment-negotiator.js';
 export type { BuyerNegotiatorConfig, Handle402Result, NegotiationEmitter } from './buyer-payment-negotiator.js';
 export { BuyerUsageVerifier } from './buyer-usage-verifier.js';
-export type { UsageObservationInput, VerifiedUsagePointer } from './buyer-usage-verifier.js';
+export type { PendingUsageBatch, UsageObservationInput } from './buyer-usage-verifier.js';
 
 // Seller payment manager
 export { SellerPaymentManager, DEFAULT_MIN_SETTLE_DELTA_STR } from './seller-payment-manager.js';
@@ -96,13 +96,21 @@ export type { ServicePricing } from './pricing.js';
 
 export {
   buildUsageManifest,
+  buildUsageLeafBatch,
   buildUsageManifestRecord,
+  computeUsageLeafBatchPointer,
   computeUsageManifestPointer,
+  computeUsageRoot,
   UsageManifestStore,
+  publishUsageLeafBatchBestEffort,
   publishUsageManifestBestEffort,
+  ZERO_USAGE_ROOT,
 } from './usage-manifest.js';
 export type {
   UsageManifest,
+  UsageLeaf,
+  UsageLeafBatch,
+  UsageLeafBatchPointer,
   UsageManifestPointer,
   UsageManifestRecord,
   UsageManifestRecordInput,

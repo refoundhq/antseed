@@ -1,5 +1,12 @@
 import Database from 'better-sqlite3';
-import type { DecodedMetadataPointerRecorded, DecodedMetadataRecorded, UsageManifest } from '@antseed/node';
+import {
+  ZERO_USAGE_ROOT,
+  computeUsageRoot,
+  type DecodedMetadataPointerRecorded,
+  type DecodedMetadataRecorded,
+  type UsageLeaf,
+  type UsageLeafBatch,
+} from '@antseed/node';
 
 export type StoredUsageManifestPointer = Omit<DecodedMetadataPointerRecorded, 'metadataHash'>;
 
@@ -44,6 +51,7 @@ interface BuyerOrChannelRow {
   total_request_count: string;
   settlement_count: number;
   first_settled_block: number;
+  usage_root?: string;
 }
 
 interface SellerTotalsRow {
@@ -83,7 +91,7 @@ export class SqliteStore {
   private _selectBuyer!: Database.Statement<[number, string], BuyerOrChannelRow>;
   private _upsertBuyer!: Database.Statement<[number, string, string, string, string, number, number, number]>;
   private _selectChannel!: Database.Statement<[number, string], BuyerOrChannelRow & { buyer: string }>;
-  private _upsertChannel!: Database.Statement<[number, string, string, string, string, string, number, number, number]>;
+  private _upsertChannel!: Database.Statement<[number, string, string, string, string, string, number, number, number, string]>;
   private _selectSellerTotals!: Database.Statement<[number], SellerTotalsRow>;
   private _selectAllSellerTotals!: Database.Statement<[], SellerTotalsRow>;
   private _countBuyers!: Database.Statement<[number], { c: number }>;
@@ -135,6 +143,7 @@ export class SqliteStore {
         settlement_count INTEGER NOT NULL DEFAULT 0,
         first_settled_block INTEGER NOT NULL,
         last_settled_block INTEGER NOT NULL,
+        usage_root TEXT NOT NULL DEFAULT '${ZERO_USAGE_ROOT}',
         PRIMARY KEY (agent_id, channel_id)
       );
 
@@ -188,6 +197,12 @@ export class SqliteStore {
       );
     `);
 
+    try {
+      this.db.exec(`ALTER TABLE seller_channel_totals ADD COLUMN usage_root TEXT NOT NULL DEFAULT '${ZERO_USAGE_ROOT}'`);
+    } catch {
+      // Column already exists on databases initialized by this branch.
+    }
+
     this._selectCheckpoint = this.db.prepare(
       'SELECT last_block, last_block_timestamp FROM indexer_checkpoint WHERE chain_id = ? AND contract_address = ?',
     );
@@ -224,14 +239,14 @@ export class SqliteStore {
     );
 
     this._selectChannel = this.db.prepare(
-      'SELECT buyer, total_input_tokens, total_output_tokens, total_request_count, settlement_count, first_settled_block FROM seller_channel_totals WHERE agent_id = ? AND channel_id = ?',
+      'SELECT buyer, total_input_tokens, total_output_tokens, total_request_count, settlement_count, first_settled_block, usage_root FROM seller_channel_totals WHERE agent_id = ? AND channel_id = ?',
     );
 
     this._upsertChannel = this.db.prepare(
       `INSERT OR REPLACE INTO seller_channel_totals
          (agent_id, channel_id, buyer, total_input_tokens, total_output_tokens, total_request_count,
-          settlement_count, first_settled_block, last_settled_block)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          settlement_count, first_settled_block, last_settled_block, usage_root)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     );
 
     this._selectSellerTotals = this.db.prepare(
@@ -384,6 +399,7 @@ export class SqliteStore {
           prevChannelSettlements + 1,
           prevChannelFirstBlock,
           event.blockNumber,
+          existingChannel?.usage_root ?? ZERO_USAGE_ROOT,
         );
       }
 
@@ -424,7 +440,7 @@ export class SqliteStore {
     chainId: string,
     contractAddress: string,
     event: DecodedMetadataPointerRecorded | StoredUsageManifestPointer,
-    manifest: UsageManifest,
+    batch: UsageLeafBatch,
     blockTimestamp?: number | null,
   ): void {
     this.db.transaction(() => {
@@ -436,8 +452,17 @@ export class SqliteStore {
       const buyer = event.buyer.toLowerCase();
       const channelId = event.channelId.toLowerCase();
       const now = Math.floor(Date.now() / 1000);
-      if (manifest.version !== 1 || manifest.channelId.toLowerCase() !== channelId) {
-        throw new Error(`usage manifest does not match pointer channel ${channelId}`);
+      if (batch.version !== 1) {
+        throw new Error(`unsupported usage leaf batch version`);
+      }
+      const existingChannel = this._selectChannel.get(agentId, channelId);
+      const prevUsageRoot = existingChannel?.usage_root ?? ZERO_USAGE_ROOT;
+      if (batch.prevRoot.toLowerCase() !== prevUsageRoot.toLowerCase()) {
+        throw new Error(`usage leaf batch prevRoot does not match channel root ${channelId}`);
+      }
+      const computedRoot = computeUsageRoot(batch.prevRoot, batch.leaves);
+      if (computedRoot.toLowerCase() !== event.usageRoot.toLowerCase() || computedRoot.toLowerCase() !== batch.usageRoot.toLowerCase()) {
+        throw new Error(`usage leaf batch root mismatch for channel ${channelId}`);
       }
 
       const inserted = this._insertPointerEvent(chainId, contractAddress, event);
@@ -452,20 +477,20 @@ export class SqliteStore {
         if (row?.processed_at != null) return;
       }
 
-      const existingChannel = this._selectChannel.get(agentId, channelId);
       const prevChannelInput = existingChannel ? BigInt(existingChannel.total_input_tokens) : 0n;
       const prevChannelOutput = existingChannel ? BigInt(existingChannel.total_output_tokens) : 0n;
       const prevChannelCount = existingChannel ? BigInt(existingChannel.total_request_count) : 0n;
-      const nextChannelInput = BigInt(manifest.totals.inputTokens);
-      const nextChannelOutput = BigInt(manifest.totals.outputTokens);
-      const nextChannelCount = BigInt(manifest.totals.requestCount);
-      if (nextChannelInput < prevChannelInput || nextChannelOutput < prevChannelOutput || nextChannelCount < prevChannelCount) {
-        throw new Error(`usage manifest regression for channel ${channelId}`);
+      let deltaInput = 0n;
+      let deltaOutput = 0n;
+      let deltaCount = 0n;
+      for (const leaf of batch.leaves) {
+        deltaInput += BigInt(leaf.inputTokens);
+        deltaOutput += BigInt(leaf.outputTokens);
+        deltaCount += 1n;
       }
-
-      const deltaInput = nextChannelInput - prevChannelInput;
-      const deltaOutput = nextChannelOutput - prevChannelOutput;
-      const deltaCount = nextChannelCount - prevChannelCount;
+      const nextChannelInput = prevChannelInput + deltaInput;
+      const nextChannelOutput = prevChannelOutput + deltaOutput;
+      const nextChannelCount = prevChannelCount + deltaCount;
       const eventTimestamp = blockTimestamp ?? null;
 
       // v1 MetadataRecorded and v2 usage manifests are intended to be mutually
@@ -508,10 +533,11 @@ export class SqliteStore {
         (existingChannel?.settlement_count ?? 0) + 1,
         existingChannel?.first_settled_block ?? event.blockNumber,
         event.blockNumber,
+        computedRoot,
       );
 
-      for (const [service, totals] of Object.entries(manifest.services)) {
-        this._applyServiceManifestTotals(agentId, channelId, service, totals);
+      for (const leaf of batch.leaves) {
+        this._applyServiceLeafDelta(agentId, channelId, leaf);
       }
 
       this._markUsageManifestPointerProcessed.run(
@@ -548,12 +574,17 @@ export class SqliteStore {
     );
   }
 
-  private _applyServiceManifestTotals(
-    agentId: number,
-    channelId: string,
-    service: string,
-    totals: UsageManifest['services'][string],
-  ): void {
+  private _applyServiceLeafDelta(agentId: number, channelId: string, leaf: UsageLeaf): void {
+    const service = leaf.service ?? 'unknown';
+    const delta = {
+      cost: BigInt(leaf.costUsdc),
+      input: BigInt(leaf.inputTokens),
+      cached: BigInt(leaf.cachedInputTokens),
+      fresh: BigInt(leaf.freshInputTokens),
+      output: BigInt(leaf.outputTokens),
+      count: 1n,
+    };
+
     const selectChannelService = this.db.prepare(
       `SELECT total_cost_usdc, total_input_tokens, total_cached_input_tokens, total_fresh_input_tokens,
               total_output_tokens, total_request_count
@@ -569,37 +600,21 @@ export class SqliteStore {
       total_request_count: string;
     } | undefined;
 
-    const next = {
-      cost: BigInt(totals.costUsdc),
-      input: BigInt(totals.inputTokens),
-      cached: BigInt(totals.cachedInputTokens),
-      fresh: BigInt(totals.freshInputTokens),
-      output: BigInt(totals.outputTokens),
-      count: BigInt(totals.requestCount),
-    };
-    const previous = {
-      cost: prev ? BigInt(prev.total_cost_usdc) : 0n,
-      input: prev ? BigInt(prev.total_input_tokens) : 0n,
-      cached: prev ? BigInt(prev.total_cached_input_tokens) : 0n,
-      fresh: prev ? BigInt(prev.total_fresh_input_tokens) : 0n,
-      output: prev ? BigInt(prev.total_output_tokens) : 0n,
-      count: prev ? BigInt(prev.total_request_count) : 0n,
-    };
-    if (
-      next.cost < previous.cost || next.input < previous.input || next.cached < previous.cached
-      || next.fresh < previous.fresh || next.output < previous.output || next.count < previous.count
-    ) {
-      throw new Error(`usage manifest regression for service ${service}`);
-    }
-
     this.db.prepare(
       `INSERT OR REPLACE INTO seller_channel_service_totals
         (agent_id, channel_id, service, total_cost_usdc, total_input_tokens,
          total_cached_input_tokens, total_fresh_input_tokens, total_output_tokens, total_request_count)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
-      agentId, channelId, service, next.cost.toString(), next.input.toString(),
-      next.cached.toString(), next.fresh.toString(), next.output.toString(), next.count.toString(),
+      agentId,
+      channelId,
+      service,
+      ((prev ? BigInt(prev.total_cost_usdc) : 0n) + delta.cost).toString(),
+      ((prev ? BigInt(prev.total_input_tokens) : 0n) + delta.input).toString(),
+      ((prev ? BigInt(prev.total_cached_input_tokens) : 0n) + delta.cached).toString(),
+      ((prev ? BigInt(prev.total_fresh_input_tokens) : 0n) + delta.fresh).toString(),
+      ((prev ? BigInt(prev.total_output_tokens) : 0n) + delta.output).toString(),
+      ((prev ? BigInt(prev.total_request_count) : 0n) + delta.count).toString(),
     );
 
     const aggregate = this.db.prepare(
@@ -617,12 +632,12 @@ export class SqliteStore {
     ).run(
       agentId,
       service,
-      ((aggregate ? BigInt(aggregate.total_cost_usdc) : 0n) + next.cost - previous.cost).toString(),
-      ((aggregate ? BigInt(aggregate.total_input_tokens) : 0n) + next.input - previous.input).toString(),
-      ((aggregate ? BigInt(aggregate.total_cached_input_tokens) : 0n) + next.cached - previous.cached).toString(),
-      ((aggregate ? BigInt(aggregate.total_fresh_input_tokens) : 0n) + next.fresh - previous.fresh).toString(),
-      ((aggregate ? BigInt(aggregate.total_output_tokens) : 0n) + next.output - previous.output).toString(),
-      ((aggregate ? BigInt(aggregate.total_request_count) : 0n) + next.count - previous.count).toString(),
+      ((aggregate ? BigInt(aggregate.total_cost_usdc) : 0n) + delta.cost).toString(),
+      ((aggregate ? BigInt(aggregate.total_input_tokens) : 0n) + delta.input).toString(),
+      ((aggregate ? BigInt(aggregate.total_cached_input_tokens) : 0n) + delta.cached).toString(),
+      ((aggregate ? BigInt(aggregate.total_fresh_input_tokens) : 0n) + delta.fresh).toString(),
+      ((aggregate ? BigInt(aggregate.total_output_tokens) : 0n) + delta.output).toString(),
+      ((aggregate ? BigInt(aggregate.total_request_count) : 0n) + delta.count).toString(),
     );
   }
 

@@ -1,5 +1,4 @@
-import { createHash } from 'node:crypto';
-import type { UsageManifest } from '@antseed/node';
+import { computeUsageRoot, type UsageLeafBatch } from '@antseed/node';
 
 export interface UsageManifestFetcherOptions {
   gatewayUrl?: string;
@@ -18,7 +17,7 @@ export class UsageManifestFetcher {
     this._maxBytes = options.maxBytes ?? readPositiveIntEnv('NETWORK_STATS_USAGE_MANIFEST_MAX_BYTES') ?? 16 * 1024 * 1024;
   }
 
-  async fetch(cid: string, expectedRoot: string): Promise<UsageManifest> {
+  async fetch(cid: string, expectedRoot: string): Promise<UsageLeafBatch> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this._timeoutMs);
     try {
@@ -29,11 +28,12 @@ export class UsageManifestFetcher {
         throw new Error(`failed to fetch usage manifest ${cid}: HTTP ${res.status}`);
       }
       const bytes = await this._readBoundedBody(res, cid);
-      const root = `0x${createHash('sha256').update(bytes).digest('hex')}`;
-      if (root.toLowerCase() !== expectedRoot.toLowerCase()) {
+      const batch = JSON.parse(new TextDecoder().decode(bytes)) as UsageLeafBatch;
+      const root = computeUsageRoot(batch.prevRoot, batch.leaves);
+      if (batch.version !== 1 || root.toLowerCase() !== batch.usageRoot.toLowerCase() || root.toLowerCase() !== expectedRoot.toLowerCase()) {
         throw new Error(`usage manifest root mismatch for ${cid}`);
       }
-      return JSON.parse(new TextDecoder().decode(bytes)) as UsageManifest;
+      return batch;
     } catch (err) {
       if (controller.signal.aborted) {
         throw new Error(`timed out fetching usage manifest ${cid}`);

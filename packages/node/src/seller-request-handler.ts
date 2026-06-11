@@ -406,7 +406,7 @@ export class SellerRequestHandler {
             const accepted = spm.getAcceptedCumulative(session.sessionId);
             const requiredAmount = cumulativeSpend;
             const service = this._extractRequestedService(request) ?? undefined;
-            const usagePointer = this._writeUsageManifestBestEffort(buyerPeerId, {
+            this._recordUsageObservationBestEffort(buyerPeerId, {
               channelId: session.sessionId,
               request,
               responseBody,
@@ -428,7 +428,6 @@ export class SellerRequestHandler {
               cachedInputTokens: String(usage.cachedInputTokens),
               freshInputTokens: String(usage.freshInputTokens),
               service,
-              ...(usagePointer ? { usageCid: usagePointer.cid, usageRoot: usagePointer.usageRoot } : {}),
             }, buyerPeerId, 'post-response');
           }
         }
@@ -669,20 +668,19 @@ export class SellerRequestHandler {
     }
   }
 
-  private _writeUsageManifestBestEffort(
+  private _recordUsageObservationBestEffort(
     buyerPeerId: string,
-    input: Parameters<SellerUsageWriter['write']>[0],
-  ): ReturnType<SellerUsageWriter['write']> {
+    input: Parameters<SellerUsageWriter['recordObservation']>[0],
+  ): void {
     const writer = this._deps.usageWriter;
-    if (!writer) return null;
+    if (!writer) return;
     try {
-      return writer.write(input);
+      writer.recordObservation(input);
     } catch (err) {
       debugWarn(
-        `[SellerHandler] Usage manifest skipped for ${buyerPeerId.slice(0, 12)}...: ` +
+        `[SellerHandler] Usage observation skipped for ${buyerPeerId.slice(0, 12)}...: ` +
         `${err instanceof Error ? err.message : err}`,
       );
-      return null;
     }
   }
 

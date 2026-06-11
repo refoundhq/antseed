@@ -1,46 +1,34 @@
-import { createHash } from 'node:crypto';
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { ZERO_USAGE_ROOT } from '@antseed/node';
 
 import { UsageManifestFetcher } from './usage-manifest-fetcher.js';
 
 const enc = new TextEncoder();
 
-function manifestBytes(): Uint8Array {
+function batchBytes(): Uint8Array {
   return enc.encode(JSON.stringify({
     version: 1,
-    channelId: '0x' + '1'.repeat(64),
-    records: [],
-    totals: {
-      costUsdc: '0',
-      inputTokens: '0',
-      cachedInputTokens: '0',
-      freshInputTokens: '0',
-      outputTokens: '0',
-      requestCount: '0',
-    },
-    services: {},
+    prevRoot: ZERO_USAGE_ROOT,
+    usageRoot: ZERO_USAGE_ROOT,
+    leaves: [],
   }));
-}
-
-function sha256Root(bytes: Uint8Array): string {
-  return `0x${createHash('sha256').update(bytes).digest('hex')}`;
 }
 
 describe('UsageManifestFetcher', () => {
   const originalFetch = globalThis.fetch;
 
-  it('fetches and verifies a bounded usage manifest', async () => {
-    const bytes = manifestBytes();
+  it('fetches and verifies a bounded usage leaf batch', async () => {
+    const bytes = batchBytes();
     globalThis.fetch = async () => new Response(bytes, { status: 200 });
     try {
       const fetcher = new UsageManifestFetcher({
         gatewayUrl: 'https://example.test/ipfs',
         maxBytes: bytes.byteLength,
       });
-      const manifest = await fetcher.fetch('bafkreitest', sha256Root(bytes));
-      assert.equal(manifest.version, 1);
-      assert.equal(manifest.channelId, '0x' + '1'.repeat(64));
+      const batch = await fetcher.fetch('bafkreitest', ZERO_USAGE_ROOT);
+      assert.equal(batch.version, 1);
+      assert.equal(batch.usageRoot, ZERO_USAGE_ROOT);
     } finally {
       globalThis.fetch = originalFetch;
     }

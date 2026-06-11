@@ -1,7 +1,13 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 
-import type { DecodedMetadataPointerRecorded, DecodedMetadataRecorded, UsageManifest } from '@antseed/node';
+import {
+  ZERO_USAGE_ROOT,
+  computeUsageRoot,
+  type DecodedMetadataPointerRecorded,
+  type DecodedMetadataRecorded,
+  type UsageLeafBatch,
+} from '@antseed/node';
 import { SqliteStore } from './store.js';
 import { MetadataIndexer } from './indexer.js';
 import type { UsageManifestFetcher } from './usage-manifest-fetcher.js';
@@ -71,29 +77,26 @@ function makePointerEvent(overrides: Partial<DecodedMetadataPointerRecorded> = {
   };
 }
 
-function makeManifest(channelId: string, overrides: Partial<UsageManifest> = {}): UsageManifest {
+function makeUsageLeafBatch(overrides: Partial<UsageLeafBatch> = {}): UsageLeafBatch {
+  const leaves = overrides.leaves ?? [{
+    requestId: 'req-1',
+    service: 'gpt-5.5',
+    costUsdc: '1000',
+    cumulativeCostUsdc: '1000',
+    inputTokens: '100',
+    cachedInputTokens: '0',
+    freshInputTokens: '100',
+    outputTokens: '50',
+    inputSha256: '0'.repeat(64),
+    outputSha256: '1'.repeat(64),
+  }];
+  const prevRoot = overrides.prevRoot ?? ZERO_USAGE_ROOT;
+  const usageRoot = overrides.usageRoot ?? computeUsageRoot(prevRoot, leaves);
   return {
     version: 1,
-    channelId,
-    records: [],
-    totals: {
-      costUsdc: '1000',
-      inputTokens: '100',
-      cachedInputTokens: '0',
-      freshInputTokens: '100',
-      outputTokens: '50',
-      requestCount: '1',
-    },
-    services: {
-      'gpt-5.5': {
-        costUsdc: '1000',
-        inputTokens: '100',
-        cachedInputTokens: '0',
-        freshInputTokens: '100',
-        outputTokens: '50',
-        requestCount: '1',
-      },
-    },
+    prevRoot,
+    usageRoot,
+    leaves,
     ...overrides,
   };
 }
@@ -330,8 +333,8 @@ describe('MetadataIndexer', () => {
   it('retries usage manifest pointers after transient fetch failure even after checkpoint advances', async () => {
     const store = makeStore();
     const channelId = '0x' + 'c'.repeat(64);
-    const pointer = makePointerEvent({ blockNumber: 10, channelId, agentId: 7n });
-    const manifest = makeManifest(channelId);
+    const batch = makeUsageLeafBatch();
+    const pointer = makePointerEvent({ blockNumber: 10, channelId, agentId: 7n, usageRoot: batch.usageRoot });
     let fetchAttempts = 0;
     const fetcher = {
       async fetch(cid: string, usageRoot: string) {
@@ -339,7 +342,7 @@ describe('MetadataIndexer', () => {
         assert.equal(cid, pointer.cid);
         assert.equal(usageRoot, pointer.usageRoot.toLowerCase());
         if (fetchAttempts === 1) throw new Error('gateway unavailable');
-        return manifest;
+        return batch;
       },
     } as unknown as UsageManifestFetcher;
 

@@ -1449,7 +1449,7 @@ export class AntseedNode extends EventEmitter {
         ...(payments.minBudgetPerRequest ? { minBudgetPerRequest: payments.minBudgetPerRequest } : {}),
         ...(payments.minSettleDelta ? { minSettleDelta: payments.minSettleDelta } : {}),
       };
-      this._sellerPaymentManager = new SellerPaymentManager(this._identity, sellerConfig, this._channelStore);
+      this._sellerPaymentManager = new SellerPaymentManager(this._identity, sellerConfig, this._channelStore, this._sellerUsageWriter);
       debugLog(`[Node] SellerPaymentManager initialized`);
 
       // Startup recovery: validate hydrated channels against on-chain state, then check timeouts

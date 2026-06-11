@@ -509,10 +509,13 @@ describe('BuyerPaymentManager', () => {
       usageCid: 'bafkreihash',
       usageRoot: '0x' + '11'.repeat(32),
     }, mux, {
-      verifiedMetadata: {
+      usageMetadata: {
         encodedMetadata,
         metadataHash: keccak256(encodedMetadata),
         requiredCumulativeAmount: 50000n,
+        usageCid: 'bafkreihash',
+        usageRoot: '0x' + '11'.repeat(32),
+        usageLeaves: [],
       },
     });
 
@@ -540,10 +543,13 @@ describe('BuyerPaymentManager', () => {
       usageCid: 'bafkreihash',
       usageRoot: '0x' + '11'.repeat(32),
     }, mux, {
-      verifiedMetadata: {
+      usageMetadata: {
         encodedMetadata,
         metadataHash: keccak256(encodedMetadata),
         requiredCumulativeAmount: 50001n,
+        usageCid: 'bafkreihash',
+        usageRoot: '0x' + '11'.repeat(32),
+        usageLeaves: [],
       },
     });
 

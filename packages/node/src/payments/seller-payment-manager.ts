@@ -17,6 +17,7 @@ import { debugLog, debugWarn } from '../utils/debug.js';
 import { peerIdToAddress } from '../types/peer.js';
 import { ChannelStore, type StoredChannel } from './channel-store.js';
 import { classifyOnChainChannel, matchesChannelParties } from './channel-session-state.js';
+import type { SellerUsageWriter } from './seller-usage-writer.js';
 
 export interface SellerPaymentConfig {
   rpcUrl: string;
@@ -139,7 +140,7 @@ export class SellerPaymentManager {
   /** Max close() retries before giving up (buyer must requestClose on-chain) */
   private static readonly MAX_CLOSE_RETRIES = 3;
 
-  constructor(identity: Identity, config: SellerPaymentConfig, channelStore: ChannelStore) {
+  constructor(identity: Identity, config: SellerPaymentConfig, channelStore: ChannelStore, private readonly _usageWriter: SellerUsageWriter | null = null) {
     this._config = config;
     this._signer = identity.wallet;
     const channelsClient = new ChannelsClient({
@@ -608,6 +609,9 @@ export class SellerPaymentManager {
           return 'rejected';
         }
         if (cumulativeAmount === existingCumulative) {
+          if (!this._acceptUsageBatch(channelId, payload, cumulativeAmount)) {
+            return 'rejected';
+          }
           debugLog(`[SellerPayment] Idempotent SpendingAuth (same cumulative=${cumulativeAmount}) — accepted`);
           return 'accepted';
         }
@@ -634,6 +638,10 @@ export class SellerPaymentManager {
             `cumulative=${cumulativeAmount} > reserveMax=${currentReserveMax}` +
             `${pendingTopUpForCheck ? ` (pending topUp to ${pendingTopUpForCheck.newMaxAmount})` : ''} channel=${channelId.slice(0, 18)}...`,
           );
+          return 'rejected';
+        }
+
+        if (!this._acceptUsageBatch(channelId, payload, cumulativeAmount)) {
           return 'rejected';
         }
 
@@ -994,6 +1002,10 @@ export class SellerPaymentManager {
       return false;
     }
 
+    if (!this._acceptUsageBatch(channelId, auth, newCumulative)) {
+      return false;
+    }
+
     this._hydratedChannelIds.delete(channelId);
 
     // Update if strictly greater
@@ -1042,6 +1054,18 @@ export class SellerPaymentManager {
 
     // Persist spent amount to ChannelStore (using tokensDelivered field)
     this._channelStore.updateTokensDelivered(sessionId, newSpent.toString(), 0);
+  }
+
+  private _acceptUsageBatch(channelId: string, payload: SpendingAuthPayload, cumulativeAmount: bigint): boolean {
+    const hasUsageBatch = Boolean(payload.usageLeaves?.length || payload.usageRoot || payload.usageCid);
+    if (!hasUsageBatch) return true;
+    const pointer = this._usageWriter?.acceptSignedBatch(channelId, payload, cumulativeAmount);
+    if (!pointer) {
+      debugWarn(`[SellerPayment] Rejecting SpendingAuth with invalid usage batch for channel=${channelId.slice(0, 18)}...`);
+      return false;
+    }
+    debugLog(`[SellerPayment] Accepted usage batch for channel=${channelId.slice(0, 18)}... cid=${pointer.cid} root=${pointer.usageRoot.slice(0, 18)}...`);
+    return true;
   }
 
   // ── Settlement ──────────────────────────────────────────────

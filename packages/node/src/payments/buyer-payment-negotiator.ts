@@ -96,6 +96,8 @@ export class BuyerPaymentNegotiator {
   private readonly _firstRequestSent = new Set<string>();
   /** Per-peer last response cost, raw content, and latency from the seller. */
   private readonly _lastResponseCost = new Map<string, LastResponseCost>();
+  /** Per-peer cumulative cost used for buyer-authored usage leaves. */
+  private readonly _usageCumulativeCost = new Map<string, bigint>();
   /** Buyer-side payment muxes keyed by seller peerId. */
   private readonly _muxes = new Map<PeerId, PaymentMux>();
   /** In-flight NeedAuth handlers keyed by seller peerId. */
@@ -216,12 +218,38 @@ export class BuyerPaymentNegotiator {
     const reportedOutputTokens = lastCost?.outputTokens;
     const reportedCachedInputTokens = lastCost?.cachedInputTokens;
     const service = lastCost?.service;
+    const session = this._bpm.getActiveSession(peer.peerId);
+    const pendingUsage = session
+      ? this._usageVerifier?.buildPendingBatch(peer.peerId, session.sessionId) ?? null
+      : null;
     try {
       const { payload, topUpNeeded } = await this._bpm.signPerRequestAuth(
         peer.peerId,
-        { inputBytes, outputBytes, sellerClaimedCost, reportedInputTokens, reportedOutputTokens, reportedCachedInputTokens, service },
+        {
+          inputBytes,
+          outputBytes,
+          sellerClaimedCost,
+          reportedInputTokens,
+          reportedOutputTokens,
+          reportedCachedInputTokens,
+          service,
+          ...(pendingUsage
+            ? {
+                usageMetadata: {
+                  encodedMetadata: pendingUsage.encodedMetadata,
+                  metadataHash: pendingUsage.metadataHash,
+                  usageCid: pendingUsage.usageCid,
+                  usageRoot: pendingUsage.usageRoot,
+                  usageLeaves: pendingUsage.leaves,
+                },
+              }
+            : {}),
+        },
       );
       pmux.sendSpendingAuth(payload);
+      if (pendingUsage && session) {
+        this._usageVerifier?.commitBatch(peer.peerId, session.sessionId, pendingUsage.batch);
+      }
       // Release held content to free memory — no longer needed after signing
       this._lastResponseCost.delete(peer.peerId);
       debugLog(`[BuyerNegotiator] Per-request SpendingAuth sent to ${peer.peerId.slice(0, 12)}... cumulative=${payload.cumulativeAmount}`);
@@ -471,13 +499,18 @@ export class BuyerPaymentNegotiator {
       cachedInputUsdPerMillion: sessionPricing?.cachedInputUsdPerMillion,
     };
     const costUsdc = computeCostUsdc(usage.freshInputTokens, usage.outputTokens, pricing, usage.cachedInputTokens);
+    const activeSession = this._bpm.getActiveSession(peer.peerId);
+    const previousCumulativeCost = this._usageCumulativeCost.get(peer.peerId)
+      ?? (activeSession ? this._usageVerifier?.getCommittedCumulativeCost(activeSession.sessionId) ?? 0n : 0n);
+    const cumulativeCost = previousCumulativeCost + costUsdc;
+    this._usageCumulativeCost.set(peer.peerId, cumulativeCost);
 
     this._lastResponseCost.set(peer.peerId, {
       costUsdc,
       inputTokens: BigInt(usage.inputTokens),
       outputTokens: BigInt(usage.outputTokens),
       cachedInputTokens: BigInt(usage.cachedInputTokens),
-      cumulativeCost: 0n,
+      cumulativeCost,
       inputContent: new Uint8Array(0),
       outputContent: response.body,
       latencyMs: 0,
@@ -496,6 +529,7 @@ export class BuyerPaymentNegotiator {
         requestId: request.requestId,
         service,
         costUsdc,
+        cumulativeCostUsdc: cumulativeCost,
         inputTokens: usage.inputTokens,
         cachedInputTokens: usage.cachedInputTokens,
         freshInputTokens: usage.freshInputTokens,
@@ -616,6 +650,7 @@ export class BuyerPaymentNegotiator {
     this._lockedPeers.delete(peerId);
     this._firstRequestSent.delete(peerId);
     this._lastResponseCost.delete(peerId);
+    this._usageCumulativeCost.delete(peerId);
     this._usageVerifier?.clearPeer(peerId);
   }
 
@@ -631,6 +666,7 @@ export class BuyerPaymentNegotiator {
     this._lockedPeers.clear();
     this._firstRequestSent.clear();
     this._lastResponseCost.clear();
+    this._usageCumulativeCost.clear();
     this._muxes.clear();
 
     for (const [, pending] of this._pendingPaymentRequired) {
@@ -644,33 +680,24 @@ export class BuyerPaymentNegotiator {
   }
 
   async handleNeedAuth(peerId: PeerId, payload: NeedAuthPayload, pmux: PaymentMux): Promise<void> {
-    const verifiedPointer = payload.usageCid || payload.usageRoot
-      ? await this._usageVerifier?.verifyPointer(peerId, payload) ?? null
-      : null;
-    if (payload.usageCid || payload.usageRoot) {
-      if (!verifiedPointer) {
-        const diverged = this._usageVerifier?.isChannelDiverged(payload.channelId) ?? false;
-        debugWarn(
-          diverged
-            ? `[BuyerNegotiator] Usage manifest diverged for channel ${payload.channelId.slice(0, 18)}...; signing legacy metadata only`
-            : `[BuyerNegotiator] Usage pointer verification failed for ${peerId.slice(0, 12)}...; signing legacy metadata only`,
-        );
-      }
-    }
+    const pendingUsage = this._usageVerifier?.buildPendingBatch(peerId, payload.channelId) ?? null;
 
     const result = await this._bpm.handleNeedAuth(peerId, payload, pmux, {
-      ...(verifiedPointer
+      ...(pendingUsage
         ? {
-            verifiedMetadata: {
-              encodedMetadata: verifiedPointer.encodedMetadata,
-              metadataHash: verifiedPointer.metadataHash,
-              requiredCumulativeAmount: verifiedPointer.requiredCumulativeAmount,
+            usageMetadata: {
+              encodedMetadata: pendingUsage.encodedMetadata,
+              metadataHash: pendingUsage.metadataHash,
+              requiredCumulativeAmount: BigInt(payload.requiredCumulativeAmount),
+              usageCid: pendingUsage.usageCid,
+              usageRoot: pendingUsage.usageRoot,
+              usageLeaves: pendingUsage.leaves,
             },
           }
         : {}),
     });
-    if (result.signedVerifiedMetadata && verifiedPointer) {
-      this._usageVerifier?.commit(payload.channelId, verifiedPointer.record);
+    if (result.signedVerifiedMetadata && pendingUsage) {
+      this._usageVerifier?.commitBatch(peerId, payload.channelId, pendingUsage.batch);
     }
   }
 
