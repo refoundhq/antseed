@@ -175,7 +175,13 @@ const config: Config = {
         src: 'logo.svg',
       },
       items: [
-        {to: '/network', label: 'Pricing', position: 'right'},
+        {
+          href: 'https://antseedstats.com/network',
+          label: 'Pricing',
+          position: 'right',
+          target: '_blank',
+          rel: 'noopener noreferrer',
+        },
         {to: '/integrations', label: 'Integrations', position: 'right'},
         {to: '/providers', label: 'Providers', position: 'right'},
         {
