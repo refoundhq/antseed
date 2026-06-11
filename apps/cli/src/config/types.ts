@@ -62,6 +62,20 @@ export interface SellerProviderConfig {
   services: Record<string, SellerServiceConfig>;
 }
 
+export type DomainVerificationMethod = 'dns-txt' | 'https-well-known';
+
+export interface DomainVerificationConfig {
+  /** Domain name to prove, without scheme, path, or port. */
+  domain: string;
+  /** Accepted proof transports. Omit to let clients try every supported method. */
+  methods?: DomainVerificationMethod[];
+}
+
+export interface VerificationConfig {
+  /** Domain ownership claims. */
+  domains?: DomainVerificationConfig[];
+}
+
 /**
  * Seller-specific configuration within the Antseed config.
  */
@@ -88,6 +102,8 @@ export interface SellerCLIConfig {
   agentDir?: string | Record<string, string>;
   /** Publicly reachable seller address override announced in metadata, e.g. "peer.example.com:6882". */
   publicAddress?: string;
+  /** Optional external ownership claims announced in signed peer metadata. */
+  verifications?: VerificationConfig;
   /** Maximum upload body size (bytes) accepted from buyers per request. Default: 64 MiB. */
   maxUploadBodyBytes?: number;
 }

@@ -10,7 +10,7 @@ import {
   topicToInfoHash,
 } from "./dht-node.js";
 import type { PeerOffering } from "../types/capability.js";
-import type { PeerMetadata, ProviderAnnouncement } from "./peer-metadata.js";
+import type { DomainVerificationClaim, DomainVerificationMethod, PeerMetadata, PeerVerifications, ProviderAnnouncement } from "./peer-metadata.js";
 import { METADATA_VERSION } from "./peer-metadata.js";
 
 import type { ServiceApiProtocol } from "../types/service-api.js";
@@ -50,6 +50,8 @@ export interface AnnouncerConfig {
   }>;
   displayName?: string;
   publicAddress?: string;
+  /** External ownership claims to include in signed metadata for client verification. */
+  verifications?: PeerVerifications;
   region: string;
   pricing: Map<
     string,
@@ -187,6 +189,26 @@ export class PeerAnnouncer {
     return cfg.sellerContract.toLowerCase().replace(/^0x/, "");
   }
 
+  private _normalizedVerifications(): PeerVerifications | undefined {
+    const claims = this.config.verifications?.domains ?? [];
+    const domains: DomainVerificationClaim[] = [];
+    const seen = new Set<string>();
+    const methodOrder: DomainVerificationMethod[] = ["dns-txt", "https-well-known"];
+    for (const claim of claims) {
+      const normalizedDomain = claim.domain.trim().toLowerCase();
+      if (!normalizedDomain || seen.has(normalizedDomain)) continue;
+      seen.add(normalizedDomain);
+      const methods = claim.methods
+        ? methodOrder.filter((method) => claim.methods!.includes(method))
+        : undefined;
+      domains.push({
+        domain: normalizedDomain,
+        ...(methods && methods.length > 0 ? { methods } : {}),
+      });
+    }
+    return domains.length > 0 ? { domains: domains.sort((a, b) => a.domain.localeCompare(b.domain)) } : undefined;
+  }
+
   private async _buildSignedMetadata(includeOnChainReputation = true): Promise<PeerMetadata> {
     const providers: ProviderAnnouncement[] = this.config.providers.map((p) => {
       const pricing = p.pricing ?? this.config.pricing.get(p.provider) ?? {
@@ -231,6 +253,10 @@ export class PeerAnnouncer {
     }
     if (this.config.stakeAmountUSDC != null) {
       metadata.stakeAmountUSDC = this.config.stakeAmountUSDC;
+    }
+    const verifications = this._normalizedVerifications();
+    if (verifications) {
+      metadata.verifications = verifications;
     }
 
     if (this.config.paymentsEnabled) {

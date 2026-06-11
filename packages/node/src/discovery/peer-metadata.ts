@@ -3,7 +3,7 @@ import type { PeerOffering } from "../types/capability.js";
 import type { ServiceApiProtocol } from "../types/service-api.js";
 import { WELL_KNOWN_SERVICE_API_PROTOCOLS } from "../types/service-api.js";
 
-export const METADATA_VERSION = 8;
+export const METADATA_VERSION = 9;
 export const WELL_KNOWN_SERVICE_CATEGORIES = [
   "privacy",
   "legal",
@@ -32,6 +32,24 @@ export interface ProviderAnnouncement {
   currentLoad: number;
 }
 
+export type DomainVerificationMethod = "dns-txt" | "https-well-known";
+
+export interface DomainVerificationClaim {
+  /** ASCII hostname only, lower-case, with no scheme, path, or port. */
+  domain: string;
+  /** Accepted proof transports. When omitted, clients may try every known method. */
+  methods?: DomainVerificationMethod[];
+}
+
+export interface PeerVerifications {
+  /**
+   * Domain ownership claims. Clients verify by checking a matching DNS TXT
+   * record at `_antseed.<domain>` or a well-known proof at
+   * `https://<domain>/.well-known/antseed.json`.
+   */
+  domains?: DomainVerificationClaim[];
+}
+
 export interface PeerMetadata {
   peerId: PeerId;
   version: number;
@@ -51,6 +69,8 @@ export interface PeerMetadata {
    * Stored as 40 lowercase hex chars (no `0x` prefix) matching `peerId` format.
    */
   sellerContract?: string;
+  /** Optional external ownership claims announced by this peer. */
+  verifications?: PeerVerifications;
   /**
    * Buyer-local observation time for this metadata fetch. Not signed and not
    * encoded in metadata; used only for diagnostics/freshness decisions.
