@@ -114,8 +114,10 @@ nav.navbar {
   letter-spacing: 1px;
   color: #6b7280;
   transition: color 0.15s ease;
-  display: flex;
-  align-items: center;
+}
+
+.navbar__items--right .navbar__link svg {
+  vertical-align: middle;
 }
 
 .navbar__items--right .navbar__link:hover,
