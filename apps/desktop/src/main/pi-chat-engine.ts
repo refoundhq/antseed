@@ -35,24 +35,28 @@ import { webFetchTool } from './chat-web-fetch.js';
 import { fetchNetworkStats } from './fetch-network-stats.js';
 import { buildAntstationSystemPrompt } from './chat-system-prompt.js';
 import {
-  allowToolForPeer,
   CHAT_DATA_DIR,
   CHAT_WORKSPACE_DIR,
-  describeToolApproval,
   getCurrentChatWorkspaceDir,
-  getPeerPermissionMode,
   getWorkspaceGitStatus,
-  isToolAllowedForPeer,
-  isToolPermissionAutoAllowed,
   loadChatWorkspaceDir,
-  normalizePermissionMode,
   persistChatWorkspaceDir,
-  requiresToolApproval,
+} from './chat-workspace.js';
+import {
+  allowToolForPeer,
+  getPeerPermissionMode,
+  isToolAllowedForPeer,
+  normalizePermissionMode,
   setPeerPermissionMode,
   type ChatPermissionMode,
   type ToolApprovalDecision,
   type ToolApprovalRequest,
-} from './chat-workspace.js';
+} from './chat-permissions.js';
+import {
+  describeToolApproval,
+  isToolPermissionAutoAllowed,
+  requiresToolApproval,
+} from './chat-tool-policy.js';
 import { DEFAULT_BUYER_STATE_PATH, LOCALHOST, LOCALHOST_URL } from './constants.js';
 import { PROXY_PROVIDER_ID, normalizeProviderId, sanitizeProviderHint } from './chat-provider-hint.js';
 import { asErrorMessage } from './utils.js';
@@ -1912,7 +1916,11 @@ export function registerPiChatHandlers({
     permissionModeInput?: unknown,
   ): Promise<{ ok: boolean; error?: string; stopReason?: ChatStreamStopReason }> => {
     const trimmedMessage = userMessage.trim();
-    const requestedPermissionMode: ChatPermissionMode = normalizePermissionMode(permissionModeInput);
+    const requestedPermissionMode: ChatPermissionMode | null = (
+      permissionModeInput === 'manual' || permissionModeInput === 'full'
+        ? normalizePermissionMode(permissionModeInput)
+        : null
+    );
     const attachmentPromptText = buildAttachmentPromptText(attachments);
     const attachmentImages = extractAttachmentImages(attachments);
     if (trimmedMessage.length === 0 && attachmentPromptText.length === 0 && attachmentImages.length === 0) {
@@ -1966,9 +1974,8 @@ export function registerPiChatHandlers({
     const persistedPeer = extractPeerFromEntries(sessionManager);
     const peerOverrideId = normalizePeerId(peerOverride) ?? null;
     const preferredPeerId = peerOverrideId ?? preferredPeerByConversationId.get(conversationId) ?? persistedPeer?.peerId ?? null;
-    const permissionMode: ChatPermissionMode = preferredPeerId
-      ? await getPeerPermissionMode(preferredPeerId)
-      : requestedPermissionMode;
+    const permissionMode: ChatPermissionMode = requestedPermissionMode
+      ?? (preferredPeerId ? await getPeerPermissionMode(preferredPeerId) : 'manual');
     if (preferredPeerId) {
       preferredPeerByConversationId.set(conversationId, preferredPeerId);
       if (peerOverrideId && persistedPeer?.peerId !== peerOverrideId) {
