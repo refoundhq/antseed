@@ -1,5 +1,11 @@
+import { useMemo } from 'react';
 import { useUiSnapshot } from '../../hooks/useUiSnapshot';
 import { formatShortId, formatInt } from '../../../core/format';
+import {
+  buildPeerReputationScoreMap,
+  formatReputationScore,
+  getPeerReputationScore,
+} from '../../../core/peer-utils';
 
 type OverviewViewProps = {
   active: boolean;
@@ -16,7 +22,23 @@ export function OverviewView({ active }: OverviewViewProps) {
     ovLastScan,
     ovPeersCount,
     overviewPeers,
+    discoverRows,
   } = useUiSnapshot();
+
+  const reputationScoresByPeerId = useMemo(
+    () => buildPeerReputationScoreMap(discoverRows),
+    [discoverRows],
+  );
+
+  const topPeersByReputation = useMemo(
+    () => [...overviewPeers].sort((a, b) => {
+      const ar = getPeerReputationScore(a, reputationScoresByPeerId) ?? -1;
+      const br = getPeerReputationScore(b, reputationScoresByPeerId) ?? -1;
+      if (br !== ar) return br - ar;
+      return b.lastSeen - a.lastSeen;
+    }),
+    [overviewPeers, reputationScoresByPeerId],
+  );
 
   return (
     <section className={`view${active ? ' active' : ''}`} role="tabpanel">
@@ -69,19 +91,19 @@ export function OverviewView({ active }: OverviewViewProps) {
                 </tr>
               </thead>
               <tbody>
-                {overviewPeers.length === 0 ? (
+                {topPeersByReputation.length === 0 ? (
                   <tr>
                     <td colSpan={4} className="empty">
                       No peers yet.
                     </td>
                   </tr>
                 ) : (
-                  overviewPeers.map((peer) => (
+                  topPeersByReputation.map((peer) => (
                     <tr key={peer.peerId}>
                       <td>{peer.displayName || '-'}</td>
                       <td title={peer.peerId}>{formatShortId(peer.peerId)}</td>
-                      <td>{peer.services.join(', ')}</td>
-                      <td>{formatInt(peer.reputation)}</td>
+                      <td>{formatInt(peer.services.length)}</td>
+                      <td>{formatReputationScore(getPeerReputationScore(peer, reputationScoresByPeerId))}</td>
                     </tr>
                   ))
                 )}

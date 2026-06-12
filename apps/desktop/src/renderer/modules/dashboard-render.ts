@@ -8,6 +8,7 @@ import {
   formatLatency,
   formatEndpoint,
 } from '../core/format';
+import { normalizeReputationScore } from '../core/peer-utils';
 
 type DashboardRenderModuleOptions = {
   uiState: RendererUiState;
@@ -73,6 +74,7 @@ function normalizeNetworkData(
       outputUsdPerMillion: safeNumber(peer.outputUsdPerMillion, 0),
       capacityMsgPerHour: safeNumber(peer.capacityMsgPerHour, 0),
       reputation: safeNumber(peer.reputation, 0),
+      onChainReputationScore: normalizeReputationScore(peer.onChainReputationScore),
       lastSeen: safeNumber(peer.lastSeen, 0),
       lastReachedAt: safeNumber(peer.lastReachedAt, 0) || null,
       source: safeString(peer.source, 'dht'),
@@ -95,6 +97,7 @@ function normalizeNetworkData(
       outputUsdPerMillion: 0,
       capacityMsgPerHour: 0,
       reputation: 0,
+      onChainReputationScore: null,
       lastSeen: 0,
       lastReachedAt: null,
       source: 'daemon',
@@ -112,6 +115,7 @@ function normalizeNetworkData(
     if (safeNumber(peer.outputUsdPerMillion, 0) > 0) existing.outputUsdPerMillion = safeNumber(peer.outputUsdPerMillion, 0);
     if (safeNumber(peer.capacityMsgPerHour, 0) > 0) existing.capacityMsgPerHour = safeNumber(peer.capacityMsgPerHour, 0);
     if (safeNumber(peer.reputation, 0) > 0) existing.reputation = safeNumber(peer.reputation, 0);
+    existing.onChainReputationScore = normalizeReputationScore(peer.onChainReputationScore) ?? existing.onChainReputationScore;
     const daemonDn = typeof peer.displayName === 'string' && (peer.displayName as string).trim().length > 0 ? (peer.displayName as string).trim() : null;
     if (daemonDn) existing.displayName = daemonDn;
     if (!existing.source || existing.source === 'dht') existing.source = safeString(peer.source, 'daemon');
@@ -122,7 +126,9 @@ function normalizeNetworkData(
   const peers = Array.from(merged.values())
     .filter((peer) => peer.services.length > 0 || peer.providers.length > 0)
     .sort((a, b) => {
-      if (b.reputation !== a.reputation) return b.reputation - a.reputation;
+      const ar = a.onChainReputationScore ?? -1;
+      const br = b.onChainReputationScore ?? -1;
+      if (br !== ar) return br - ar;
       return b.lastSeen - a.lastSeen;
     });
 
