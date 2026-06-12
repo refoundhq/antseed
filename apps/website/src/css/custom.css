@@ -606,7 +606,11 @@ html[data-theme='light'] .prism-code {
   color: #1a1a1a;
 }
 
-/* Homepage light theme */
+/* =============================================
+   Homepage — "the colony at night" dark skin.
+   Scoped via .homepage-wrapper so docs/blog/etc.
+   keep the light field-guide theme.
+   ============================================= */
 .homepage-wrapper,
 .homepage-wrapper .main-wrapper,
 .homepage-wrapper article,
@@ -615,18 +619,92 @@ html[data-theme='light'] .prism-code {
   background: transparent !important;
 }
 
+.homepage-wrapper { overflow-x: clip; }
+
 html:has(.homepage-wrapper),
 body:has(.homepage-wrapper) {
-  background: #f5f5f0 !important;
+  background: #070b09 !important;
 }
 
+/* Film grain over the dark field — keeps large flat areas alive. */
+body:has(.homepage-wrapper)::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  pointer-events: none;
+  opacity: 0.05;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* Navbar — dark glass over the colony. */
 .homepage-wrapper .navbar,
 html:has(.homepage-wrapper) .navbar {
-  background: #f5f5f0 !important;
-  --ifm-navbar-background-color: #f5f5f0 !important;
+  background: rgba(7, 11, 9, 0.78) !important;
+  --ifm-navbar-background-color: transparent !important;
+  border-bottom: 1px solid rgba(151, 255, 199, 0.08);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
 }
 
 html:has(.homepage-wrapper) .navbar--fixed-top {
-  background: rgba(245, 245, 240, 0.92) !important;
-  backdrop-filter: blur(12px);
+  background: rgba(7, 11, 9, 0.78) !important;
+}
+
+/* ANT in bone-white, SEED stays pheromone green. */
+html:has(.homepage-wrapper) .navbar__title {
+  background: linear-gradient(to right, #edf6ee 0%, #edf6ee 42.86%, #1FD87A 42.86%, #1FD87A 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+}
+
+html:has(.homepage-wrapper) .navbar__items--right .navbar__link {
+  color: #97aa9f;
+}
+
+html:has(.homepage-wrapper) .navbar__items--right .navbar__link:hover,
+html:has(.homepage-wrapper) .navbar__items--right .navbar__link:focus-visible,
+html:has(.homepage-wrapper) .navbar__items--right .navbar__link--active {
+  color: #edf6ee;
+}
+
+html:has(.homepage-wrapper) .navbar__toggle {
+  color: #edf6ee;
+}
+
+/* Footer — hairline + readable links on the dark field. */
+html:has(.homepage-wrapper) footer {
+  border-top-color: rgba(151, 255, 199, 0.08) !important;
+}
+
+html:has(.homepage-wrapper) .custom-footer-link {
+  color: #647568 !important;
+}
+
+html:has(.homepage-wrapper) .custom-footer-link:hover,
+html:has(.homepage-wrapper) .custom-footer-link:focus-visible {
+  color: #edf6ee !important;
+}
+
+/* Selection on the dark homepage. */
+html:has(.homepage-wrapper) ::selection {
+  background-color: rgba(31, 216, 122, 0.32);
+  color: #eafff3;
+}
+
+/* Scrollbar on the dark homepage. */
+html:has(.homepage-wrapper) ::-webkit-scrollbar-track { background: #070b09; }
+html:has(.homepage-wrapper) ::-webkit-scrollbar-thumb { background: #1c2a21; }
+html:has(.homepage-wrapper) ::-webkit-scrollbar-thumb:hover { background: #2c4033; }
+
+/* Scroll-staged sections. Classes are applied by JS only, so the
+   page renders fully without JavaScript. */
+.homepage-wrapper .reveal-prep {
+  opacity: 0;
+  transform: translateY(26px);
+  transition: opacity .8s cubic-bezier(.22, .61, .21, 1), transform .8s cubic-bezier(.22, .61, .21, 1);
+}
+.homepage-wrapper .reveal-prep.reveal-in {
+  opacity: 1;
+  transform: none;
 }
