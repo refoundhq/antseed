@@ -120,7 +120,7 @@ export default function VsOpenRouter(): JSX.Element {
           </p>
           <div className={styles.ctaRow}>
             <Link to="/docs/install" className={styles.ctaPrimary}>Install AntSeed</Link>
-            <Link to="/network" className={styles.ctaSecondary}>Live pricing →</Link>
+            <a href="https://antseedstats.com/network" target="_blank" rel="noopener noreferrer" className={styles.ctaSecondary}>Live pricing →</a>
           </div>
         </div>
 

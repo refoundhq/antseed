@@ -300,7 +300,7 @@ function RunFirstBanner() {
                 Prefer the visual version? <code>antseed network browse</code> (no flags)
                 prints a table with prices, sessions, on-chain volume, and a{' '}
                 <code>✓</code> for vouched peers. Or open the same view in a browser:{' '}
-                <Link to="/network">live network page</Link>.
+                <a href="https://antseedstats.com/network" target="_blank" rel="noopener noreferrer">live network page</a>.
               </p>
             </div>
           </li>
@@ -665,7 +665,7 @@ export default function IntegrationPage({integration}: {integration: Integration
             <p className={styles.modelNote}>
               The exact list of models depends on which peer you pin. Run{' '}
               <code>antseed network browse</code> or open the{' '}
-              <Link to="/network">live network page</Link> to see what's available right now.
+              <a href="https://antseedstats.com/network" target="_blank" rel="noopener noreferrer">live network page</a> to see what's available right now.
             </p>
           </Section>
         )}

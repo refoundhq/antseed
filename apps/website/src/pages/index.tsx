@@ -41,7 +41,7 @@ function useNetworkStats() {
 function LiveBar() {
   const {peerCount, serviceCount} = useNetworkStats();
   return (
-    <Link to="/network" className={styles.lbar} style={{textDecoration:'none'}}>
+    <a href="https://antseedstats.com/network" target="_blank" rel="noopener noreferrer" className={styles.lbar} style={{textDecoration:'none'}}>
       <div className={styles.litem}><span className={styles.ldot}/> <span>Network live</span></div>
       {peerCount != null && <>
         <div className={styles.ldiv}/>
@@ -52,7 +52,7 @@ function LiveBar() {
         <div className={styles.litem}><strong>{serviceCount}</strong> SERVICES AVAILABLE</div>
       </>}
       <span className={styles.liveArrow}>→</span>
-    </Link>
+    </a>
   );
 }
 
@@ -391,7 +391,7 @@ export default function Home(): JSX.Element {
               <DesktopDownloadIcon platform={download.platform === 'win' ? 'mac' : 'win'} />
               {download.platform === 'win' ? 'Download Mac' : 'Download Windows'}
             </a>
-            <Link to="/network" className={styles.pathSecondaryBtn}>See live providers →</Link>
+            <a href="https://antseedstats.com/network" target="_blank" rel="noopener noreferrer" className={styles.pathSecondaryBtn}>See live providers →</a>
           </div>
         </div>
         <div className={styles.audienceMedia}>
