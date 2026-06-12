@@ -36,6 +36,7 @@ export type PeerEntry = {
   outputUsdPerMillion: number;
   capacityMsgPerHour: number;
   reputation: number;
+  onChainReputationScore: number | null;
   lastSeen: number;
   lastReachedAt: number | null;
   source: string;

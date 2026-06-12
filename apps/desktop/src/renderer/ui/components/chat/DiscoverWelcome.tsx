@@ -15,7 +15,13 @@ import {
   formatCategoryLabel,
 } from './discover-filter-util';
 import { DiscoverFilters } from './DiscoverFilters';
-import { getPeerGradient, getPeerDisplayName, formatPerMillionPrice, getTagTint } from '../../../core/peer-utils';
+import {
+  getPeerGradient,
+  getPeerDisplayName,
+  formatPerMillionPrice,
+  getTagTint,
+  formatReputationScore,
+} from '../../../core/peer-utils';
 import { getKnownProxy, type KnownProxy } from '../../../core/known-proxies';
 import { InfoTooltip } from '../InfoTooltip';
 import styles from './DiscoverWelcome.module.scss';
@@ -242,11 +248,6 @@ function formatVolumeUsdc(n: number): string {
 
 function isLowReputation(score: number | null): boolean {
   return typeof score === 'number' && Number.isFinite(score) && score < LOW_REPUTATION_SCORE_THRESHOLD;
-}
-
-function formatReputationScore(score: number | null): string {
-  if (score == null || !Number.isFinite(score)) return '—';
-  return (score / 10).toFixed(1);
 }
 
 function formatReputationTooltip(item: CardItem): { avgChannelUsdc: string } {

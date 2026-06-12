@@ -2,6 +2,11 @@ import { useState, useMemo, useCallback } from 'react';
 import { useUiSnapshot } from '../../hooks/useUiSnapshot';
 import { useActions } from '../../hooks/useActions';
 import { formatShortId, formatInt, formatEndpoint } from '../../../core/format';
+import {
+  buildPeerReputationScoreMap,
+  formatReputationScore,
+  getPeerReputationScore,
+} from '../../../core/peer-utils';
 import { safeString } from '../../../core/safe';
 import type { PeerEntry, SortDirection } from '../../../core/state';
 
@@ -11,10 +16,22 @@ type PeersViewProps = {
 
 type SortKey = string;
 
-function sortPeers(items: PeerEntry[], key: SortKey, dir: SortDirection): PeerEntry[] {
+function sortPeers(
+  items: PeerEntry[],
+  key: SortKey,
+  dir: SortDirection,
+  reputationScoresByPeerId: ReadonlyMap<string, number>,
+): PeerEntry[] {
   return [...items].sort((a, b) => {
     let va: unknown = (a as Record<string, unknown>)[key];
     let vb: unknown = (b as Record<string, unknown>)[key];
+    if (key === 'services') {
+      va = a.services.length;
+      vb = b.services.length;
+    } else if (key === 'reputation') {
+      va = getPeerReputationScore(a, reputationScoresByPeerId) ?? -1;
+      vb = getPeerReputationScore(b, reputationScoresByPeerId) ?? -1;
+    }
     if (Array.isArray(va)) va = (va as string[]).join(', ');
     if (Array.isArray(vb)) vb = (vb as string[]).join(', ');
     if (typeof va === 'string') va = va.toLowerCase();
@@ -27,7 +44,11 @@ function sortPeers(items: PeerEntry[], key: SortKey, dir: SortDirection): PeerEn
   });
 }
 
-function filterPeers(peers: PeerEntry[], filterText: string): PeerEntry[] {
+function filterPeers(
+  peers: PeerEntry[],
+  filterText: string,
+  reputationScoresByPeerId: ReadonlyMap<string, number>,
+): PeerEntry[] {
   if (!filterText) return peers;
   const lower = filterText.toLowerCase();
   return peers.filter((peer) => {
@@ -38,7 +59,7 @@ function filterPeers(peers: PeerEntry[], filterText: string): PeerEntry[] {
       String(peer.inputUsdPerMillion),
       String(peer.outputUsdPerMillion),
       String(peer.capacityMsgPerHour),
-      String(peer.reputation),
+      formatReputationScore(getPeerReputationScore(peer, reputationScoresByPeerId)),
       formatEndpoint(peer),
     ]
       .join(' ')
@@ -61,7 +82,7 @@ const COLUMNS: { key: string; label: string; sortable: boolean }[] = [
 ];
 
 export function PeersView({ active }: PeersViewProps) {
-  const { lastPeers, peersMeta, peersMessage } = useUiSnapshot();
+  const { lastPeers, peersMeta, peersMessage, discoverRows } = useUiSnapshot();
   const actions = useActions();
 
   const [sortKey, setSortKey] = useState('reputation');
@@ -80,10 +101,15 @@ export function PeersView({ active }: PeersViewProps) {
     [sortKey],
   );
 
+  const reputationScoresByPeerId = useMemo(
+    () => buildPeerReputationScoreMap(discoverRows),
+    [discoverRows],
+  );
+
   const displayPeers = useMemo(() => {
-    const filtered = filterPeers(lastPeers, filter);
-    return sortPeers(filtered, sortKey, sortDir);
-  }, [lastPeers, filter, sortKey, sortDir]);
+    const filtered = filterPeers(lastPeers, filter, reputationScoresByPeerId);
+    return sortPeers(filtered, sortKey, sortDir, reputationScoresByPeerId);
+  }, [lastPeers, filter, sortKey, sortDir, reputationScoresByPeerId]);
 
   return (
     <section className={`view${active ? ' active' : ''}`} role="tabpanel">
@@ -143,7 +169,7 @@ export function PeersView({ active }: PeersViewProps) {
                       <td>{peer.displayName || '-'}</td>
                       <td title={peer.peerId}>{formatShortId(peer.peerId)}</td>
                       <td>{safeString(peer.source, 'n/a').toUpperCase()}</td>
-                      <td>{peer.services.join(', ')}</td>
+                      <td>{formatInt(peer.services.length)}</td>
                       <td>{String(peer.inputUsdPerMillion)}</td>
                       <td>{String(peer.outputUsdPerMillion)}</td>
                       <td>
@@ -151,7 +177,7 @@ export function PeersView({ active }: PeersViewProps) {
                           ? `${formatInt(peer.capacityMsgPerHour)}/h`
                           : 'n/a'}
                       </td>
-                      <td>{formatInt(peer.reputation)}</td>
+                      <td>{formatReputationScore(getPeerReputationScore(peer, reputationScoresByPeerId))}</td>
                       <td>{formatEndpoint(peer)}</td>
                     </tr>
                   ))
