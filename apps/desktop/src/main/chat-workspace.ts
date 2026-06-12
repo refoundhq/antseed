@@ -1,15 +1,15 @@
 import { execFile as execFileCallback } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
+import { ANTSEED_HOME_DIR, CHAT_DATA_DIR, CHAT_WORKSPACE_DIR } from './chat-paths.js';
+import { getChatWorkspacePath, setChatWorkspacePath } from './chat-permissions.js';
 import { asErrorMessage } from './utils.js';
 
-export const ANTSEED_HOME_DIR = path.join(homedir(), '.antseed');
-export const CHAT_DATA_DIR = path.join(ANTSEED_HOME_DIR, 'chat');
-export const CHAT_WORKSPACE_DIR = path.join(ANTSEED_HOME_DIR, 'projects');
-const CHAT_WORKSPACE_STATE_FILE = path.join(CHAT_DATA_DIR, 'workspace.json');
+export { ANTSEED_HOME_DIR, CHAT_DATA_DIR, CHAT_WORKSPACE_DIR };
+const LEGACY_CHAT_WORKSPACE_STATE_FILE = path.join(CHAT_DATA_DIR, 'workspace.json');
 const WORKSPACE_PICKER_TOOLING_DIRS = new Set([
   '.claude',
   '.codex',
@@ -54,13 +54,23 @@ export function getCurrentChatWorkspaceDir(): string {
   return currentChatWorkspaceDir;
 }
 
-export async function loadChatWorkspaceDir(): Promise<string> {
+async function loadLegacyChatWorkspacePath(): Promise<string | null> {
   try {
-    const raw = await readFile(CHAT_WORKSPACE_STATE_FILE, 'utf8');
+    const raw = await readFile(LEGACY_CHAT_WORKSPACE_STATE_FILE, 'utf8');
     const parsed = JSON.parse(raw) as { path?: unknown };
     const savedPath = typeof parsed.path === 'string' ? parsed.path.trim() : '';
+    return savedPath || null;
+  } catch {
+    return null;
+  }
+}
+
+export async function loadChatWorkspaceDir(): Promise<string> {
+  try {
+    const savedPath = await getChatWorkspacePath() ?? await loadLegacyChatWorkspacePath();
     if (savedPath && existsSync(savedPath)) {
       currentChatWorkspaceDir = savedPath;
+      await setChatWorkspacePath(savedPath);
     }
   } catch {
     // Keep default workspace dir.
@@ -91,8 +101,7 @@ export async function persistChatWorkspaceDir(workspaceDir: string): Promise<str
   if (!existsSync(trimmed)) {
     throw new Error(`Workspace does not exist: ${trimmed}`);
   }
-  await mkdir(CHAT_DATA_DIR, { recursive: true });
-  await writeFile(CHAT_WORKSPACE_STATE_FILE, JSON.stringify({ path: trimmed }, null, 2), 'utf8');
+  await setChatWorkspacePath(trimmed);
   currentChatWorkspaceDir = trimmed;
   return currentChatWorkspaceDir;
 }

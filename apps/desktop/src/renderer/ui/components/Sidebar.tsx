@@ -241,6 +241,7 @@ function ConversationListRow({
   conv,
   activeConvId,
   sendingConvIds,
+  approvalConvIds,
   chatActiveChannels,
   peerDisplayNameById,
   onSelectConv,
@@ -252,6 +253,7 @@ function ConversationListRow({
   conv: ConvRecord;
   activeConvId: string | null;
   sendingConvIds: ReadonlySet<string>;
+  approvalConvIds: ReadonlySet<string>;
   chatActiveChannels: Map<string, { reservedUsdc: string; peerName: string }>;
   peerDisplayNameById: ReadonlyMap<string, string>;
   onSelectConv: (id: string) => void;
@@ -263,6 +265,7 @@ function ConversationListRow({
   const id = getConversationId(conv);
   const title = String(conv.title || 'Untitled chat');
   const isActive = id === activeConvId;
+  const needsApproval = approvalConvIds.has(id);
   const isRunning = sendingConvIds.has(id);
   const serviceLabel = shortServiceName(conv.service);
   const totalCost = Number(conv.totalEstimatedCostUsd) || 0;
@@ -287,12 +290,12 @@ function ConversationListRow({
     >
       <div className={styles.chatConvTop}>
         <div className={styles.chatConvPeer}>{title}</div>
-        {isRunning && (
+        {(needsApproval || isRunning) && (
           <span
-            className={styles.chatConvRunningDot}
+            className={`${styles.chatConvRunningDot}${needsApproval ? ` ${styles.chatConvApprovalDot}` : ''}`}
             role="status"
-            aria-label="Request in progress"
-            title="Request in progress"
+            aria-label={needsApproval ? 'Approval required' : 'Request in progress'}
+            title={needsApproval ? 'Approval required' : 'Request in progress'}
           />
         )}
         <div className={styles.chatConvRight}>
@@ -349,6 +352,7 @@ function ChatListSection({
   totalConversationCount,
   activeConvId,
   sendingConvIds,
+  approvalConvIds,
   chatActiveChannels,
   peerDisplayNameById,
   onSelectConv,
@@ -364,6 +368,7 @@ function ChatListSection({
   totalConversationCount: number;
   activeConvId: string | null;
   sendingConvIds: ReadonlySet<string>;
+  approvalConvIds: ReadonlySet<string>;
   chatActiveChannels: Map<string, { reservedUsdc: string; peerName: string }>;
   peerDisplayNameById: ReadonlyMap<string, string>;
   onSelectConv: (id: string) => void;
@@ -418,6 +423,7 @@ function ChatListSection({
               conv={conv}
               activeConvId={activeConvId}
               sendingConvIds={sendingConvIds}
+              approvalConvIds={approvalConvIds}
               chatActiveChannels={chatActiveChannels}
               peerDisplayNameById={peerDisplayNameById}
               onSelectConv={onSelectConv}
@@ -568,6 +574,7 @@ function ChatSidebar({ onSelectView }: { onSelectView: (view: ViewName) => void 
     chatConversations,
     chatActiveConversation,
     chatSendingConversationIds,
+    chatToolApprovalRequests,
     chatActiveChannels,
     discoverRows,
     chatServiceOptions,
@@ -581,6 +588,14 @@ function ChatSidebar({ onSelectView }: { onSelectView: (view: ViewName) => void 
     () => new Set(Array.isArray(chatSendingConversationIds) ? chatSendingConversationIds : []),
     [chatSendingConversationIds],
   );
+  const approvalConvIds = useMemo(() => {
+    const ids = new Set<string>();
+    const requests = Array.isArray(chatToolApprovalRequests) ? chatToolApprovalRequests : [];
+    for (const request of requests) {
+      if (request.conversationId) ids.add(request.conversationId);
+    }
+    return ids;
+  }, [chatToolApprovalRequests]);
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
   const [recentNow, setRecentNow] = useState(() => Date.now());
   const [chatSearchOpen, setChatSearchOpen] = useState(false);
@@ -682,6 +697,7 @@ function ChatSidebar({ onSelectView }: { onSelectView: (view: ViewName) => void 
         totalConversationCount={allConversations.length}
         activeConvId={chatActiveConversation}
         sendingConvIds={sendingConvIds}
+        approvalConvIds={approvalConvIds}
         chatActiveChannels={chatActiveChannels}
         peerDisplayNameById={peerDisplayNameById}
         onSelectConv={handleSelectConv}
