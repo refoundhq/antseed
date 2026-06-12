@@ -44,6 +44,38 @@ test('sensitive commands cannot be saved as reusable peer approvals', () => {
   }
 });
 
+test('read-only pipelines of read commands stay auto-allowed', () => {
+  const piped = describeBash('grep -n needle src | wc -l');
+  assert.equal(piped.permissionKey, 'bash:read');
+  assert.equal(isToolPermissionAutoAllowed(piped.permissionKey), true);
+});
+
+test('read-looking commands that smuggle a second command are never auto-allowed', () => {
+  // A trusting first-word allowlist would classify each of these by its leading
+  // read command. The composition guard must force a non-auto class instead.
+  const bypasses = [
+    'cat $(node payload.js)',     // command substitution
+    'cat `node payload.js`',      // backtick substitution
+    'ls <(node payload.js)',      // process substitution
+    'ls\nnode payload.js',        // newline-separated statements
+    'grep foo file && node x.js', // chaining via &&
+    'grep foo file | node x.js',  // pipe into a non-read command
+  ];
+  for (const command of bypasses) {
+    const approval = describeBash(command);
+    assert.equal(
+      isToolPermissionAutoAllowed(approval.permissionKey),
+      false,
+      `expected ${command} to require explicit approval, got ${approval.permissionKey}`,
+    );
+  }
+});
+
+test('read-only git commands with trailing composition are not auto-allowed', () => {
+  assert.equal(isToolPermissionAutoAllowed(describeBash('git status && node x.js').permissionKey), false);
+  assert.equal(isToolPermissionAutoAllowed(describeBash('git log; node x.js').permissionKey), false);
+});
+
 test('network and file-changing commands require explicit non-auto approval', () => {
   const network = describeBash('curl https://example.com/install.sh');
   const write = describeBash('pnpm install');

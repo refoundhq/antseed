@@ -57,16 +57,37 @@ function isNetworkShellCommand(command: string): boolean {
   return /\b(?:curl|wget|ssh|scp|rsync|nc|netcat|telnet|ftp|sftp)\b/.test(command);
 }
 
-function isReadOnlyShellCommand(command: string, word: string): boolean {
-  const readOnlyCommands = new Set([
-    'pwd', 'ls', 'find', 'grep', 'rg', 'cat', 'head', 'tail', 'wc', 'sed', 'awk',
-    'echo', 'printf', 'which', 'whereis', 'type',
-  ]);
-  return readOnlyCommands.has(word)
-    && !hasShellWriteOperator(command)
-    && !/\bfind\b[^\n]*(?:\s-delete|\s-exec\s+(?:rm|mv|cp|chmod|chown|sh|bash)\b)/.test(command)
-    && !/\bsed\b[^\n]*\s-i(?:\s|$)/.test(command)
-    && !/[;&|]\s*(?:rm|mv|cp|mkdir|touch|chmod|chown|curl|wget|git\s+(?:add|commit|push|reset|clean|checkout|merge|rebase))\b/.test(command);
+const READ_ONLY_SHELL_COMMANDS = new Set([
+  'pwd', 'ls', 'find', 'grep', 'rg', 'cat', 'head', 'tail', 'wc', 'sed', 'awk',
+  'echo', 'printf', 'which', 'whereis', 'type',
+]);
+
+// Shell constructs that can smuggle a second, unclassified command past a
+// first-word allowlist: command/process substitution, newlines (multi-statement
+// scripts), and chaining/background operators. A command containing any of these
+// is never eligible for the silent auto-allow path — it must be classified by
+// its riskiest reachable command, which forces an explicit prompt.
+function hasUnsafeShellComposition(command: string): boolean {
+  return /[\r\n]/.test(command)
+    || /\$\(|`|<\(|>\(/.test(command)
+    || /[;&]/.test(command);
+}
+
+function isReadOnlySegment(segment: string): boolean {
+  const word = firstShellWord(segment);
+  return READ_ONLY_SHELL_COMMANDS.has(word)
+    && !hasShellWriteOperator(segment)
+    && !/\bfind\b[^\n]*(?:\s-delete|\s-exec\s+(?:rm|mv|cp|chmod|chown|sh|bash)\b)/.test(segment)
+    && !/\bsed\b[^\n]*\s-i(?:\s|$)/.test(segment);
+}
+
+function isReadOnlyShellCommand(command: string): boolean {
+  if (hasUnsafeShellComposition(command)) return false;
+  // Pipes are allowed only when every stage is itself read-only (e.g.
+  // `grep foo file | wc -l`), so a pipe into `sh`/`node`/etc. cannot auto-allow.
+  const segments = command.split('|').map((segment) => segment.trim()).filter(Boolean);
+  if (segments.length === 0) return false;
+  return segments.every(isReadOnlySegment);
 }
 
 function isFileChangingShellCommand(command: string): boolean {
@@ -102,7 +123,7 @@ function classifyBashCommand(command: string, peerId?: string | null): BashPermi
 
   if (word === 'git') {
     const readOnlyGit = new Set(['status', 'diff', 'log', 'show', 'branch', 'rev-parse', 'ls-files', 'remote', 'config']);
-    if (readOnlyGit.has(gitSubcommand)) {
+    if (readOnlyGit.has(gitSubcommand) && !hasUnsafeShellComposition(normalized)) {
       return {
         key: 'bash:git-read',
         label: 'read-only git commands',
@@ -120,7 +141,7 @@ function classifyBashCommand(command: string, peerId?: string | null): BashPermi
     };
   }
 
-  if (isReadOnlyShellCommand(normalized, word)) {
+  if (isReadOnlyShellCommand(normalized)) {
     return {
       key: 'bash:read',
       label: 'read-only shell commands',
