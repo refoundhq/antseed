@@ -125,6 +125,8 @@ export interface PaymentsCLIConfig {
    * amount. Default: "2000" (~$0.002).
    */
   minSettleDelta?: string;
+  /** Optional seller-side slack for estimate-only reserve preflight checks. Unset disables estimate-only rejection. */
+  reserveEstimateOverdraftUsdc?: string;
   /**
    * Maximum USDC the buyer authorizes per single request in base units — the
    * per-request overdraft window beyond the buyer's independently-verified

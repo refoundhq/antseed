@@ -134,6 +134,8 @@ export interface NodePaymentsConfig {
   minBudgetPerRequest?: string;
   /** Minimum unsettled delta (base units) required before idle settle submits a tx. Default: "2000" (~$0.002). */
   minSettleDelta?: string;
+  /** Optional seller-side slack for estimate-only reserve preflight checks. Unset disables estimate-only rejection. */
+  reserveEstimateOverdraftUsdc?: string;
   /** Maximum USDC the buyer authorizes per single request (base units). Default: "500000" ($0.50). */
   maxPerRequestUsdc?: string;
   /** Maximum total USDC the buyer will reserve in a single SpendingAuth (base units). Default: "10000000" ($10.00). */
@@ -1194,6 +1196,9 @@ export class AntseedNode extends EventEmitter {
       channelsClient: this._channelsClient,
       announcer: this._announcer,
       maxUploadBodyBytes: this._config.maxUploadBodyBytes,
+      ...(this._config.payments?.reserveEstimateOverdraftUsdc != null
+        ? { reserveEstimateOverdraftUsdc: BigInt(this._config.payments.reserveEstimateOverdraftUsdc) }
+        : {}),
       emit: (event, ...args) => this.emit(event, ...args),
     });
 
