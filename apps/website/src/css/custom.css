@@ -320,8 +320,13 @@ nav.navbar {
    ============================================= */
 .custom-footer-link:hover,
 .custom-footer-link:focus-visible {
-  color: #0a0e14 !important;
+  color: var(--as-green, #139256) !important;
   text-decoration: none;
+}
+
+html[data-theme='light'] .custom-footer-link:hover,
+html[data-theme='light'] .custom-footer-link:focus-visible {
+  color: #139256 !important;
 }
 
 html[data-theme='dark'] .custom-footer-link:hover,
@@ -894,9 +899,14 @@ html:has(.homepage-wrapper) .custom-footer-link {
   color: #647568 !important;
 }
 
-html:has(.homepage-wrapper) .custom-footer-link:hover,
-html:has(.homepage-wrapper) .custom-footer-link:focus-visible {
+html[data-theme='dark']:has(.homepage-wrapper) .custom-footer-link:hover,
+html[data-theme='dark']:has(.homepage-wrapper) .custom-footer-link:focus-visible {
   color: #edf6ee !important;
+}
+
+html[data-theme='light']:has(.homepage-wrapper) .custom-footer-link:hover,
+html[data-theme='light']:has(.homepage-wrapper) .custom-footer-link:focus-visible {
+  color: #139256 !important;
 }
 
 /* Selection on the dark homepage. */
