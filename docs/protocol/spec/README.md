@@ -80,6 +80,12 @@ How trust boundaries, cryptographic controls, abuse resistance, and residual ris
 
 See: [06-security-overview.md](./06-security-overview.md)
 
+### 7. Model Verification
+
+How a buyer gains confidence that the model it paid for is the model it received, and escalates confirmed substitution to slashing. Covers behavioral probes, reference shadow sampling, signed responses, passive fingerprinting, and TEE attestation. Proposed / design.
+
+See: [07-model-verification.md](./07-model-verification.md)
+
 ## Specification Documents
 
 | Document | Layer | Description |
@@ -91,10 +97,12 @@ See: [06-security-overview.md](./06-security-overview.md)
 | [04-payments.md](./04-payments.md) | Payments | Payment settlement and pricing |
 | [05-reputation.md](./05-reputation.md) | Reputation | Trust and reputation system |
 | [06-security-overview.md](./06-security-overview.md) | Security | Cross-layer security model, controls, and hardening priorities |
+| [07-model-verification.md](./07-model-verification.md) | Verification | Verifying that the served model matches the advertised model (proposed) |
 
 ## Version History
 
 | Version | Date | Notes |
 |---|---|---|
+| 1.2 | 2026-06-13 | Added model-verification design spec (proposed) |
 | 1.1 | 2026-03-01 | Added cross-layer security overview for buyer-seller flow |
 | 1.0 | 2026-02-18 | Initial protocol specification |
