@@ -101,6 +101,15 @@
   .logoCell.light { background:var(--field-1); color:var(--ink); }
   .logoCell img { width:58px; height:58px; }
   .logoCell.small img { width:28px; height:28px; }
+  .logoCell.product { min-width:360px; justify-content:flex-start; }
+  .logoCell.product img { width:234px; height:auto; }
+  .assetGrid { display:grid; grid-template-columns:minmax(240px,.75fr) minmax(320px,1.25fr); gap:16px; align-items:stretch; }
+  .assetCard { border:1px solid var(--line); border-radius:18px; padding:16px; background:linear-gradient(180deg,rgba(255,255,255,.035),rgba(255,255,255,.012)); }
+  .assetCard img { display:block; width:100%; height:auto; border-radius:16px; border:1px solid rgba(151,255,199,.1); background:#070b09; }
+  .assetCard b { display:block; margin:14px 0 6px; font-family:var(--font-data); font-size:11px; letter-spacing:1.4px; text-transform:uppercase; color:var(--green); }
+  .assetCard p { margin:0; color:var(--text-2); font-size:13px; line-height:1.55; }
+  .assetLinks { display:flex; gap:10px; flex-wrap:wrap; margin-top:12px; }
+  .assetLinks a { font-family:var(--font-data); font-size:10px; letter-spacing:1px; text-transform:uppercase; text-decoration:none; color:var(--green); border:1px solid rgba(31,216,122,.22); border-radius:999px; padding:7px 9px; background:rgba(31,216,122,.055); }
   .themeSamples { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
   .sample { padding:22px; min-height:220px; }
   .sample.dark { background:#070b09; }
@@ -112,7 +121,7 @@
   .moneyStrip { display:flex; gap:10px; flex-wrap:wrap; margin-top:12px; }
   .pill { font-family:var(--font-data); font-size:11px; letter-spacing:1px; border-radius:999px; padding:8px 10px; border:1px solid var(--line); color:var(--green); background:rgba(31,216,122,.05); }
   .pill.money { color:var(--clay); border-color:var(--clay-line); background:rgba(232,163,61,.07); }
-  @media (max-width:800px) { .hero, .themeSamples { grid-template-columns:1fr; } .typeRow, .rule { grid-template-columns:1fr; } body { padding-top:28px; } }
+  @media (max-width:800px) { .hero, .themeSamples, .assetGrid { grid-template-columns:1fr; } .typeRow, .rule { grid-template-columns:1fr; } body { padding-top:28px; } .logoCell.product { min-width:0; } .logoCell.product img { width:100%; max-width:234px; } }
 </style>
 </head>
 <body>
@@ -202,6 +211,26 @@
       <div class="logoCell"><img src="/logos/antseed-mark.svg" alt=""><span class="wordmark">ANT<i>SEED</i></span></div>
       <div class="logoCell light"><img src="/logos/antseed-mark.svg" alt=""><span class="wordmark">ANT<i>SEED</i></span></div>
       <div class="logoCell small"><img src="/logos/antseed-mark-clay.svg" alt=""><span class="wordmark"><span style="color:var(--clay)">$ANTS</span></span></div>
+      <div class="logoCell product"><img src="/logos/antstation-logo.svg" alt="AntStation logo"></div>
+      <div class="logoCell product light"><img src="/logos/antstation-logo-light.svg" alt="AntStation logo for light surfaces"></div>
+    </div>
+  </section>
+
+  <section id="social">
+    <h2>07 · Social assets</h2>
+    <div class="assetGrid">
+      <div class="assetCard">
+        <img src="/social/x-avatar-antseed.png" alt="AntSeed X profile avatar">
+        <b>X profile image</b>
+        <p>Square 1200×1200 PNG. The ant mark is centered inside the circle-safe zone so it reads after X crops the avatar.</p>
+        <div class="assetLinks"><a href="/social/x-avatar-antseed.png">PNG</a><a href="/social/x-avatar-antseed.svg">SVG source</a></div>
+      </div>
+      <div class="assetCard">
+        <img src="/social/x-banner-antseed.png" alt="AntSeed X account banner">
+        <b>X banner suggestion</b>
+        <p>1500×500 PNG. Dark soil field, pheromone rails, green network/action brand, and a restrained clay USDC economics accent.</p>
+        <div class="assetLinks"><a href="/social/x-banner-antseed.png">PNG</a><a href="/social/x-banner-antseed.svg">SVG source</a></div>
+      </div>
     </div>
   </section>
 </div>
