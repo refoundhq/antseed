@@ -75,3 +75,38 @@ export function formatPerMillionPrice(usdPerMillion: number): string {
   if (usdPerMillion < 0.01) return `$${usdPerMillion.toFixed(3)}/M`;
   return `$${usdPerMillion.toFixed(2)}/M`;
 }
+
+export type PeerReputationSource = {
+  peerId: string;
+  onChainReputationScore?: number | null;
+};
+
+export function normalizeReputationScore(score: unknown): number | null {
+  return typeof score === 'number' && Number.isFinite(score) ? score : null;
+}
+
+export function formatReputationScore(score: unknown): string {
+  const normalized = normalizeReputationScore(score);
+  if (normalized === null) return '—';
+  return (normalized / 10).toFixed(1);
+}
+
+export function buildPeerReputationScoreMap(rows: PeerReputationSource[]): Map<string, number> {
+  const scores = new Map<string, number>();
+  for (const row of rows) {
+    const score = normalizeReputationScore(row.onChainReputationScore);
+    if (score === null) continue;
+    const existing = scores.get(row.peerId);
+    if (existing === undefined || score > existing) {
+      scores.set(row.peerId, score);
+    }
+  }
+  return scores;
+}
+
+export function getPeerReputationScore(
+  peer: PeerReputationSource,
+  scoresByPeerId: ReadonlyMap<string, number>,
+): number | null {
+  return scoresByPeerId.get(peer.peerId) ?? normalizeReputationScore(peer.onChainReputationScore);
+}

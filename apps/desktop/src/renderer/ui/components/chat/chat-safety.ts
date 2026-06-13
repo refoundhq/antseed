@@ -19,8 +19,10 @@ const EVM_ADDRESS_PATTERN = /\b0x[a-fA-F0-9]{40}\b/g;
 const BITCOIN_ADDRESS_PATTERN = /\b(?:bc1[ac-hj-np-z02-9]{25,87}|[13][a-km-zA-HJ-NP-Z1-9]{25,34})\b/gi;
 const COSMOS_ADDRESS_PATTERN = /\b[a-z]{2,16}1[0-9a-z]{38,58}\b/gi;
 // Broad enough to catch common Solana/base58 addresses, but constrained to avoid
-// ordinary prose: base58 only, 32-44 chars, and at least one digit plus both cases.
-const SOLANA_ADDRESS_PATTERN = /\b(?=[1-9A-HJ-NP-Za-km-z]{32,44}\b)(?=[1-9A-HJ-NP-Za-km-z]*\d)(?=[1-9A-HJ-NP-Za-km-z]*[A-Z])(?=[1-9A-HJ-NP-Za-km-z]*[a-z])[1-9A-HJ-NP-Za-km-z]{32,44}\b/g;
+// ordinary prose: base58 only, 32-44 chars, and at least one digit. Case is not
+// required — real base58 addresses with no uppercase letter are valid and must
+// still trigger the safety gate; recall matters more than precision here.
+const SOLANA_ADDRESS_PATTERN = /\b(?=[1-9A-HJ-NP-Za-km-z]{32,44}\b)(?=[1-9A-HJ-NP-Za-km-z]*\d)[1-9A-HJ-NP-Za-km-z]{32,44}\b/g;
 
 const TRAILING_URL_PUNCTUATION = /[),.;:!?]+$/;
 const PAYMENT_INTENT_PATTERN = /\b(?:send|transfer|deposit|top\s*up|fund|funds|pay|payment|required|billing|balance|insufficient|add\s+credits?|add\s+funds?|connect\s+(?:your\s+)?wallet|approve\s+(?:the\s+)?(?:transaction|token|spend|allowance)|claim\s+(?:refund|airdrop|reward)|verify\s+(?:your\s+)?wallet|wallet\s+verification)\b/i;

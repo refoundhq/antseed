@@ -5,7 +5,7 @@ import { swapAuthHeader, validateRequestService } from './auth-swap.js';
 import Bottleneck from 'bottleneck';
 import { stripRelayRequestHeaders, stripRelayResponseHeaders } from './http-headers.js';
 
-export const DEFAULT_HTTP_TIMEOUT_MS = 120_000;
+export const DEFAULT_HTTP_TIMEOUT_MS = 5 * 60_000;
 
 export interface RelayConfig {
   baseUrl: string;

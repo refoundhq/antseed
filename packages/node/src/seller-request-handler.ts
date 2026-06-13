@@ -25,6 +25,7 @@ export interface SellerRequestHandlerDeps {
   channelsClient: ChannelsClient | null;
   announcer: PeerAnnouncer | null;
   maxUploadBodyBytes?: number;
+  reserveEstimateOverdraftUsdc?: bigint;
   emit: (event: string, ...args: unknown[]) => boolean;
 }
 
@@ -206,9 +207,14 @@ export class SellerRequestHandler {
           const requestCostEstimate = this._estimateMaxRequestCostUsdc(request, requestPricing);
           const estimatedRequestCost = requestCostEstimate?.cost ?? 0n;
           const remainingLockedReserve = reserveMax > spent ? reserveMax - spent : 0n;
-          const estimatedCostExceedsLockedReserve = reserveMax > 0n
+          const reserveEstimateOverdraft = this._deps.reserveEstimateOverdraftUsdc;
+          const effectiveEstimateLimit = reserveEstimateOverdraft != null
+            ? remainingLockedReserve + reserveEstimateOverdraft
+            : null;
+          const estimatedCostExceedsLockedReserve = effectiveEstimateLimit != null
+            && reserveMax > 0n
             && estimatedRequestCost > 0n
-            && estimatedRequestCost > remainingLockedReserve;
+            && estimatedRequestCost > effectiveEstimateLimit;
 
           if (isBlocked || (spent > 0n && (spent > accepted || isAtExactSpendLimit)) || estimatedCostExceedsLockedReserve) {
             const baseRequirements = spm.getPaymentRequirements(
@@ -239,7 +245,7 @@ export class SellerRequestHandler {
               } else if (estimatedCostExceedsLockedReserve) {
                 reason = 'insufficient locked reserve for estimated request';
               }
-              debugLog(`[SellerHandler] Session ${reason} for ${buyerPeerId.slice(0, 12)}... (spent=${spent} accepted=${accepted} target=${target} reserveMax=${reserveMax} remainingLockedReserve=${remainingLockedReserve} estimatedRequestCost=${estimatedRequestCost} estimatedInputTokens=${requestCostEstimate?.inputTokens ?? 0} estimatedMaxOutputTokens=${requestCostEstimate?.maxOutputTokens ?? 0}) — returning 402`);
+              debugLog(`[SellerHandler] Session ${reason} for ${buyerPeerId.slice(0, 12)}... (spent=${spent} accepted=${accepted} target=${target} reserveMax=${reserveMax} remainingLockedReserve=${remainingLockedReserve} reserveEstimateOverdraft=${reserveEstimateOverdraft ?? 'disabled'} effectiveEstimateLimit=${effectiveEstimateLimit ?? 'disabled'} estimatedRequestCost=${estimatedRequestCost} estimatedInputTokens=${requestCostEstimate?.inputTokens ?? 0} estimatedMaxOutputTokens=${requestCostEstimate?.maxOutputTokens ?? 0}) — returning 402`);
               if (isBlocked || isAlreadyExhausted || estimatedCostExceedsLockedReserve) {
                 // Default settleSession() performs final close(); do not use
                 // settleOnly here because exhausted channels must release the

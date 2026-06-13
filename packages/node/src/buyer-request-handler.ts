@@ -35,6 +35,8 @@ export interface BuyerRequestHandlerConfig {
   maxStreamDurationMs?: number;
 }
 
+const DEFAULT_REQUEST_TIMEOUT_MS = 5 * 60_000;
+
 export interface BuyerRequestHandlerDeps {
   negotiator: BuyerPaymentNegotiator | null;
   getConnection: (peer: PeerInfo) => Promise<PeerConnection>;
@@ -100,7 +102,7 @@ export class BuyerRequestHandler {
     let startTime = Date.now();
 
     const executeRequest = (): Promise<SerializedHttpResponse> => new Promise<SerializedHttpResponse>((resolve, reject) => {
-      const timeoutMs = this._config.requestTimeoutMs ?? 30_000;
+      const timeoutMs = this._config.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
       const maxStreamBufferBytes = Math.max(1, this._config.maxStreamBufferBytes ?? 16 * 1024 * 1024);
       const maxStreamDurationMs = Math.max(1, this._config.maxStreamDurationMs ?? 5 * 60_000);
       const streamInitialResponseTimeoutMs = callbacks ? Math.max(timeoutMs, 90_000) : timeoutMs;

@@ -134,6 +134,8 @@ export interface NodePaymentsConfig {
   minBudgetPerRequest?: string;
   /** Minimum unsettled delta (base units) required before idle settle submits a tx. Default: "2000" (~$0.002). */
   minSettleDelta?: string;
+  /** Optional seller-side slack for estimate-only reserve preflight checks. Unset disables estimate-only rejection. */
+  reserveEstimateOverdraftUsdc?: string;
   /** Maximum USDC the buyer authorizes per single request (base units). Default: "500000" ($0.50). */
   maxPerRequestUsdc?: string;
   /** Maximum total USDC the buyer will reserve in a single SpendingAuth (base units). Default: "10000000" ($10.00). */
@@ -149,7 +151,7 @@ export interface NodeConfig {
   dhtPort?: number;           // Default: 6881 for seller, 0 for buyer
   signalingPort?: number;     // Default: 6882 for seller
   bootstrapNodes?: Array<{ host: string; port: number }>;
-  requestTimeoutMs?: number;  // Default: 30000
+  requestTimeoutMs?: number;  // Default: 300000
   /** Timeout in ms for each HTTP metadata fetch during peer discovery. Default: 1500 */
   metadataFetchTimeoutMs?: number;
   /** Maximum buffered body size (bytes) while reconstructing streaming responses. Default: 16 MiB. */
@@ -1194,6 +1196,9 @@ export class AntseedNode extends EventEmitter {
       channelsClient: this._channelsClient,
       announcer: this._announcer,
       maxUploadBodyBytes: this._config.maxUploadBodyBytes,
+      ...(this._config.payments?.reserveEstimateOverdraftUsdc != null
+        ? { reserveEstimateOverdraftUsdc: BigInt(this._config.payments.reserveEstimateOverdraftUsdc) }
+        : {}),
       emit: (event, ...args) => this.emit(event, ...args),
     });
 

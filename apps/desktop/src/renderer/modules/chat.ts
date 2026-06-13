@@ -8,6 +8,9 @@ import type {
   DesktopBridge,
   PreparedChatAttachment,
   RawChatAttachment,
+  ChatPermissionMode,
+  ToolApprovalDecision,
+  ToolApprovalRequest,
 } from '../types/bridge';
 import type {
   ChatMessage,
@@ -85,6 +88,8 @@ export type ChatModuleApi = {
   handleServiceFocus: () => void;
   handleServiceBlur: () => void;
   clearPinnedPeer: () => void;
+  setChatPermissionMode: (mode: ChatPermissionMode) => void;
+  decideToolApproval: (decision: ToolApprovalDecision, requestId?: string) => void;
   handleLogLineForThinkingPhase: (line: string) => void;
 };
 
@@ -150,6 +155,7 @@ export function initChatModule({
   let serviceRefreshInProgress = false;
   let serviceSelectFocused = false;
   let workspaceSwitchToken = 0;
+  let permissionRefreshToken = 0;
   let desiredWorkspacePath: string | null = uiState.chatWorkspacePath || null;
   const sendingConversationIds = new Set<string>();
   const streamTurnsByConversation = new Map<string, number>();
@@ -159,6 +165,70 @@ export function initChatModule({
   const localConversationMessages = new Map<string, ChatMessage[]>();
   const streamingMessagesByConversation = new Map<string, ChatMessage>();
   let newChatDraftVersion = 0;
+
+  const normalizePermissionMode = (value: unknown): ChatPermissionMode => (
+    value === 'full' ? 'full' : 'manual'
+  );
+
+  function getActivePermissionPeerId(): string {
+    const conversationPeerId = activeConversation?.peerId?.trim() ?? '';
+    if (conversationPeerId) return conversationPeerId;
+    if (uiState.chatSelectedPeerId) return uiState.chatSelectedPeerId;
+    const selected = decodeChatServiceSelection(uiState.chatSelectedServiceValue);
+    return selected.peerId?.trim() ?? '';
+  }
+
+  async function refreshChatPermissionModeForPeer(peerId = getActivePermissionPeerId()): Promise<void> {
+    const refreshToken = permissionRefreshToken + 1;
+    permissionRefreshToken = refreshToken;
+    const normalizedPeerId = peerId.trim();
+    if (!normalizedPeerId) {
+      uiState.chatPermissionMode = 'manual';
+      notifyUiStateChanged();
+      return;
+    }
+    uiState.chatPermissionMode = 'manual';
+    notifyUiStateChanged();
+    try {
+      const result = await bridge?.chatPeerPermissionModeGet?.(normalizedPeerId);
+      if (permissionRefreshToken !== refreshToken || normalizedPeerId !== getActivePermissionPeerId().trim()) {
+        return;
+      }
+      if (result?.ok && result.mode) {
+        uiState.chatPermissionMode = normalizePermissionMode(result.mode);
+        notifyUiStateChanged();
+      }
+    } catch {
+      // Keep the current in-memory value.
+    }
+  }
+
+  void refreshChatPermissionModeForPeer();
+
+  function setChatPermissionMode(mode: ChatPermissionMode): void {
+    const nextMode = normalizePermissionMode(mode);
+    const peerId = getActivePermissionPeerId();
+    uiState.chatPermissionMode = nextMode;
+    if (peerId) {
+      void bridge?.chatPeerPermissionModeSet?.(peerId, nextMode).catch(() => undefined);
+    }
+    notifyUiStateChanged();
+  }
+
+  function setToolApprovalRequests(requests: ToolApprovalRequest[]): void {
+    uiState.chatToolApprovalRequests = requests;
+    uiState.chatToolApprovalRequest = requests[0] ?? null;
+  }
+
+  function decideToolApproval(decision: ToolApprovalDecision, requestId?: string): void {
+    const request = requestId
+      ? uiState.chatToolApprovalRequests.find((entry) => entry.id === requestId) ?? null
+      : uiState.chatToolApprovalRequest;
+    if (!request) return;
+    setToolApprovalRequests(uiState.chatToolApprovalRequests.filter((entry) => entry.id !== request.id));
+    notifyUiStateChanged();
+    void bridge?.chatToolApprovalDecision?.(request.id, decision);
+  }
 
   // ---------------------------------------------------------------------------
   // Payment approval helpers
@@ -1555,6 +1625,7 @@ export function initChatModule({
         setLocalConversationMessages(convId, uiState.chatMessages as ChatMessage[]);
         updateThreadMeta(activeConversation);
         clearTransientChatNotices();
+        void refreshChatPermissionModeForPeer(resolveConversationPeerId(activeConversation));
         notifyUiStateChanged();
 
         const convWorkspacePath = conv.workspacePath;
@@ -1593,6 +1664,7 @@ export function initChatModule({
     // render the WalkingAnt inside the empty new-chat screen.
     syncActiveConversationSendingState();
     updateThreadMeta(null);
+    void refreshChatPermissionModeForPeer();
     notifyUiStateChanged();
   }
 
@@ -2059,6 +2131,7 @@ export function initChatModule({
           selection.provider ?? undefined,
           attachments,
           selection.peerId,
+          uiState.chatPermissionMode,
         );
 
       void (async () => {
@@ -2138,6 +2211,7 @@ export function initChatModule({
               selection.provider ?? undefined,
               attachments,
               selection.peerId,
+              uiState.chatPermissionMode,
             );
 
           let result = await sendRequest();
@@ -2282,6 +2356,7 @@ export function initChatModule({
         peerId: peerId || null,
       }).catch(() => undefined);
     }
+    void refreshChatPermissionModeForPeer(peerId);
 
     notifyUiStateChanged();
   }
@@ -2313,6 +2388,7 @@ export function initChatModule({
         peerId: null,
       }).catch(() => undefined);
     }
+    void refreshChatPermissionModeForPeer('');
     notifyUiStateChanged();
   }
 
@@ -2710,6 +2786,27 @@ export function initChatModule({
       });
     }
 
+    if (bridge.onChatToolApprovalRequested) {
+      bridge.onChatToolApprovalRequested((request) => {
+        const existingIndex = uiState.chatToolApprovalRequests.findIndex((entry) => entry.id === request.id);
+        const next = existingIndex >= 0
+          ? uiState.chatToolApprovalRequests.map((entry) => (entry.id === request.id ? request : entry))
+          : [...uiState.chatToolApprovalRequests, request];
+        setToolApprovalRequests(next);
+        notifyUiStateChanged();
+      });
+    }
+
+    if (bridge.onChatToolApprovalCleared) {
+      bridge.onChatToolApprovalCleared((data) => {
+        const next = uiState.chatToolApprovalRequests.filter((entry) => entry.id !== data.id);
+        if (next.length !== uiState.chatToolApprovalRequests.length) {
+          setToolApprovalRequests(next);
+          notifyUiStateChanged();
+        }
+      });
+    }
+
     if (bridge.onBrowserPreviewOpen) {
       bridge.onBrowserPreviewOpen((data) => {
         uiState.browserPreviewUrl = data.url;
@@ -2890,6 +2987,8 @@ export function initChatModule({
 
   return {
     handleLogLineForThinkingPhase,
+    setChatPermissionMode,
+    decideToolApproval,
     refreshChatServiceOptions,
     refreshChatProxyStatus,
     refreshChatConversations,
