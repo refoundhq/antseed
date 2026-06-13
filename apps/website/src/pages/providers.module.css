@@ -25,7 +25,7 @@
 .hero::before {
   content: '';
   position: absolute;
-  inset: 18px -16% auto;
+  inset: 0 -16% auto;
   height: 420px;
   background:
     radial-gradient(circle at 50% 0%, rgba(31, 216, 122, 0.12), transparent 58%),
@@ -251,28 +251,45 @@
   display: flex;
   gap: 18px;
   align-items: flex-start;
-  border-left: 3px solid var(--as-clay);
+  border-left: 3px solid var(--as-risk);
   border-radius: var(--as-radius);
   padding: 22px 26px;
-  background: rgba(232, 163, 61, .07);
+  background: var(--as-risk-dim);
+  border-top: 1px solid rgba(255, 107, 107, .12);
+  border-right: 1px solid rgba(255, 107, 107, .12);
+  border-bottom: 1px solid rgba(255, 107, 107, .12);
 }
-.complianceIcon { font-size: 20px; line-height: 1.4; flex-shrink: 0; }
+.complianceIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: 1px solid rgba(255, 107, 107, .34);
+  border-radius: 50%;
+  color: var(--as-risk);
+  font-family: var(--as-font-data);
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1;
+  flex-shrink: 0;
+}
 .complianceTitle {
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 1.6px;
   text-transform: uppercase;
-  color: var(--as-clay);
+  color: var(--as-risk);
   margin: 0 0 10px;
 }
 .complianceBody p {
   font-size: 14px;
-  color: #d9c7a0;
+  color: #e7b9b9;
   line-height: 1.65;
   margin: 0 0 10px;
 }
 .complianceBody p:last-child { margin: 0; }
-.complianceBody strong { color: #ffe0a3; }
+.complianceBody strong { color: #ffd6d6; }
 
 .privacyGrid {
   display: grid;
@@ -512,9 +529,9 @@
   box-shadow: 0 22px 70px rgba(10, 14, 20, .1);
 }
 :global(html[data-theme='light']) .pathCard:hover { background: #fff; }
-:global(html[data-theme='light']) .complianceCard { background: #fff7e9; border-color: rgba(232, 163, 61, .28); border-left-color: var(--as-clay); box-shadow: 0 18px 55px rgba(10, 14, 20, .08); }
-:global(html[data-theme='light']) .complianceBody p { color: #6f521a; }
-:global(html[data-theme='light']) .complianceBody strong { color: #3d2a07; }
+:global(html[data-theme='light']) .complianceCard { background: #fff1f1; border-color: rgba(199, 58, 58, .18); border-left-color: var(--as-risk); box-shadow: 0 18px 55px rgba(10, 14, 20, .08); }
+:global(html[data-theme='light']) .complianceBody p { color: #6f3333; }
+:global(html[data-theme='light']) .complianceBody strong { color: #4d1717; }
 :global(html[data-theme='light']) .ctaPrimary { background: var(--as-green-deep); border-color: var(--as-green-deep); color: #f7fff9 !important; }
 :global(html[data-theme='light']) .ctaSecondary { color: #0a0e14 !important; border-color: rgba(10,14,20,.14); background: rgba(255,255,255,.58); }
 :global(html[data-theme='light']) .privacyRow,

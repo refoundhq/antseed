@@ -1373,7 +1373,7 @@
 .detailHeader::before {
   content: '';
   position: absolute;
-  inset: 16px -18% auto;
+  inset: 0 -18% auto;
   height: 430px;
   background: radial-gradient(circle at 50% 0%, rgba(31, 216, 122, .12), transparent 58%);
   pointer-events: none;
@@ -1412,7 +1412,8 @@
 .detailHeaderText h1,
 .catTitle,
 .sectionTitle,
-.runFirstStepTitle {
+.runFirstStepTitle,
+.bottomBlock h3 {
   font-family: var(--as-font-display);
   color: var(--as-text);
   font-weight: 550;
@@ -1586,8 +1587,9 @@
 }
 .card:hover { transform: translateY(-2px); border-color: rgba(31,216,122,.32); background: var(--as-soil-3); }
 .cardHead { display: flex; align-items: center; gap: 12px; }
-.logoWrap { width: 44px; height: 44px; border-radius: 12px; display: flex; align-items: center; justify-content: center; background: #070b09; box-shadow: none; flex-shrink: 0; }
+.logoWrap { width: 44px; height: 44px; border-radius: 12px; display: flex; align-items: center; justify-content: center; background: rgba(151,170,159,.08); box-shadow: none; flex-shrink: 0; }
 .logoImg { max-width: 28px; max-height: 28px; object-fit: contain; }
+.mutedLogoImg { filter: grayscale(1) invert(.72) brightness(1.08) contrast(.78); opacity: .84; }
 .logoGlyph { color: var(--as-green); font-weight: 700; }
 .cardTitle { color: var(--as-text); margin: 0; font-size: 18px; font-weight: 600; }
 .cardCategory { color: var(--as-text-3); }
@@ -1698,6 +1700,7 @@
 :global(html[data-theme='light']) .bottomBlock,
 :global(html[data-theme='light']) .detailLogo,
 :global(html[data-theme='light']) .logoWrap { background: rgba(255,255,255,.74); border-color: rgba(19,146,86,.16); box-shadow: 0 18px 55px rgba(10,14,20,.08); }
+:global(html[data-theme='light']) .mutedLogoImg { filter: grayscale(1) brightness(.56) contrast(.9); opacity: .74; }
 :global(html[data-theme='light']) .card:hover { background: #fff; }
 :global(html[data-theme='light']) .search { background: #fff; color: #0a0e14; border-color: rgba(10,14,20,.12); }
 :global(html[data-theme='light']) .heroCta { background: var(--as-green-deep); border-color: var(--as-green-deep); color: #f7fff9 !important; }

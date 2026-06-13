@@ -33,10 +33,6 @@ const config: Config = {
   baseUrl: '/',
   onBrokenLinks: 'throw',
 
-  scripts: [{src: '/force-dark-default.js', async: false}],
-
-
-
   markdown: {
     hooks: {
       onBrokenMarkdownLinks: 'warn',

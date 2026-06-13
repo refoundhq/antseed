@@ -585,6 +585,7 @@ function Section({eyebrow, title, children}: {eyebrow: string; title: string; ch
 
 export default function IntegrationPage({integration}: {integration: Integration}): JSX.Element {
   const i = integration;
+  const mutedLogo = i.slug === 'genlayer-studio' || i.slug === 'langchain-python';
 
   // Pick related integrations from the same category, excluding self.
   const related = integrations
@@ -609,7 +610,15 @@ export default function IntegrationPage({integration}: {integration: Integration
 
         <header className={styles.detailHeader}>
           <div className={styles.detailLogo}>
-            {i.logo ? <img src={`/logos/${i.logo}`} alt="" /> : <span>{i.glyph ?? i.name[0]}</span>}
+            {i.logo ? (
+              <img
+                src={`/logos/${i.logo}`}
+                alt=""
+                className={mutedLogo ? styles.mutedLogoImg : undefined}
+              />
+            ) : (
+              <span>{i.glyph ?? i.name[0]}</span>
+            )}
           </div>
           <div className={styles.detailHeaderText}>
             <h1>{i.name}</h1>

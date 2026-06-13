@@ -32,7 +32,7 @@
 .hero::before {
   content: '';
   position: absolute;
-  inset: 16px -18% auto;
+  inset: 0 -18% auto;
   height: 430px;
   background:
     radial-gradient(circle at 50% 0%, rgba(232, 163, 61, 0.14), transparent 58%),
@@ -108,6 +108,7 @@
   justify-content: center;
   gap: 12px;
   flex-wrap: wrap;
+  margin-bottom: 16px;
 }
 .protocolNotice {
   display: inline-flex;

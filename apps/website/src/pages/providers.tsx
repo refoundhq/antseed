@@ -150,7 +150,7 @@ export default function Providers(): JSX.Element {
       {/* ── COMPLIANCE ── */}
       <section className={styles.compliance}>
         <div className={styles.complianceCard}>
-          <div className={styles.complianceIcon} aria-hidden="true">⚠️</div>
+          <div className={styles.complianceIcon} aria-hidden="true">!</div>
           <div className={styles.complianceBody}>
             <p className={styles.complianceTitle}>Provider Compliance</p>
             <p>
