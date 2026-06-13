@@ -14,7 +14,7 @@
   text-transform: uppercase;
   color: #1FD87A;
   font-weight: 600;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: 'Share Tech Mono', monospace;
   margin-bottom: 18px;
 }
 .heroTitle {
@@ -116,7 +116,7 @@
 .jumpIcon svg { width: 16px; height: 16px; }
 .jumpLabel { white-space: nowrap; }
 .jumpCount {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: 'Share Tech Mono', monospace;
   font-size: 11px;
   background: #f4f4ef;
   border: 1px solid #e8e8e3;
@@ -159,7 +159,7 @@
 .resultCount {
   font-size: 12px;
   color: #888;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: 'Share Tech Mono', monospace;
 }
 .noResults {
   text-align: center;
@@ -224,7 +224,7 @@
   max-width: 720px;
 }
 .catCount {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: 'Share Tech Mono', monospace;
   font-size: 10px;
   letter-spacing: 1.5px;
   text-transform: uppercase;
@@ -286,7 +286,7 @@
 }
 .logoImg { max-width: 28px; max-height: 28px; }
 .logoGlyph {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: 'Share Tech Mono', monospace;
   font-weight: 700;
   font-size: 16px;
   color: #1a1a1a;
@@ -307,7 +307,7 @@
   color: #888;
   text-transform: uppercase;
   letter-spacing: 1.5px;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: 'Share Tech Mono', monospace;
   white-space: nowrap;
 }
 .cardLine {
@@ -328,7 +328,7 @@
   margin-top: 2px;
 }
 .cardSetup {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: 'Share Tech Mono', monospace;
   font-size: 11px;
   font-weight: 500;
   color: #888;
@@ -381,7 +381,7 @@
   font-size: 13px;
   color: #888;
   margin-bottom: 24px;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: 'Share Tech Mono', monospace;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -410,7 +410,7 @@
 }
 .detailLogo img { max-width: 44px; max-height: 44px; }
 .detailLogo span {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: 'Share Tech Mono', monospace;
   font-weight: 700;
   font-size: 28px;
   color: #1a1a1a;
@@ -436,7 +436,7 @@
 .detailBadge {
   display: inline-block;
   font-size: 11px;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: 'Share Tech Mono', monospace;
   font-weight: 500;
   padding: 3px 10px;
   border-radius: 100px;
@@ -506,7 +506,7 @@
   margin: 0 0 4px;
   text-transform: uppercase;
   letter-spacing: 1.6px;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: 'Share Tech Mono', monospace;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -555,7 +555,7 @@
 }
 .runFirstToggle {
   flex-shrink: 0;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: 'Share Tech Mono', monospace;
   font-size: 11px;
   font-weight: 500;
   color: #0d8c4f;
@@ -584,7 +584,7 @@
   box-shadow: 0 1px 0 rgba(0, 0, 0, 0.02);
 }
 .wireFormatTitle {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: 'Share Tech Mono', monospace;
   font-size: 11px;
   letter-spacing: 1.5px;
   text-transform: uppercase;
@@ -677,7 +677,7 @@
   border-radius: 6px;
 }
 .wireFormatCode {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: 'Share Tech Mono', monospace;
   font-size: 12px;
   color: #0d8c4f;
 }
@@ -705,7 +705,7 @@
   margin-bottom: 24px;
 }
 .glossaryTitle {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: 'Share Tech Mono', monospace;
   font-size: 11px;
   letter-spacing: 1.5px;
   text-transform: uppercase;
@@ -803,7 +803,7 @@
   background: #fff;
   border: 1.5px solid #1FD87A;
   color: #0d8c4f;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: 'Share Tech Mono', monospace;
   font-size: 11px;
   font-weight: 700;
   display: flex;
@@ -850,7 +850,7 @@
 .runFirstItemOptional .runFirstStepTitle { color: #444; }
 .runFirstOptionalTag {
   display: inline-block;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: 'Share Tech Mono', monospace;
   font-size: 10px;
   font-weight: 600;
   letter-spacing: 1px;
@@ -880,7 +880,7 @@
   text-transform: uppercase;
   color: #1FD87A;
   font-weight: 600;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: 'Share Tech Mono', monospace;
   margin: 0 0 6px;
 }
 .sectionTitle {
@@ -942,7 +942,7 @@
 .codeBlockPath {
   font-size: 11px;
   color: #0d8c4f;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: 'Share Tech Mono', monospace;
   margin-bottom: 6px;
   display: block;
 }
@@ -952,7 +952,7 @@
   color: #e6e6e3 !important;
   border-radius: 10px;
   padding: 14px 56px 14px 16px;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: 'Share Tech Mono', monospace;
   font-size: 13px;
   line-height: 1.55;
   /* Critical: clip + scroll long shell lines INSIDE this element.
@@ -973,7 +973,7 @@
 }
 .codeBlockText {
   color: #e6e6e3;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: 'Share Tech Mono', monospace;
   font-size: 13px;
   line-height: 1.55;
   white-space: pre;
@@ -988,7 +988,7 @@
  * so the docs feel grounded in real artifacts. */
 .exampleOutputWrap { display: block; margin-top: 8px; }
 .exampleOutputLabel {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: 'Share Tech Mono', monospace;
   font-size: 10px;
   letter-spacing: 1.5px;
   text-transform: uppercase;
@@ -1012,7 +1012,7 @@
   color: #cbd5e1;
   border-radius: 10px;
   padding: 14px 16px;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: 'Share Tech Mono', monospace;
   font-size: 12px;
   line-height: 1.55;
   /* Same width guard as .codeBlock — keep horizontal scroll inside
@@ -1036,7 +1036,7 @@
   border-radius: 6px;
   padding: 4px 10px;
   font-size: 11px;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: 'Share Tech Mono', monospace;
   font-weight: 500;
   cursor: pointer;
   transition: background 0.15s, color 0.15s, border-color 0.15s;
@@ -1053,7 +1053,7 @@
   width: 100%;
   border-collapse: separate;
   border-spacing: 0;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: 'Share Tech Mono', monospace;
   font-size: 13px;
   background: #0e1116;
   color: #e6e6e3;
@@ -1082,7 +1082,7 @@
   font-family: inherit !important;
 }
 .envDetails {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: 'Share Tech Mono', monospace;
   font-size: 12px;
   color: #888;
 }
@@ -1126,7 +1126,7 @@
   background: #f4f4ef;
   border: 1px solid #e8e8e3;
   color: #1a1a1a;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: 'Share Tech Mono', monospace;
   font-size: 12px;
   padding: 4px 10px;
   border-radius: 100px;
@@ -1224,7 +1224,7 @@
   gap: 8px;
   text-transform: uppercase;
   letter-spacing: 1.5px;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: 'Share Tech Mono', monospace;
 }
 .agentBox h3::before {
   content: '⚙';
@@ -1247,7 +1247,7 @@
 .agentBox a {
   color: #0d8c4f;
   font-weight: 500;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: 'Share Tech Mono', monospace;
 }
 
 /* ====== Related row ====== */
@@ -1258,7 +1258,7 @@
 }
 .relatedRow a {
   font-size: 12px;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: 'Share Tech Mono', monospace;
   color: #1a1a1a;
   background: #fff;
   border: 1px solid #e8e8e3;
@@ -1354,4 +1354,460 @@
   .sections { padding: 0 16px; }
   .jumpNav { padding: 0 16px; }
   .searchRow { padding: 0 16px; }
+}
+
+
+/* ============================================================
+   ANTSEED BRAND PLATE OVERRIDE — integrations hub + detail pages
+   Content is unchanged; this layer only updates the visual system.
+   ============================================================ */
+.hero,
+.detailHeader {
+  position: relative;
+  text-align: center;
+  padding: clamp(72px, 10vw, 118px) 20px 36px;
+  max-width: 920px;
+  margin: 0 auto;
+}
+.hero::before,
+.detailHeader::before {
+  content: '';
+  position: absolute;
+  inset: 16px -18% auto;
+  height: 430px;
+  background: radial-gradient(circle at 50% 0%, rgba(31, 216, 122, .12), transparent 58%);
+  pointer-events: none;
+  z-index: -1;
+}
+.kicker,
+.catCount,
+.cardSetup,
+.breadcrumb,
+.detailBadge,
+.runFirstKicker,
+.wireFormatTitle,
+.wireFormatLabel,
+.glossaryTitle,
+.runFirstNum,
+.sectionEyebrow,
+.stepLabel,
+.codeBlockPath,
+.exampleOutputLabel,
+.copyBtn,
+.envTable,
+.modelChip {
+  font-family: var(--as-font-data);
+}
+.kicker,
+.sectionEyebrow {
+  display: inline-block;
+  font-size: 11px;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: var(--as-green);
+  font-weight: 700;
+  margin-bottom: 18px;
+}
+.heroTitle,
+.detailHeaderText h1,
+.catTitle,
+.sectionTitle,
+.runFirstStepTitle {
+  font-family: var(--as-font-display);
+  color: var(--as-text);
+  font-weight: 550;
+  letter-spacing: -0.014em;
+}
+.heroTitle,
+.detailHeaderText h1 {
+  font-size: clamp(40px, 5.6vw, 72px);
+  line-height: 1.03;
+  margin: 0 0 18px;
+  text-wrap: balance;
+}
+.heroSub,
+.noResults,
+.catTagline,
+.cardLine,
+.detailOneLiner,
+.description,
+.runFirstSub,
+.wireFormatBody,
+.wireFormatHint,
+.glossaryList,
+.runFirstHint,
+.stepNote,
+.bulletList,
+.modelNote,
+.guiBlock,
+.troubleshootList,
+.agentBox {
+  color: var(--as-text-2);
+  line-height: 1.65;
+}
+.heroSub { font-size: 16px; max-width: 760px; }
+.heroSub code,
+.runFirstSub code,
+.glossaryList code,
+.runFirstHint code,
+.stepNote code,
+.wireFormatCode,
+.description code {
+  color: #8fffc4;
+  background: rgba(31, 216, 122, .08);
+  border: 1px solid rgba(31, 216, 122, .18);
+  border-radius: 6px;
+  padding: 2px 6px;
+}
+.heroCta,
+.heroCtaGhost,
+.runFirstToggle,
+.copyBtn,
+.linkRow a,
+.relatedRow a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 42px;
+  border-radius: var(--as-radius-pill);
+  font-size: 13px;
+  font-weight: 700;
+  text-decoration: none !important;
+  transition: transform .15s ease, background .15s ease, border-color .15s ease, color .15s ease, box-shadow .15s ease;
+}
+.heroCta {
+  background: var(--as-green);
+  border: 1px solid var(--as-green);
+  color: #052012 !important;
+  padding: 0 22px;
+}
+.heroCta:hover { background: var(--as-green-bright); border-color: var(--as-green-bright); color: #052012 !important; transform: translateY(-1px); box-shadow: 0 10px 36px rgba(31,216,122,.25); }
+.heroCtaGhost,
+.runFirstToggle,
+.linkRow a,
+.relatedRow a {
+  background: transparent;
+  border: 1px solid var(--as-line-strong);
+  color: var(--as-text) !important;
+  padding: 0 20px;
+}
+.heroCtaGhost:hover,
+.runFirstToggle:hover,
+.linkRow a:hover,
+.relatedRow a:hover { border-color: rgba(31,216,122,.46); color: var(--as-green) !important; transform: translateY(-1px); }
+.heroCtaRow,
+.linkRow,
+.relatedRow { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+
+.jumpNav,
+.searchRow,
+.sections,
+.detailWrap,
+.bottomBlock {
+  max-width: 1200px;
+}
+.jumpNav { margin: 14px auto 0; padding: 0 20px; display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+.jumpLink,
+.card,
+.runFirst,
+.wireFormat,
+.glossary,
+.step,
+.envBlock,
+.guiBlock,
+.configList,
+.agentBox,
+.bottomBlock,
+.detailLogo,
+.logoWrap {
+  background: var(--as-soil-2);
+  border: 1px solid var(--as-line);
+  box-shadow: 0 18px 55px rgba(0,0,0,.18);
+}
+.jumpLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 8px 14px 8px 11px;
+  border-radius: 999px;
+  color: var(--as-text) !important;
+  text-decoration: none !important;
+  box-shadow: none;
+}
+.jumpLink:hover { border-color: rgba(31,216,122,.34); color: var(--as-green) !important; transform: translateY(-1px); }
+.jumpIcon,
+.catGlyph,
+.cardArrow { color: var(--as-green); }
+.jumpCount,
+.catCount,
+.cardSetup,
+.detailBadge,
+.modelChip {
+  color: var(--as-text-3);
+  background: rgba(255,255,255,.025);
+  border: 1px solid var(--as-line);
+  border-radius: 999px;
+}
+.searchRow { margin: 28px auto 8px; padding: 0 20px; }
+.search {
+  width: 100%;
+  font-family: var(--as-font-ui);
+  font-size: 14px;
+  padding: 13px 18px;
+  border: 1px solid var(--as-line-strong);
+  border-radius: 999px;
+  background: #070b09;
+  color: var(--as-text);
+  outline: none;
+}
+.search:focus { border-color: var(--as-green); box-shadow: 0 0 0 3px rgba(31,216,122,.12); }
+.search::placeholder { color: var(--as-text-3); }
+.resultCount { color: var(--as-text-3); font-family: var(--as-font-data); }
+.sections { margin: 30px auto 0; padding: 0 20px; }
+.catSection { margin: 0 0 58px; scroll-margin-top: 90px; }
+.catHeader { display: flex; align-items: flex-start; gap: 14px; margin-bottom: 18px; padding-bottom: 14px; border-bottom: 1px solid var(--as-line); }
+.catGlyph { width: 42px; height: 42px; border-radius: 12px; background: rgba(31,216,122,.08); border: 1px solid rgba(31,216,122,.18); display: flex; align-items: center; justify-content: center; flex-shrink: 0; margin-top: 2px; }
+.catTitleRow { display: flex; align-items: center; gap: 12px; margin: 0 0 4px; flex-wrap: wrap; }
+.catTitle { font-size: 25px; margin: 0; line-height: 1.2; }
+.catCount { font-size: 10px; letter-spacing: 1.5px; text-transform: uppercase; padding: 3px 10px; flex-shrink: 0; }
+.catGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; }
+.card {
+  border-radius: var(--as-radius);
+  padding: 18px 18px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  text-decoration: none !important;
+  color: inherit;
+  transition: transform .15s, border-color .15s, box-shadow .15s, background .15s;
+  min-height: 168px;
+}
+.card:hover { transform: translateY(-2px); border-color: rgba(31,216,122,.32); background: var(--as-soil-3); }
+.cardHead { display: flex; align-items: center; gap: 12px; }
+.logoWrap { width: 44px; height: 44px; border-radius: 12px; display: flex; align-items: center; justify-content: center; background: #070b09; box-shadow: none; flex-shrink: 0; }
+.logoImg { max-width: 28px; max-height: 28px; object-fit: contain; }
+.logoGlyph { color: var(--as-green); font-weight: 700; }
+.cardTitle { color: var(--as-text); margin: 0; font-size: 18px; font-weight: 600; }
+.cardCategory { color: var(--as-text-3); }
+.cardFooter { margin-top: auto; display: flex; align-items: center; gap: 8px; }
+.cardSetup { font-size: 10px; padding: 3px 9px; }
+.cardArrow { margin-left: auto; }
+.bottomBlock { margin: 24px auto 80px; padding: 32px; border-radius: 18px; text-align: center; }
+
+.detailWrap { margin: 0 auto; padding: 0 20px 90px; }
+.breadcrumb { display: flex; gap: 8px; align-items: center; color: var(--as-text-3); font-size: 12px; margin: 30px 0; }
+.breadcrumb a { color: var(--as-text-2); text-decoration: none; }
+.breadcrumb a:hover { color: var(--as-green); }
+.detailHeader { display: flex; text-align: left; gap: 22px; align-items: center; padding-top: 52px; }
+.detailLogo { width: 72px; height: 72px; border-radius: 18px; display: flex; align-items: center; justify-content: center; background: #070b09; flex-shrink: 0; }
+.detailOneLiner { font-size: 17px; }
+.detailBadgeRow { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.detailBadge { font-size: 10px; text-transform: uppercase; letter-spacing: 1.2px; padding: 5px 10px; }
+.detailBadgeGreen { color: var(--as-green); border-color: rgba(31,216,122,.25); }
+.description { max-width: 780px; margin: 0 auto 28px; font-size: 15px; }
+.runFirst,
+.wireFormat,
+.glossary,
+.agentBox,
+.bottomBlock { border-radius: 18px; }
+.runFirst { margin: 26px 0; padding: 22px; }
+.runFirstHeader { display: flex; justify-content: space-between; gap: 18px; align-items: center; }
+.runFirstKicker { color: var(--as-green); font-size: 11px; text-transform: uppercase; letter-spacing: 1.8px; margin: 0 0 4px; }
+.runFirstDot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--as-green); margin-right: 8px; box-shadow: 0 0 12px rgba(31,216,122,.65); }
+.runFirstRail,
+.stepList { list-style: none; padding: 0; margin: 24px 0 0; display: grid; gap: 14px; }
+.runFirstItem,
+.step { border-radius: var(--as-radius); padding: 18px; }
+.runFirstItem { display: grid; grid-template-columns: 34px minmax(0,1fr); gap: 14px; border: 1px solid var(--as-line); background: rgba(255,255,255,.015); }
+.runFirstNum { color: var(--as-green); font-weight: 700; }
+.runFirstStepTitle { margin: 0 0 6px; font-size: 18px; }
+.runFirstItemOptional { border-color: rgba(232,163,61,.2); }
+.runFirstOptionalTag { color: var(--as-clay); }
+.glossary,
+.wireFormat { padding: 22px; margin: 22px 0; }
+.glossaryTitle,
+.wireFormatTitle { color: var(--as-green); letter-spacing: 1.5px; text-transform: uppercase; font-size: 11px; }
+.wireFormatGrid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; margin-top: 16px; }
+.wireFormatRow { border: 1px solid var(--as-line); border-radius: 12px; padding: 12px; background: rgba(255,255,255,.014); }
+.wireFormatNative { color: var(--as-green); }
+.wireFormatWarn { color: var(--as-clay); }
+.section { margin: 52px 0; }
+.sectionTitle { font-size: clamp(28px, 3vw, 40px); margin: 0 0 20px; }
+.step { border: 1px solid var(--as-line); }
+.stepLabel { color: var(--as-green); font-size: 11px; letter-spacing: 1.5px; text-transform: uppercase; display: block; margin-bottom: 10px; }
+.bulletList { padding-left: 20px; }
+.codeBlockWrap,
+.exampleOutputWrap { margin: 12px 0; min-width: 0; }
+.codeBlockPath,
+.exampleOutputLabel { display: block; color: var(--as-text-3); font-size: 10px; letter-spacing: 1.2px; text-transform: uppercase; margin: 0 0 6px; }
+.codeBlock,
+.exampleOutput {
+  position: relative;
+  background: #070b09;
+  border: 1px solid var(--as-line-strong);
+  border-radius: 12px;
+  padding: 16px;
+  overflow-x: auto;
+}
+.codeBlockText { white-space: pre; color: #dff6e9; font-family: var(--as-font-data); font-size: 12px; line-height: 1.7; display: block; padding-right: 72px; }
+.copyBtn { position: absolute; top: 10px; right: 10px; min-height: 30px; padding: 0 12px; border: 1px solid rgba(31,216,122,.25); color: var(--as-green); background: rgba(31,216,122,.08); cursor: pointer; }
+.copied { color: #052012; background: var(--as-green); }
+.envBlock { border-radius: 14px; padding: 16px; }
+.envTable { width: 100%; font-size: 12px; }
+.envTable td { border-bottom: 1px solid var(--as-line); padding: 8px; color: var(--as-text-2); }
+.envDetails summary { color: var(--as-green); cursor: pointer; }
+.configList,
+.troubleshootList { border-radius: 14px; padding: 18px 22px; }
+.modelChips { display: flex; flex-wrap: wrap; gap: 8px; }
+.modelChip { padding: 5px 10px; font-size: 11px; }
+
+:global(html[data-theme='light']) .heroTitle,
+:global(html[data-theme='light']) .detailHeaderText h1,
+:global(html[data-theme='light']) .catTitle,
+:global(html[data-theme='light']) .cardTitle,
+:global(html[data-theme='light']) .sectionTitle,
+:global(html[data-theme='light']) .runFirstStepTitle { color: #0a0e14; }
+:global(html[data-theme='light']) .heroSub,
+:global(html[data-theme='light']) .catTagline,
+:global(html[data-theme='light']) .cardLine,
+:global(html[data-theme='light']) .detailOneLiner,
+:global(html[data-theme='light']) .description,
+:global(html[data-theme='light']) .runFirstSub,
+:global(html[data-theme='light']) .wireFormatBody,
+:global(html[data-theme='light']) .wireFormatHint,
+:global(html[data-theme='light']) .glossaryList,
+:global(html[data-theme='light']) .runFirstHint,
+:global(html[data-theme='light']) .stepNote,
+:global(html[data-theme='light']) .bulletList,
+:global(html[data-theme='light']) .modelNote,
+:global(html[data-theme='light']) .guiBlock,
+:global(html[data-theme='light']) .troubleshootList,
+:global(html[data-theme='light']) .agentBox { color: #53635a; }
+:global(html[data-theme='light']) .jumpLink,
+:global(html[data-theme='light']) .card,
+:global(html[data-theme='light']) .runFirst,
+:global(html[data-theme='light']) .wireFormat,
+:global(html[data-theme='light']) .glossary,
+:global(html[data-theme='light']) .step,
+:global(html[data-theme='light']) .envBlock,
+:global(html[data-theme='light']) .guiBlock,
+:global(html[data-theme='light']) .configList,
+:global(html[data-theme='light']) .agentBox,
+:global(html[data-theme='light']) .bottomBlock,
+:global(html[data-theme='light']) .detailLogo,
+:global(html[data-theme='light']) .logoWrap { background: rgba(255,255,255,.74); border-color: rgba(19,146,86,.16); box-shadow: 0 18px 55px rgba(10,14,20,.08); }
+:global(html[data-theme='light']) .card:hover { background: #fff; }
+:global(html[data-theme='light']) .search { background: #fff; color: #0a0e14; border-color: rgba(10,14,20,.12); }
+:global(html[data-theme='light']) .heroCta { background: var(--as-green-deep); border-color: var(--as-green-deep); color: #f7fff9 !important; }
+:global(html[data-theme='light']) .heroCtaGhost,
+:global(html[data-theme='light']) .runFirstToggle,
+:global(html[data-theme='light']) .linkRow a,
+:global(html[data-theme='light']) .relatedRow a { color: #0a0e14 !important; border-color: rgba(10,14,20,.14); background: rgba(255,255,255,.58); }
+:global(html[data-theme='light']) .codeBlock,
+:global(html[data-theme='light']) .exampleOutput { background: #0a0e14; border-color: rgba(10,14,20,.12); }
+:global(html[data-theme='light']) .codeBlockText { color: #dff6e9; }
+:global(html[data-theme='light']) .catHeader,
+:global(html[data-theme='light']) .envTable td { border-color: rgba(10,14,20,.08); }
+
+@media (max-width: 760px) {
+  .hero,
+  .detailHeader { padding: 58px 18px 34px; }
+  .heroTitle,
+  .detailHeaderText h1 { font-size: clamp(34px, 11vw, 50px); }
+  .heroCtaRow,
+  .linkRow,
+  .relatedRow { flex-direction: column; align-items: stretch; }
+  .heroCta,
+  .heroCtaGhost,
+  .linkRow a,
+  .relatedRow a { width: 100%; }
+  .catHeader,
+  .detailHeader,
+  .runFirstHeader { flex-direction: column; text-align: left; align-items: stretch; }
+  .catGrid { grid-template-columns: 1fr; }
+  .wireFormatGrid { grid-template-columns: 1fr; }
+  .runFirstItem { grid-template-columns: 1fr; }
+  .codeBlockText { font-size: 11px; padding-right: 0; padding-top: 32px; }
+  .copyBtn { top: 8px; right: 8px; }
+  .bottomBlock { padding: 24px; }
+}
+
+
+/* Light-mode contrast pass — no pale mint text on cream. */
+:global(html[data-theme='light']) .heroSub code,
+:global(html[data-theme='light']) .runFirstSub code,
+:global(html[data-theme='light']) .glossaryList code,
+:global(html[data-theme='light']) .runFirstHint code,
+:global(html[data-theme='light']) .stepNote code,
+:global(html[data-theme='light']) .wireFormatCode,
+:global(html[data-theme='light']) .description code {
+  color: #0b5c38;
+  background: rgba(19, 146, 86, 0.08);
+  border-color: rgba(19, 146, 86, 0.2);
+  text-shadow: none;
+}
+:global(html[data-theme='light']) .jumpLink {
+  color: #0a0e14 !important;
+  background: rgba(255, 255, 255, 0.92);
+  border-color: rgba(19, 146, 86, 0.22);
+  box-shadow: 0 14px 38px rgba(10, 14, 20, 0.08);
+}
+:global(html[data-theme='light']) .jumpLink:hover {
+  color: #0b5c38 !important;
+  border-color: rgba(19, 146, 86, 0.42);
+  background: #ffffff;
+}
+:global(html[data-theme='light']) .jumpIcon,
+:global(html[data-theme='light']) .catGlyph,
+:global(html[data-theme='light']) .cardArrow {
+  color: #139256;
+}
+:global(html[data-theme='light']) .jumpLabel {
+  color: #0a0e14;
+  opacity: 1;
+}
+:global(html[data-theme='light']) .jumpCount,
+:global(html[data-theme='light']) .catCount,
+:global(html[data-theme='light']) .cardSetup,
+:global(html[data-theme='light']) .detailBadge,
+:global(html[data-theme='light']) .modelChip {
+  color: #53635a;
+  background: #ffffff;
+  border-color: rgba(10, 14, 20, 0.1);
+}
+:global(html[data-theme='light']) .kicker,
+:global(html[data-theme='light']) .sectionEyebrow,
+:global(html[data-theme='light']) .runFirstKicker,
+:global(html[data-theme='light']) .glossaryTitle,
+:global(html[data-theme='light']) .wireFormatTitle,
+:global(html[data-theme='light']) .stepLabel,
+:global(html[data-theme='light']) .runFirstNum {
+  color: #139256;
+}
+:global(html[data-theme='light']) .search {
+  color: #0a0e14;
+  background: #ffffff;
+  border-color: rgba(10, 14, 20, 0.14);
+  box-shadow: 0 12px 32px rgba(10, 14, 20, 0.07);
+}
+:global(html[data-theme='light']) .search::placeholder {
+  color: #53635a;
+  opacity: 1;
+}
+:global(html[data-theme='light']) .heroCtaGhost,
+:global(html[data-theme='light']) .runFirstToggle,
+:global(html[data-theme='light']) .linkRow a,
+:global(html[data-theme='light']) .relatedRow a {
+  color: #0a0e14 !important;
+  border-color: rgba(10, 14, 20, 0.16);
+  background: #ffffff;
+}
+:global(html[data-theme='light']) .heroCtaGhost:hover,
+:global(html[data-theme='light']) .runFirstToggle:hover,
+:global(html[data-theme='light']) .linkRow a:hover,
+:global(html[data-theme='light']) .relatedRow a:hover {
+  color: #0b5c38 !important;
+  border-color: rgba(19, 146, 86, 0.42);
 }

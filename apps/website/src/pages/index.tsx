@@ -59,15 +59,17 @@ function LiveBar() {
 function AntGlyph({className}: {className?: string}) {
   return (
     <svg className={className} viewBox="0 0 24 32" fill="none" aria-hidden="true">
-      <g stroke="currentColor" strokeWidth="1.1" strokeLinecap="round" opacity=".7">
+      <g stroke="currentColor" strokeWidth="1.2" strokeLinecap="round">
         <path d="M10.6 12.2 L4 8.4" /><path d="M13.4 12.2 L20 8.4" />
         <path d="M10.4 15 L3 15.6" /><path d="M13.6 15 L21 15.6" />
         <path d="M10.6 17.8 L4.4 23.4" /><path d="M13.4 17.8 L19.6 23.4" />
-      </g>
-      <g stroke="currentColor" strokeWidth="1" strokeLinecap="round" opacity=".8">
         <path d="M10.9 6.4 L8.2 2.4" /><path d="M13.1 6.4 L15.8 2.4" />
       </g>
       <g fill="currentColor">
+        <circle cx="3.6" cy="8.2" r=".9" /><circle cx="20.4" cy="8.2" r=".9" />
+        <circle cx="2.6" cy="15.6" r=".9" /><circle cx="21.4" cy="15.6" r=".9" />
+        <circle cx="4.1" cy="23.7" r=".9" /><circle cx="19.9" cy="23.7" r=".9" />
+        <circle cx="8" cy="2.1" r=".9" /><circle cx="16" cy="2.1" r=".9" />
         <ellipse cx="12" cy="8.2" rx="2.5" ry="3" />
         <ellipse cx="12" cy="13.6" rx="2.1" ry="2.8" />
         <ellipse cx="12" cy="21.4" rx="3.3" ry="5" />
@@ -114,11 +116,24 @@ function PheromoneField() {
 
     type Ant = {x: number; y: number; a: number; v: number; wob: number; ph: number; s: number};
     type Pheromone = {x: number; y: number; life: number; max: number; r: number; pull: number; ring: boolean};
+    type Seed = {x: number; y: number; life: number; max: number; size: number; eaten: number};
     let ants: Ant[] = [];
     let pheromones: Pheromone[] = [];
+    let clickSeeds: Seed[] = [];
+
+    const isLightTheme = () => document.documentElement.getAttribute('data-theme') === 'light';
+    const trailFade = () => isLightTheme() ? 'rgba(245, 245, 240, 0.05)' : 'rgba(7, 11, 9, 0.038)';
+    const trailBase = () => isLightTheme() ? '#f5f5f0' : '#070b09';
+    const antLeg = () => isLightTheme() ? 'rgba(10, 14, 20, 0.72)' : 'rgba(140, 255, 196, 0.5)';
+    const antAntenna = () => isLightTheme() ? 'rgba(10, 14, 20, 0.82)' : 'rgba(140, 255, 196, 0.65)';
+    const antBody = () => isLightTheme() ? 'rgba(10, 14, 20, 0.94)' : 'rgba(160, 255, 205, 0.92)';
+    const pheromoneDot = () => isLightTheme() ? 'rgba(19, 146, 86, 0.38)' : 'rgba(31, 216, 122, 0.5)';
+    const pheromoneLink = (alpha: number) => isLightTheme() ? `rgba(19, 146, 86, ${Math.min(0.34, alpha * 1.8).toFixed(3)})` : `rgba(31, 216, 122, ${alpha.toFixed(3)})`;
+    const pheromoneRing = (alpha: number) => isLightTheme() ? `rgba(11, 92, 56, ${Math.min(0.5, alpha * 1.7).toFixed(3)})` : `rgba(31, 216, 122, ${alpha.toFixed(3)})`;
 
     const seed = () => {
-      const count = Math.max(12, Math.min(30, Math.round(w / 52)));
+      // Colony size reduced ~15% — calmer field, same stigmergy.
+      const count = Math.max(10, Math.min(25, Math.round(w / 61)));
       ants = Array.from({length: count}, () => ({
         x: Math.random() * w,
         y: Math.random() * h,
@@ -139,7 +154,7 @@ function PheromoneField() {
         cv.height = Math.round(h * dpr);
         cx.setTransform(dpr, 0, 0, dpr, 0, 0);
       }
-      tctx.fillStyle = '#070b09';
+      tctx.fillStyle = trailBase();
       tctx.fillRect(0, 0, w, h);
       seed();
     };
@@ -158,7 +173,7 @@ function PheromoneField() {
       ctx.rotate(ant.a + Math.PI / 2); // body drawn pointing up; -y = forward
       ctx.scale(ant.s, ant.s);
       // Legs — three pairs in an alternating tripod swing.
-      ctx.strokeStyle = 'rgba(140, 255, 196, 0.5)';
+      ctx.strokeStyle = antLeg();
       ctx.lineWidth = 0.9;
       for (let side = -1; side <= 1; side += 2) {
         for (let i = 0; i < 3; i++) {
@@ -171,12 +186,12 @@ function PheromoneField() {
         }
       }
       // Antennae.
-      ctx.strokeStyle = 'rgba(140, 255, 196, 0.65)';
+      ctx.strokeStyle = antAntenna();
       ctx.lineWidth = 0.8;
       ctx.beginPath(); ctx.moveTo(-0.8, -4.6); ctx.lineTo(-2.8, -7.6); ctx.stroke();
       ctx.beginPath(); ctx.moveTo(0.8, -4.6); ctx.lineTo(2.8, -7.6); ctx.stroke();
       // Body — head, thorax, abdomen.
-      ctx.fillStyle = 'rgba(160, 255, 205, 0.92)';
+      ctx.fillStyle = antBody();
       ctx.beginPath(); ctx.ellipse(0, -3.6, 1.4, 1.8, 0, 0, Math.PI * 2); ctx.fill();
       ctx.beginPath(); ctx.ellipse(0, -0.4, 1.2, 1.7, 0, 0, Math.PI * 2); ctx.fill();
       ctx.beginPath(); ctx.ellipse(0, 3.4, 1.9, 2.9, 0, 0, Math.PI * 2); ctx.fill();
@@ -187,10 +202,11 @@ function PheromoneField() {
 
     const step = () => {
       // Trail layer fades slowly — this is what leaves the pheromone smear.
-      tctx.fillStyle = 'rgba(7, 11, 9, 0.038)';
+      tctx.fillStyle = trailFade();
       tctx.fillRect(0, 0, w, h);
 
       pheromones = pheromones.filter((p) => --p.life > 0);
+      clickSeeds = clickSeeds.filter((s) => --s.life > 0 && s.eaten < 1);
 
       for (const ant of ants) {
         // Steer toward live pheromone within reach.
@@ -202,6 +218,19 @@ function PheromoneField() {
             ant.a += angTo(ant.a, Math.atan2(dy, dx)) * p.pull * (p.life / p.max);
           }
         }
+        // Clicks drop edible seeds; nearby ants swarm, then consume them.
+        for (const s of clickSeeds) {
+          const dx = s.x - ant.x;
+          const dy = s.y - ant.y;
+          const d2 = dx * dx + dy * dy;
+          if (d2 < 290 * 290 && d2 > 16) {
+            ant.a += angTo(ant.a, Math.atan2(dy, dx)) * 0.18 * (s.life / s.max) * (1 - s.eaten);
+          }
+          if (d2 < 42) {
+            s.eaten = Math.min(1, s.eaten + 0.08);
+            s.life = Math.min(s.life, 34);
+          }
+        }
         ant.a += (Math.random() - 0.5) * 0.26 * ant.wob;
         ant.x += Math.cos(ant.a) * ant.v;
         ant.y += Math.sin(ant.a) * ant.v;
@@ -211,7 +240,7 @@ function PheromoneField() {
         if (ant.y < -12) ant.y = h + 12;
         if (ant.y > h + 12) ant.y = -12;
         // Pheromone dot left behind.
-        tctx.fillStyle = 'rgba(31, 216, 122, 0.5)';
+        tctx.fillStyle = pheromoneDot();
         tctx.beginPath();
         tctx.arc(ant.x, ant.y, 1.1, 0, Math.PI * 2);
         tctx.fill();
@@ -225,7 +254,7 @@ function PheromoneField() {
           const d2 = dx * dx + dy * dy;
           if (d2 < LINK * LINK) {
             const t = 1 - Math.sqrt(d2) / LINK;
-            tctx.strokeStyle = `rgba(31, 216, 122, ${(t * 0.18).toFixed(3)})`;
+            tctx.strokeStyle = pheromoneLink(t * 0.18);
             tctx.lineWidth = 1;
             tctx.beginPath();
             tctx.moveTo(ants[i].x, ants[i].y);
@@ -235,12 +264,24 @@ function PheromoneField() {
         }
       }
 
-      // Crisp layer: click rings + the ants themselves.
+      // Crisp layer: edible click seeds, click rings + the ants themselves.
       actx.clearRect(0, 0, w, h);
+      for (const s of clickSeeds) {
+        const age = 1 - s.life / s.max;
+        const r = s.size * (1 - s.eaten * 0.65) * (0.9 + Math.sin(age * Math.PI * 6) * 0.12);
+        const alpha = Math.max(0, (s.life / s.max) * (1 - s.eaten));
+        actx.fillStyle = `rgba(232, 163, 61, ${(0.9 * alpha).toFixed(3)})`;
+        actx.shadowColor = 'rgba(232, 163, 61, 0.75)';
+        actx.shadowBlur = 12 * alpha;
+        actx.beginPath();
+        actx.ellipse(s.x, s.y, r * 1.15, r * 0.85, age * Math.PI, 0, Math.PI * 2);
+        actx.fill();
+        actx.shadowBlur = 0;
+      }
       for (const p of pheromones) {
         if (!p.ring) continue;
         const k = 1 - p.life / p.max;
-        actx.strokeStyle = `rgba(31, 216, 122, ${(0.32 * (1 - k)).toFixed(3)})`;
+        actx.strokeStyle = pheromoneRing(0.32 * (1 - k));
         actx.lineWidth = 1;
         actx.beginPath();
         actx.arc(p.x, p.y, 14 + k * p.r, 0, Math.PI * 2);
@@ -283,6 +324,19 @@ function PheromoneField() {
     const onClick = (e: MouseEvent) => {
       const {x, y} = localXY(e);
       pheromones.push({x, y, life: 220, max: 220, r: 300, pull: 0.12, ring: true});
+      for (let i = 0; i < 8; i++) {
+        const a = Math.random() * Math.PI * 2;
+        const d = 4 + Math.random() * 22;
+        clickSeeds.push({
+          x: x + Math.cos(a) * d,
+          y: y + Math.sin(a) * d,
+          life: 260 + Math.random() * 80,
+          max: 320,
+          size: 2.1 + Math.random() * 1.8,
+          eaten: 0,
+        });
+      }
+      if (clickSeeds.length > 52) clickSeeds.splice(0, clickSeeds.length - 52);
     };
 
     const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -405,31 +459,82 @@ function RequestTrace() {
 }
 
 /* ============================================================
+   DEPTH RAIL — the page is a descent into the colony.
+   A fixed gauge on the right edge tracks how deep you've
+   scrolled into the nest, an ant marking your position.
+   ============================================================ */
+function DepthRail() {
+  const [p, setP] = useState(0);
+  useEffect(() => {
+    let raf = 0;
+    const update = () => {
+      raf = 0;
+      const d = document.documentElement;
+      const max = d.scrollHeight - window.innerHeight;
+      setP(max > 0 ? Math.min(1, window.scrollY / max) : 0);
+    };
+    const onScroll = () => {
+      if (!raf) raf = requestAnimationFrame(update);
+    };
+    update();
+    window.addEventListener('scroll', onScroll, {passive: true});
+    return () => {
+      if (raf) cancelAnimationFrame(raf);
+      window.removeEventListener('scroll', onScroll);
+    };
+  }, []);
+  return (
+    <div className={styles.depthRail} aria-hidden="true">
+      <span className={styles.depthLabel}>surface</span>
+      <div className={styles.depthTrack}>
+        <div className={styles.depthFill} style={{transform: `scaleY(${p})`}} />
+        <span className={styles.depthAnt} style={{top: `${p * 100}%`}}><AntGlyph /></span>
+      </div>
+      <span className={styles.depthLabel}>{(p * 14).toFixed(1)}m ↓</span>
+    </div>
+  );
+}
+
+/* ============================================================
+   PHEROMONE TRAIL — brand divider between sections.
+   A marching dotted line led by a single worker ant.
+   ============================================================ */
+function Trail() {
+  return (
+    <div className={styles.trail} aria-hidden="true">
+      <span className={styles.trailNode} />
+      <span className={styles.trailNode} />
+      <span className={styles.trailNode} />
+      <span className={styles.trailNode} />
+    </div>
+  );
+}
+
+/* ============================================================
    TELEMETRY BAND (marquee)
    ============================================================ */
 const BAND_MODELS: [string, string][] = [
-  ['anthropic.png', 'Claude'], ['openai.png', 'GPT'], ['google.png', 'Gemini'],
-  ['deepseek.png', 'DeepSeek'], ['meta.png', 'Llama'], ['qwen.png', 'Qwen'],
-  ['mistral.png', 'Mistral'], ['moonshot.png', 'Kimi'], ['zhipu.png', 'GLM'],
+  ['anthropic.png', 'Anthropic'], ['openai.png', 'OpenAI'], ['google.png', 'Google'],
+  ['deepseek.png', 'DeepSeek'], ['meta.png', 'Meta'], ['qwen.png', 'Qwen'],
+  ['mistral.png', 'Mistral'], ['moonshot.png', 'Moonshot'], ['zhipu.png', 'Zhipu'],
+  ['minimax.png', 'MiniMax'], ['cohere.png', 'Cohere'], ['nousresearch.svg', 'Nous Research'],
 ];
 
 function TelemetryBand() {
   const items = (
     <>
       {BAND_MODELS.map(([logo, name], i) => (
-        <span className={styles.bandModel} key={`${name}-${i}`}>
-          <img src={`/logos/${logo}`} alt="" loading="lazy" />{name}
+        <span className={styles.bandModel} key={`${name}-${i}`} title={name}>
+          <img src={`/logos/${logo}`} alt={name} loading="lazy" />
+          <span className={styles.bandName}>{name}</span>
         </span>
       ))}
-      <span className={styles.bandNote}>usdc settlement on base</span>
-      <span className={styles.bandNote}>no account · no api key</span>
-      <span className={styles.bandNote}>peer-to-peer transport</span>
     </>
   );
   return (
     <div className={styles.band} aria-label="Models available on the network">
       <div className={styles.bandTrack}>
-        {items}{items}{items}
+        {items}{items}
       </div>
     </div>
   );
@@ -480,7 +585,7 @@ function FAQSection() {
   return (
     <section className={styles.section} data-reveal>
       <header className={styles.sectionHead}>
-        <span className={styles.sectionIndex}>06 / questions</span>
+        <span className={styles.ghostNum} aria-hidden="true">06</span>
         <h2 className={styles.sectionTitle}>Fair questions.</h2>
       </header>
       <div className={styles.faqList}>
@@ -553,16 +658,17 @@ export default function Home(): JSX.Element {
         <script type="application/ld+json">{JSON.stringify(faqLd)}</script>
       </Head>
 
+      <DepthRail />
+
       {/* ===== HERO ===== */}
       <header className={styles.hero}>
         <PheromoneField />
         <div className={styles.heroGrid}>
           <div className={styles.heroCopy}>
-            <p className={styles.heroKicker}>⏚ a peer-to-peer ai network</p>
             <h1 className={styles.heroTitle}>The <em>open market</em> for AI&nbsp;inference.</h1>
             <p className={styles.heroSub}>
               Anyone can sell intelligence. Anyone can buy it. Requests travel
-              peer-to-peer, payments settle on-chain in USDC, and reputation is
+              peer-to-peer, payments settle on-chain in <span className={styles.clay}>USDC</span>, and reputation is
               verifiable. No gatekeepers. No accounts. No one in the middle.
             </p>
             <div className={styles.heroCtas}>
@@ -576,7 +682,7 @@ export default function Home(): JSX.Element {
           </div>
           <div className={styles.heroSide}>
             <RequestTrace />
-            <p className={styles.heroHint}>⌖ click the field — drop pheromone, the colony responds</p>
+            <p className={styles.heroHint}>⌖ click the field — drop seeds, the colony responds</p>
           </div>
         </div>
       </header>
@@ -586,7 +692,7 @@ export default function Home(): JSX.Element {
       {/* ===== 01 / PROTOCOL ===== */}
       <section className={styles.section} data-reveal>
         <header className={styles.sectionHead}>
-          <span className={styles.sectionIndex}>01 / protocol</span>
+          <span className={styles.ghostNum} aria-hidden="true">01</span>
           <h2 className={styles.sectionTitle}>How a request travels.</h2>
           <p className={styles.sectionLead}>
             The colony doesn&apos;t have a manager. Neither does the network. Four
@@ -595,6 +701,10 @@ export default function Home(): JSX.Element {
         </header>
         <div className={styles.journey}>
           <div className={styles.journeyRail} aria-hidden="true">
+            <span className={styles.journeyNode} />
+            <span className={styles.journeyNode} />
+            <span className={styles.journeyNode} />
+            <span className={styles.journeyNode} />
             <span className={styles.journeyWalker}>
               <AntGlyph className={styles.journeyAnt} />
               <span className={styles.journeySeed} />
@@ -613,10 +723,11 @@ export default function Home(): JSX.Element {
         </div>
       </section>
 
+      <Trail />
+
       {/* ===== 02 / CHAT ===== */}
       <section className={`${styles.section} ${styles.split}`} data-reveal>
         <div className={styles.splitCopy}>
-          <span className={styles.sectionIndex}>02 / chat</span>
           <h2 className={styles.sectionTitle}>Open the app. Skip&nbsp;the&nbsp;account.</h2>
           <p className={styles.sectionLead}>
             AntStation is the desktop app for the open model market. Pick a
@@ -657,7 +768,6 @@ export default function Home(): JSX.Element {
       {/* ===== 03 / BUILD ===== */}
       <section className={`${styles.section} ${styles.split} ${styles.splitReverse}`} data-reveal>
         <div className={styles.splitCopy}>
-          <span className={styles.sectionIndex}>03 / build</span>
           <h2 className={styles.sectionTitle}>Point your tools at&nbsp;localhost.</h2>
           <p className={styles.sectionLead}>
             AntSeed exposes OpenAI and Anthropic-compatible APIs at{' '}
@@ -702,10 +812,12 @@ export default function Home(): JSX.Element {
         </div>
       </section>
 
+      <Trail />
+
       {/* ===== 04 / SUPPLY ===== */}
       <section className={styles.section} data-reveal>
         <header className={styles.sectionHead}>
-          <span className={styles.sectionIndex}>04 / supply</span>
+          <span className={styles.ghostNum} aria-hidden="true">04</span>
           <h2 className={styles.sectionTitle}>Anyone can sell intelligence.</h2>
           <p className={styles.sectionLead}>
             GPUs, an API, a router, or a specialist agent — stake your claim,
@@ -731,7 +843,7 @@ export default function Home(): JSX.Element {
       {/* ===== 05 / STANCE ===== */}
       <section className={styles.section} data-reveal>
         <header className={styles.sectionHead}>
-          <span className={styles.sectionIndex}>05 / stance</span>
+          <span className={styles.ghostNum} aria-hidden="true">05</span>
           <h2 className={styles.sectionTitle}>No gatekeepers. <em>Structurally.</em></h2>
           <p className={styles.sectionLead}>
             Not a policy promise — an architecture. There is no position in the
@@ -753,23 +865,25 @@ export default function Home(): JSX.Element {
         </div>
       </section>
 
+      <Trail />
+
       {/* ===== ANTS BAND ===== */}
       <section className={styles.antsBand} data-reveal>
         <div className={styles.antsOrb}>
-          <img src="/logos/antseed-mark.svg" alt="ANTS" />
+          <img src="/logos/antseed-mark-clay.svg" alt="ANTS" />
           <span className={styles.orbAnt} aria-hidden="true"><AntGlyph /></span>
           <span className={`${styles.orbAnt} ${styles.orbAntTwo}`} aria-hidden="true"><AntGlyph /></span>
         </div>
         <div className={styles.antsCopy}>
-          <span className={styles.sectionIndex}>network utility</span>
-          <h2>$ANTS will power Subscription Pools, reputation and more.</h2>
+          <h2><span className={styles.clayWord}>$ANTS</span> will power reputation and much more. All fees go to <span className={styles.clayWord}>buy and burn</span>.</h2>
           <p>
             As AntSeed grows from individual requests to recurring agent
             workloads, ANTS becomes the coordination layer for access,
-            incentives, and subscription pool utility.
+            incentives, and reputation — with network fees flowing
+            into buy and burn.
           </p>
         </div>
-        <Link to="/ants-token" className={styles.btnSolid}>Explore ANTS →</Link>
+        <Link to="/ants-token" className={styles.btnClay}>Explore ANTS →</Link>
       </section>
 
       {/* ===== FAQ ===== */}
