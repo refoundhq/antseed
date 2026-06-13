@@ -1,6 +1,6 @@
 import { createRoot } from 'react-dom/client';
 import { WagmiProvider } from 'wagmi';
-import { RainbowKitProvider, lightTheme } from '@rainbow-me/rainbowkit';
+import { RainbowKitProvider, darkTheme } from '@rainbow-me/rainbowkit';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { wagmiConfig } from './wagmi-config';
 import { App } from './App';
@@ -25,9 +25,9 @@ createRoot(rootEl).render(
   <WagmiProvider config={wagmiConfig}>
     <QueryClientProvider client={queryClient}>
       <RainbowKitProvider
-        theme={lightTheme({
-          accentColor: '#1FD87A',
-          accentColorForeground: '#ffffff',
+        theme={darkTheme({
+          accentColor: '#e8a33d',
+          accentColorForeground: '#0a0e14',
           borderRadius: 'large',
           fontStack: 'system',
         })}
