@@ -73,12 +73,18 @@ function hasUnsafeShellComposition(command: string): boolean {
     || /[;&]/.test(command);
 }
 
+// Several allowlisted commands are general-purpose interpreters or have
+// file-writing flags, so the first-word match alone is not sufficient. These
+// guards reject intra-command escape forms that would otherwise smuggle a
+// silent `bash:read` auto-allow (awk `system()`/`getline`, sed `e` flag/`e`
+// command/`-f` script-from-file, find `-fprint*`/`-fls` arbitrary file write).
 function isReadOnlySegment(segment: string): boolean {
   const word = firstShellWord(segment);
   return READ_ONLY_SHELL_COMMANDS.has(word)
     && !hasShellWriteOperator(segment)
-    && !/\bfind\b[^\n]*(?:\s-delete|\s-exec\s+(?:rm|mv|cp|chmod|chown|sh|bash)\b)/.test(segment)
-    && !/\bsed\b[^\n]*\s-i(?:\s|$)/.test(segment);
+    && !/\bfind\b[^\n]*(?:\s-delete|\s-exec\s+(?:rm|mv|cp|chmod|chown|sh|bash)\b|\s-fprint(?:f|0)?\b|\s-fls\b)/.test(segment)
+    && !/\bsed\b[^\n]*\s(?:-i(?:\s|$)|-f\s|['"][^'"]*(?:\/[gipm0-9]*e[gipm0-9]*['"\s]|[0-9$~!,]+\s*!?e[\s'"]))/.test(segment)
+    && !/\bawk\b[^\n]*(?:\bsystem\s*\(|\bgetline\b|\{[^}]*(?:\|\s*["']|["']\s*\|))/.test(segment);
 }
 
 function isReadOnlyShellCommand(command: string): boolean {
