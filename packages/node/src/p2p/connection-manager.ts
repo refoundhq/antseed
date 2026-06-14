@@ -7,6 +7,7 @@ import type {
 } from "node-datachannel";
 import { type PeerId } from "../types/peer.js";
 import { ConnectionState, type ConnectionConfig } from "../types/connection.js";
+import { CONNECTION_CAPABILITY_RESPONSE_AUTH_V1 } from "../types/protocol.js";
 import { type IceConfig, getDefaultIceConfig } from "./ice-config.js";
 import type { Wallet } from "ethers";
 import {
@@ -39,10 +40,12 @@ type InitialWireMessage =
   | {
       type: "intro";
       auth: ConnectionAuthEnvelope;
+      capabilities?: string[];
     }
   | {
       type: "hello";
       auth: ConnectionAuthEnvelope;
+      capabilities?: string[];
     };
 
 type SignalingMessage =
@@ -62,6 +65,7 @@ const LINE_SEPARATOR = "\n";
 const INITIAL_LINE_TIMEOUT_MS = 10_000;
 const MAX_INITIAL_LINE_BYTES = 8 * 1024;
 const TCP_KEEPALIVE_INITIAL_DELAY_MS = 10_000;
+const LOCAL_CONNECTION_CAPABILITIES = [CONNECTION_CAPABILITY_RESPONSE_AUTH_V1] as const;
 
 /** Represents a single P2P connection. */
 export class PeerConnection extends EventEmitter {
@@ -74,6 +78,7 @@ export class PeerConnection extends EventEmitter {
   private _dataChannel: NativeDataChannel | null = null;
   private _rawSocket: Socket | null = null;
   private _signalingSocket: Socket | null = null;
+  private _remoteCapabilities = new Set<string>();
 
   constructor(config: ConnectionConfig) {
     super();
@@ -84,6 +89,14 @@ export class PeerConnection extends EventEmitter {
 
   get state(): ConnectionState {
     return this._state;
+  }
+
+  setRemoteCapabilities(capabilities: Iterable<string>): void {
+    this._remoteCapabilities = new Set(capabilities);
+  }
+
+  hasRemoteCapability(capability: string): boolean {
+    return this._remoteCapabilities.has(capability);
   }
 
   attachRtcPeer(rtc: NativeRtcPeerConnection): void {
@@ -261,6 +274,18 @@ export class PeerConnection extends EventEmitter {
       this.emit("error", err);
     }
   }
+}
+
+function normalizeCapabilities(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const capabilities: string[] = [];
+  for (const item of value) {
+    if (typeof item !== "string" || item.length === 0 || item.length > 128) {
+      continue;
+    }
+    capabilities.push(item);
+  }
+  return capabilities;
 }
 
 /** Manages all peer connections and optional inbound listening. */
@@ -498,6 +523,7 @@ export class ConnectionManager extends EventEmitter {
           this._localPeerId!,
           this._localWallet!,
         ),
+        capabilities: [...LOCAL_CONNECTION_CAPABILITIES],
       });
 
       rtc = this._createRtcPeer(config.remotePeerId);
@@ -538,6 +564,7 @@ export class ConnectionManager extends EventEmitter {
           this._localPeerId!,
           this._localWallet!,
         ),
+        capabilities: [...LOCAL_CONNECTION_CAPABILITIES],
       });
       conn.attachRawSocket(socket);
     });
@@ -608,13 +635,15 @@ export class ConnectionManager extends EventEmitter {
         return;
       }
 
+      const remoteCapabilities = normalizeCapabilities(intro.capabilities);
+
       if (intro.type === "intro") {
-        this._acceptTcpInbound(socket, verified.peerId, remaining);
+        this._acceptTcpInbound(socket, verified.peerId, remaining, remoteCapabilities);
         return;
       }
 
       if (intro.type === "hello") {
-        this._acceptWebRtcInbound(socket, verified.peerId, remaining.toString("utf8"));
+        this._acceptWebRtcInbound(socket, verified.peerId, remaining.toString("utf8"), remoteCapabilities);
         return;
       }
 
@@ -691,7 +720,12 @@ export class ConnectionManager extends EventEmitter {
     );
   }
 
-  private _acceptTcpInbound(socket: Socket, remotePeerId: PeerId, remainingData: Buffer): void {
+  private _acceptTcpInbound(
+    socket: Socket,
+    remotePeerId: PeerId,
+    remainingData: Buffer,
+    remoteCapabilities: string[],
+  ): void {
     const existing = this._connections.get(remotePeerId);
     if (existing && existing.state !== ConnectionState.Closed && existing.state !== ConnectionState.Failed) {
       // Replace stale/ghost connections from the same peer instead of rejecting
@@ -703,6 +737,7 @@ export class ConnectionManager extends EventEmitter {
       remotePeerId,
       isInitiator: false,
     });
+    conn.setRemoteCapabilities(remoteCapabilities);
     this._registerConnection(remotePeerId, conn);
     conn.attachRawSocket(
       socket,
@@ -711,7 +746,12 @@ export class ConnectionManager extends EventEmitter {
     this.emit("connection", conn);
   }
 
-  private _acceptWebRtcInbound(socket: Socket, remotePeerId: PeerId, initialSignalingBuffer: string): void {
+  private _acceptWebRtcInbound(
+    socket: Socket,
+    remotePeerId: PeerId,
+    initialSignalingBuffer: string,
+    remoteCapabilities: string[],
+  ): void {
     const existing = this._connections.get(remotePeerId);
     if (existing && existing.state !== ConnectionState.Closed && existing.state !== ConnectionState.Failed) {
       // Replace stale/ghost connections from the same peer instead of rejecting
@@ -723,6 +763,7 @@ export class ConnectionManager extends EventEmitter {
       remotePeerId,
       isInitiator: false,
     });
+    conn.setRemoteCapabilities(remoteCapabilities);
     conn.attachSignalingSocket(socket);
     this._registerConnection(remotePeerId, conn);
 

@@ -32,14 +32,6 @@ export function encodeFrame(msg: FramedMessage): Uint8Array {
   return frame;
 }
 
-const VALID_MESSAGE_TYPES = new Set<number>(
-  Object.values(MessageType).filter((v): v is number => typeof v === "number"),
-);
-
-function isValidMessageType(value: number): boolean {
-  return VALID_MESSAGE_TYPES.has(value);
-}
-
 /**
  * Decode a single FramedMessage from a binary buffer.
  * Returns the message and the number of bytes consumed.
@@ -53,11 +45,7 @@ export function decodeFrame(
   }
 
   const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
-  const rawType = view.getUint8(0);
-  if (!isValidMessageType(rawType)) {
-    throw new Error(`Invalid message type: 0x${rawType.toString(16).padStart(2, "0")}`);
-  }
-  const type = rawType as MessageType;
+  const type = view.getUint8(0);
   const messageId = view.getUint32(1);
   const payloadLength = view.getUint32(5);
 

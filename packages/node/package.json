@@ -33,6 +33,10 @@
       "import": "./dist/payments/index.js",
       "types": "./dist/payments/index.d.ts"
     },
+    "./verification": {
+      "import": "./dist/verification/index.js",
+      "types": "./dist/verification/index.d.ts"
+    },
     "./types": {
       "import": "./dist/types/index.js",
       "types": "./dist/types/index.d.ts"

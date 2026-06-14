@@ -44,6 +44,8 @@ import {
 import { HttpMetadataResolver } from "./discovery/http-metadata-resolver.js";
 import { ProxyMux } from "./proxy/proxy-mux.js";
 import { PaymentMux } from "./p2p/payment-mux.js";
+import { VerificationMux } from "./verification/verification-mux.js";
+import { VerificationStorage } from "./verification/storage.js";
 import { FrameDecoder, encodeFrame } from "./p2p/message-protocol.js";
 import { KeepaliveManager, buildPongPayload } from "./p2p/keepalive.js";
 import { MessageType } from "./types/protocol.js";
@@ -232,6 +234,7 @@ export class AntseedNode extends EventEmitter {
   private _sellerAddressResolver: SellerAddressResolver | null = null;
   private _identityClient: IdentityClient | null = null;
   private _paymentMuxes = new Map<PeerId, PaymentMux>();
+  private _verificationMuxes = new Map<PeerId, VerificationMux>();
   /** Seller-side request handler (provider matching, execution, load tracking). */
   private _sellerHandler: SellerRequestHandler | null = null;
   /** Buyer-side payment manager (initialized when buyer has payment config). */
@@ -244,6 +247,8 @@ export class AntseedNode extends EventEmitter {
   private _sellerPaymentManager: SellerPaymentManager | null = null;
   /** Shared channel store for payment persistence. */
   private _channelStore: ChannelStore | null = null;
+  /** Buyer-side response authentication storage. */
+  private _verificationStorage: VerificationStorage | null = null;
   /** Periodic timeout checker interval. */
   private _timeoutCheckerInterval: ReturnType<typeof setInterval> | null = null;
   /** Block cursor for CloseRequested event polling. */
@@ -403,6 +408,7 @@ export class AntseedNode extends EventEmitter {
     // Close all proxy muxes
     this._muxes.clear();
     this._paymentMuxes.clear();
+    this._verificationMuxes.clear();
     this._decoders.clear();
 
     // Close all connections
@@ -433,6 +439,15 @@ export class AntseedNode extends EventEmitter {
         // ignore close errors
       }
       this._metering = null;
+    }
+
+    if (this._verificationStorage) {
+      try {
+        this._verificationStorage.close();
+      } catch {
+        // ignore close errors
+      }
+      this._verificationStorage = null;
     }
 
     if (this._timeoutCheckerInterval) {
@@ -971,6 +986,7 @@ export class AntseedNode extends EventEmitter {
       }
       const proxyMux = this._muxes.get(peerId);
       const paymentMux = this._paymentMuxes.get(peerId);
+      const verificationMux = this._verificationMuxes.get(peerId);
       for (const frame of frames) {
         // Keepalive: respond to Ping, dispatch Pong to manager
         if (frame.type === MessageType.Ping) {
@@ -991,6 +1007,11 @@ export class AntseedNode extends EventEmitter {
           paymentMux.handleFrame(frame).catch((err) => {
             const message = err instanceof Error ? err.message : String(err);
             debugWarn(`[Node] Failed to handle payment frame from ${peerId.slice(0, 12)}...: ${message}`);
+          });
+        } else if (verificationMux && VerificationMux.isVerificationMessage(frame.type)) {
+          verificationMux.handleFrame(frame).catch((err) => {
+            const message = err instanceof Error ? err.message : String(err);
+            debugWarn(`[Node] Failed to handle verification frame from ${peerId.slice(0, 12)}...: ${message}`);
           });
         } else if (proxyMux) {
           proxyMux.handleFrame(frame).catch((err) => {
@@ -1190,6 +1211,7 @@ export class AntseedNode extends EventEmitter {
 
     // Create seller request handler
     this._sellerHandler = new SellerRequestHandler({
+      identity,
       providers: this._providers,
       sellerPaymentManager: this._sellerPaymentManager,
       sessionTracker: this._sessionTracker,
@@ -1216,6 +1238,7 @@ export class AntseedNode extends EventEmitter {
     debugLog(`[Node] Starting buyer — DHT port=${dhtPort}`);
 
     const dataDir = this._config.dataDir ?? join(homedir(), ".antseed");
+    this._initializeVerificationStorage(dataDir);
     await this._initializePayments(dataDir);
 
     // Start DHT with ephemeral port
@@ -1299,9 +1322,12 @@ export class AntseedNode extends EventEmitter {
         maxStreamDurationMs: this._config.maxStreamDurationMs,
       },
       {
+        localPeerId: identity.peerId,
         negotiator: this._buyerNegotiator,
+        verificationStorage: this._verificationStorage,
         getConnection: (peer) => this._getOrCreateConnection(peer),
         getMux: (peerId, conn) => this._getOrCreateMux(peerId, conn),
+        getVerificationMux: (peerId, conn) => this._getOrCreateVerificationMux(peerId, conn),
         registerPaymentMux: (peerId, pmux) => this._paymentMuxes.set(peerId, pmux),
       },
     );
@@ -1315,6 +1341,7 @@ export class AntseedNode extends EventEmitter {
 
     // Create PaymentMux alongside ProxyMux (seller-side)
     const paymentMux = new PaymentMux(conn);
+    const verificationMux = new VerificationMux(conn);
     if (this._sellerPaymentManager) {
       const spm = this._sellerPaymentManager;
       paymentMux.onSpendingAuth((payload) => {
@@ -1335,8 +1362,9 @@ export class AntseedNode extends EventEmitter {
       });
     }
     this._paymentMuxes.set(buyerPeerId, paymentMux);
+    this._verificationMuxes.set(buyerPeerId, verificationMux);
 
-    const { mux } = this._sellerHandler!.handleConnection(conn, buyerPeerId, paymentMux);
+    const { mux } = this._sellerHandler!.handleConnection(conn, buyerPeerId, paymentMux, verificationMux);
 
     this._muxes.set(buyerPeerId, mux);
     this._wireConnection(conn, buyerPeerId);
@@ -1485,6 +1513,16 @@ export class AntseedNode extends EventEmitter {
     });
   }
 
+  private _initializeVerificationStorage(dataDir: string): void {
+    if (this._verificationStorage) return;
+    try {
+      this._verificationStorage = new VerificationStorage(join(dataDir, "verification.db"));
+      debugLog("[Node] Verification storage initialized");
+    } catch (err) {
+      debugWarn(`[Node] Verification storage unavailable: ${err instanceof Error ? err.message : err}`);
+    }
+  }
+
   private async _getOrCreateConnection(peer: PeerInfo): Promise<PeerConnection> {
     if (!this._connectionManager || !this._identity) {
       throw new Error("Node not started");
@@ -1578,6 +1616,17 @@ export class AntseedNode extends EventEmitter {
       maxUploadBodyBytes: this._config.maxUploadBodyBytes,
     });
     this._muxes.set(peerId, mux);
+    return mux;
+  }
+
+  private _getOrCreateVerificationMux(peerId: PeerId, conn: PeerConnection): VerificationMux {
+    const existing = this._verificationMuxes.get(peerId);
+    if (existing) {
+      return existing;
+    }
+
+    const mux = new VerificationMux(conn);
+    this._verificationMuxes.set(peerId, mux);
     return mux;
   }
 

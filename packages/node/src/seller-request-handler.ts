@@ -5,6 +5,7 @@ import type {
 } from './interfaces/seller-provider.js';
 import type { SellerSessionTracker } from './metering/seller-session-tracker.js';
 import type { PaymentMux } from './p2p/payment-mux.js';
+import type { Identity } from './p2p/identity.js';
 import type { ChannelsClient } from './payments/evm/channels-client.js';
 import type { SellerPaymentManager } from './payments/seller-payment-manager.js';
 import { ProxyMux } from './proxy/proxy-mux.js';
@@ -16,9 +17,12 @@ import type {
 import { parseResponseUsage } from './utils/response-usage.js';
 import { computeCostUsdc, estimateTokensFromBytes, type ServicePricing } from './payments/pricing.js';
 import { debugLog, debugWarn } from './utils/debug.js';
-import { PAYMENT_CODE_CHANNEL_EXHAUSTED } from './types/protocol.js';
+import { CONNECTION_CAPABILITY_RESPONSE_AUTH_V1, PAYMENT_CODE_CHANNEL_EXHAUSTED } from './types/protocol.js';
+import { VerificationMux } from './verification/verification-mux.js';
+import { createResponseAuthPayload } from './verification/response-auth.js';
 
 export interface SellerRequestHandlerDeps {
+  identity: Identity;
   providers: Provider[];
   sellerPaymentManager: SellerPaymentManager | null;
   sessionTracker: SellerSessionTracker | null;
@@ -57,6 +61,7 @@ export class SellerRequestHandler {
     conn: PeerConnection,
     buyerPeerId: string,
     paymentMux: PaymentMux,
+    verificationMux: VerificationMux,
   ): { mux: ProxyMux } {
     const mux = new ProxyMux(conn, {
       maxUploadBodyBytes: this._deps.maxUploadBodyBytes,
@@ -300,6 +305,11 @@ export class SellerRequestHandler {
         }
       }
 
+      const responseAuthRequest: SerializedHttpRequest = {
+        ...request,
+        headers: { ...request.headers },
+      };
+
       // Track active seller session at request start
       this._deps.sessionTracker?.getOrCreateSession(buyerPeerId, provider.name);
 
@@ -312,6 +322,10 @@ export class SellerRequestHandler {
       let responseBody: Uint8Array = new Uint8Array(0);
       let streamedResponseStarted = false;
       let heldDoneChunkData: Uint8Array | null = null;
+      let responseStartedAt = startTime;
+      let responseForAuth: SerializedHttpResponse | null = null;
+      let streamAuthStatusCode = 0;
+      let streamAuthHeaders: Record<string, string> | null = null;
       let responseUsage: import('./utils/response-usage.js').ResponseUsage = { inputTokens: 0, outputTokens: 0, freshInputTokens: 0, cachedInputTokens: 0 };
       this.adjustProviderLoad(provider.name, 1);
       try {
@@ -319,7 +333,10 @@ export class SellerRequestHandler {
           const response = await this._executeRequest(provider, request, {
             onResponseStart: (streamResponseStart) => {
               streamedResponseStarted = true;
+              responseStartedAt = Date.now();
               statusCode = streamResponseStart.statusCode;
+              streamAuthStatusCode = streamResponseStart.statusCode;
+              streamAuthHeaders = { ...streamResponseStart.headers };
               mux.sendProxyResponse(streamResponseStart);
             },
             onResponseChunk: (chunk) => {
@@ -334,6 +351,7 @@ export class SellerRequestHandler {
           });
           statusCode = response.statusCode;
           responseBody = response.body ?? new Uint8Array(0);
+          responseForAuth = response;
           if (statusCode >= 400) {
             const errBody = new TextDecoder().decode(responseBody).slice(0, 200);
             debugWarn(`[SellerHandler] Provider error response: status=${statusCode} provider="${provider.name}" model="${requestedModel}" buyer=${buyerPeerId.slice(0, 12)}... (${Date.now() - startTime}ms) body=${errBody}`);
@@ -358,9 +376,11 @@ export class SellerRequestHandler {
           debugWarn(`[SellerHandler] Provider exception: provider="${provider.name}" model="${requestedModel}" buyer=${buyerPeerId.slice(0, 12)}... (${Date.now() - startTime}ms) ${message}`);
           responseBody = new TextEncoder().encode(message);
           if (streamedResponseStarted) {
+            const errorFrame = new TextEncoder().encode(`event: error\ndata: ${message}\n\n`);
+            responseBody = errorFrame;
             mux.sendProxyChunk({
               requestId: request.requestId,
-              data: new TextEncoder().encode(`event: error\ndata: ${message}\n\n`),
+              data: errorFrame,
               done: false,
             });
             mux.sendProxyChunk({
@@ -368,14 +388,23 @@ export class SellerRequestHandler {
               data: new Uint8Array(0),
               done: true,
             });
+            if (streamAuthHeaders !== null) {
+              responseForAuth = {
+                requestId: request.requestId,
+                statusCode: streamAuthStatusCode,
+                headers: streamAuthHeaders,
+                body: errorFrame,
+              };
+            }
           } else {
             statusCode = 500;
-            mux.sendProxyResponse({
+            responseForAuth = {
               requestId: request.requestId,
               statusCode: 500,
               headers: { "content-type": "text/plain" },
               body: responseBody,
-            });
+            };
+            mux.sendProxyResponse(responseForAuth);
           }
         }
 
@@ -424,6 +453,27 @@ export class SellerRequestHandler {
               service: this._extractRequestedService(request) ?? undefined,
             }, buyerPeerId, 'post-response');
           }
+        }
+
+        const buyerSupportsResponseAuth =
+          typeof (conn as { hasRemoteCapability?: unknown }).hasRemoteCapability === 'function'
+          && conn.hasRemoteCapability(CONNECTION_CAPABILITY_RESPONSE_AUTH_V1);
+
+        if (responseForAuth && buyerSupportsResponseAuth) {
+          const channelId = spm?.getChannelByPeer(buyerPeerId)?.sessionId ?? null;
+          this._sendResponseAuthBestEffort(
+            verificationMux,
+            responseAuthRequest,
+            responseForAuth,
+            {
+              buyerPeerId,
+              providerName: provider.name,
+              advertisedService: requestedModel,
+              responseStartedAt,
+              responseCompletedAt: Date.now(),
+              channelId,
+            },
+          );
         }
       } finally {
         this.adjustProviderLoad(provider.name, -1);
@@ -678,6 +728,37 @@ export class SellerRequestHandler {
     this._metadataRefreshTimer = timer;
     if (typeof (timer as { unref?: () => void }).unref === "function") {
       (timer as { unref: () => void }).unref();
+    }
+  }
+
+  private _sendResponseAuthBestEffort(
+    verificationMux: VerificationMux,
+    request: SerializedHttpRequest,
+    response: SerializedHttpResponse,
+    context: {
+      buyerPeerId: string;
+      providerName: string;
+      advertisedService: string;
+      responseStartedAt: number;
+      responseCompletedAt: number;
+      channelId: string | null;
+    },
+  ): void {
+    try {
+      const payload = createResponseAuthPayload({
+        request,
+        response,
+        buyerPeerId: context.buyerPeerId,
+        sellerPeerId: this._deps.identity.peerId,
+        advertisedService: context.advertisedService,
+        provider: context.providerName,
+        responseStartedAt: context.responseStartedAt,
+        responseCompletedAt: context.responseCompletedAt,
+        channelId: context.channelId,
+      }, this._deps.identity.wallet);
+      verificationMux.sendResponseAuth(payload);
+    } catch (err) {
+      debugWarn(`[SellerHandler] Failed to send ResponseAuth for ${request.requestId.slice(0, 8)}: ${err instanceof Error ? err.message : err}`);
     }
   }
 }
