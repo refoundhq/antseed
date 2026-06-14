@@ -12,7 +12,7 @@
   font-size: 12px;
   letter-spacing: 3px;
   text-transform: uppercase;
-  color: #1FD87A;
+  color: var(--as-green);
   font-weight: 600;
   font-family: 'Share Tech Mono', monospace;
   margin-bottom: 18px;
@@ -47,7 +47,7 @@
   flex-wrap: wrap;
 }
 .heroCta {
-  background: #1FD87A;
+  background: var(--as-green);
   color: #ffffff;
   padding: 12px 24px;
   border-radius: 100px;
@@ -59,7 +59,7 @@
 .heroCta:hover {
   text-decoration: none;
   color: #ffffff;
-  background: #19c46d;
+  background: var(--as-green-bright);
   transform: translateY(-1px);
 }
 .heroCtaGhost {
@@ -99,7 +99,7 @@
   transition: border-color 0.15s, transform 0.15s, background 0.15s;
 }
 .jumpLink:hover {
-  border-color: #1FD87A;
+  border-color: var(--as-green);
   text-decoration: none;
   color: #1a1a1a;
   transform: translateY(-1px);
@@ -110,7 +110,7 @@
   justify-content: center;
   width: 16px;
   height: 16px;
-  color: #1FD87A;
+  color: var(--as-green);
   flex-shrink: 0;
 }
 .jumpIcon svg { width: 16px; height: 16px; }
@@ -127,7 +127,7 @@
 .jumpLink:hover .jumpCount {
   background: rgba(31, 216, 122, 0.1);
   border-color: rgba(31, 216, 122, 0.3);
-  color: #0d8c4f;
+  color: var(--as-green);
 }
 
 /* ====== HUB: Search ====== */
@@ -153,7 +153,7 @@
   transition: border-color 0.15s, box-shadow 0.15s;
 }
 .search:focus {
-  border-color: #1FD87A;
+  border-color: var(--as-green);
   box-shadow: 0 0 0 3px rgba(31, 216, 122, 0.12);
 }
 .resultCount {
@@ -167,7 +167,7 @@
   color: #555;
   padding: 60px 20px;
 }
-.noResults a { color: #1FD87A; font-weight: 500; }
+.noResults a { color: var(--as-green); font-weight: 500; }
 
 /* ====== HUB: Category sections ====== */
 .sections {
@@ -196,7 +196,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #0d8c4f;
+  color: var(--as-green);
   flex-shrink: 0;
   margin-top: 2px;
 }
@@ -260,13 +260,13 @@
 .card:hover {
   text-decoration: none;
   color: inherit;
-  border-color: #1FD87A;
+  border-color: var(--as-green);
   transform: translateY(-2px);
   box-shadow: 0 6px 20px rgba(31, 216, 122, 0.08);
 }
 .card:hover .cardArrow {
   transform: translateX(3px);
-  color: #1FD87A;
+  color: var(--as-green);
 }
 .cardHead {
   display: flex;
@@ -367,7 +367,7 @@
   color: #555;
   margin: 0;
 }
-.bottomBlock a { color: #1FD87A; font-weight: 500; }
+.bottomBlock a { color: var(--as-green); font-weight: 500; }
 @media (max-width: 720px) { .bottomBlock { grid-template-columns: 1fr; } }
 
 /* ========== PER-INTEGRATION PAGE ========== */
@@ -446,7 +446,7 @@
 }
 .detailBadgeGreen {
   background: rgba(31, 216, 122, 0.1);
-  color: #0d8c4f;
+  color: var(--as-green);
   border-color: rgba(31, 216, 122, 0.3);
 }
 
@@ -502,7 +502,7 @@
 .runFirstKicker {
   font-size: 11px;
   font-weight: 600;
-  color: #0d8c4f;
+  color: var(--as-green);
   margin: 0 0 4px;
   text-transform: uppercase;
   letter-spacing: 1.6px;
@@ -516,7 +516,7 @@
   flex-shrink: 0;
   width: 7px;
   height: 7px;
-  background: #1FD87A;
+  background: var(--as-green);
   border-radius: 50%;
   box-shadow: 0 0 0 0 rgba(31, 216, 122, 0.6);
   animation: runFirstDotPulse 1.4s ease-in-out infinite;
@@ -550,7 +550,7 @@
   border-radius: 5px;
   padding: 1px 6px;
   font-size: 12px;
-  color: #0d8c4f;
+  color: var(--as-green);
   font-weight: 500;
 }
 .runFirstToggle {
@@ -558,7 +558,7 @@
   font-family: 'Share Tech Mono', monospace;
   font-size: 11px;
   font-weight: 500;
-  color: #0d8c4f;
+  color: var(--as-green);
   background: #fff;
   border: 1px solid rgba(31, 216, 122, 0.3);
   border-radius: 100px;
@@ -577,7 +577,7 @@
 .wireFormat {
   background: #ffffff;
   border: 1px solid rgba(0, 0, 0, 0.08);
-  border-left: 3px solid #1FD87A;
+  border-left: 3px solid var(--as-green);
   border-radius: 10px;
   padding: 18px 22px;
   margin: 24px 0 0;
@@ -588,7 +588,7 @@
   font-size: 11px;
   letter-spacing: 1.5px;
   text-transform: uppercase;
-  color: #0d8c4f;
+  color: var(--as-green);
   margin: 0 0 12px;
   font-weight: 600;
 }
@@ -709,7 +709,7 @@
   font-size: 11px;
   letter-spacing: 1.5px;
   text-transform: uppercase;
-  color: #0d8c4f;
+  color: var(--as-green);
   margin: 0 0 12px;
   font-weight: 600;
 }
@@ -731,11 +731,11 @@
   border-radius: 4px;
   padding: 1px 5px;
   font-size: 12px;
-  color: #0d8c4f;
+  color: var(--as-green);
 }
 .glossaryList strong {
   font-weight: 600;
-  color: #0d8c4f;
+  color: var(--as-green);
 }
 
 /* Field-list under a step — explains JSON keys returned by a command. */
@@ -755,7 +755,7 @@
   border-radius: 4px;
   padding: 1px 5px;
   font-size: 11.5px;
-  color: #0d8c4f;
+  color: var(--as-green);
 }
 .runFirstFieldList strong {
   font-weight: 600;
@@ -801,8 +801,8 @@
   height: 24px;
   border-radius: 50%;
   background: #fff;
-  border: 1.5px solid #1FD87A;
-  color: #0d8c4f;
+  border: 1.5px solid var(--as-green);
+  color: var(--as-green);
   font-family: 'Share Tech Mono', monospace;
   font-size: 11px;
   font-weight: 700;
@@ -833,7 +833,7 @@
   border-radius: 4px;
   padding: 1px 5px;
   font-size: 11.5px;
-  color: #0d8c4f;
+  color: var(--as-green);
 }
 .runFirstHint strong {
   font-weight: 600;
@@ -845,7 +845,7 @@
 .runFirstItemOptional .runFirstNum {
   border-color: rgba(31, 216, 122, 0.5);
   border-style: dashed;
-  color: #1FD87A;
+  color: var(--as-green);
 }
 .runFirstItemOptional .runFirstStepTitle { color: #444; }
 .runFirstOptionalTag {
@@ -864,8 +864,8 @@
   vertical-align: 2px;
 }
 
-.runFirst a { color: #0d8c4f; font-weight: 500; }
-.runFirst a:hover { color: #1FD87A; }
+.runFirst a { color: var(--as-green); font-weight: 500; }
+.runFirst a:hover { color: var(--as-green); }
 
 /* ====== Section ====== */
 .section {
@@ -878,7 +878,7 @@
   font-size: 11px;
   letter-spacing: 2px;
   text-transform: uppercase;
-  color: #1FD87A;
+  color: var(--as-green);
   font-weight: 600;
   font-family: 'Share Tech Mono', monospace;
   margin: 0 0 6px;
@@ -941,7 +941,7 @@
 }
 .codeBlockPath {
   font-size: 11px;
-  color: #0d8c4f;
+  color: var(--as-green);
   font-family: 'Share Tech Mono', monospace;
   margin-bottom: 6px;
   display: block;
@@ -1043,7 +1043,7 @@
 }
 .copyBtn:hover { background: rgba(255, 255, 255, 0.16); color: #fff; }
 .copyBtn.copied {
-  color: #1FD87A;
+  color: var(--as-green);
   border-color: rgba(31, 216, 122, 0.4);
 }
 
@@ -1068,7 +1068,7 @@
 }
 .envTable tr:last-child td { border-bottom: none; }
 .envTable td:first-child {
-  color: #1FD87A;
+  color: var(--as-green);
   white-space: nowrap;
   font-weight: 500;
 }
@@ -1145,7 +1145,7 @@
   font-size: 12px;
   color: #1a1a1a;
 }
-.modelNote a { color: #1FD87A; font-weight: 500; }
+.modelNote a { color: var(--as-green); font-weight: 500; }
 
 /* ====== Troubleshooting ====== */
 .troubleshootList {
@@ -1199,7 +1199,7 @@
   text-decoration: none;
   transition: border-color 0.15s;
 }
-.linkRow a:hover { border-color: #1FD87A; text-decoration: none; }
+.linkRow a:hover { border-color: var(--as-green); text-decoration: none; }
 .linkRow a::after {
   content: '↗';
   font-size: 11px;
@@ -1218,7 +1218,7 @@
   font-size: 12px;
   font-weight: 600;
   margin: 0 0 8px;
-  color: #0d8c4f;
+  color: var(--as-green);
   display: flex;
   align-items: center;
   gap: 8px;
@@ -1267,7 +1267,7 @@
   padding: 5px 12px;
   text-decoration: none;
 }
-.relatedRow a:hover { border-color: #1FD87A; text-decoration: none; }
+.relatedRow a:hover { border-color: var(--as-green); text-decoration: none; }
 
 /* ============================================================
  * Narrow viewports
@@ -1820,7 +1820,7 @@
 :global(html[data-theme='light']) .jumpIcon,
 :global(html[data-theme='light']) .catGlyph,
 :global(html[data-theme='light']) .cardArrow {
-  color: #139256;
+  color: var(--as-green);
 }
 :global(html[data-theme='light']) .jumpLabel {
   color: #0a0e14;
@@ -1842,7 +1842,7 @@
 :global(html[data-theme='light']) .wireFormatTitle,
 :global(html[data-theme='light']) .stepLabel,
 :global(html[data-theme='light']) .runFirstNum {
-  color: #139256;
+  color: var(--as-green);
 }
 :global(html[data-theme='light']) .search {
   color: #0a0e14;

@@ -18,6 +18,12 @@ const ZOKYO_URL = 'https://www.zokyo.io';
 const AUDIT_REPORT_URL = '/antseed-zokyo-audit-report-may-14-2026.pdf';
 const CONTRACT_URL_BASE = 'https://basescan.org/address';
 type ThemeMode = 'dark' | 'light';
+const THEME_STORAGE_KEY = 'diem-theme-mode';
+
+function readInitialTheme(): ThemeMode {
+  const current = document.documentElement.getAttribute('data-theme');
+  return current === 'light' ? 'light' : 'dark';
+}
 
 // OS glyph for the primary download button. Matches the mark used in
 // apps/website/src/lib/DesktopDownloadIcon.tsx so the two properties feel
@@ -64,27 +70,23 @@ export function AlphaStrip({ maxStakeDisplay }: { maxStakeDisplay: string | null
 }
 
 function ThemeToggle() {
-  const [theme, setTheme] = useState<ThemeMode>('dark');
+  const [theme, setTheme] = useState<ThemeMode>(readInitialTheme);
 
   useEffect(() => {
-    // DIEM is money/economics-first, so every fresh page entry starts dark.
-    // The lighter mode remains available via this toggle, but it is not
-    // persisted across reloads/navigation.
-    document.documentElement.setAttribute('data-theme', 'dark');
-    document.documentElement.style.colorScheme = 'dark';
-    setTheme('dark');
-    try {
-      localStorage.removeItem('diem-theme-mode');
-    } catch {
-      // ignore storage failures
-    }
-  }, []);
+    document.documentElement.setAttribute('data-theme', theme);
+    document.documentElement.style.colorScheme = theme;
+  }, [theme]);
 
   const toggle = () => {
     const next: ThemeMode = theme === 'dark' ? 'light' : 'dark';
     setTheme(next);
     document.documentElement.setAttribute('data-theme', next);
     document.documentElement.style.colorScheme = next;
+    try {
+      localStorage.setItem(THEME_STORAGE_KEY, next);
+    } catch {
+      // Ignore storage failures; the in-page toggle still works.
+    }
   };
 
   return (

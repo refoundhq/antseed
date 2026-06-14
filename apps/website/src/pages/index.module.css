@@ -1251,7 +1251,7 @@ img, video, canvas, svg { max-width: 100%; }
 }
 :global(html[data-theme='light']) .heroTitle em,
 :global(html[data-theme='light']) .sectionTitle em {
-  color: #139256;
+  color: var(--as-green);
   text-shadow: none;
 }
 :global(html[data-theme='light']) .heroSub,
@@ -1263,14 +1263,14 @@ img, video, canvas, svg { max-width: 100%; }
   color: #53635a;
 }
 :global(html[data-theme='light']) .btnSolid {
-  background: #139256;
-  border-color: #139256;
+  background: var(--as-green);
+  border-color: var(--as-green);
   color: #f7fff9;
   box-shadow: none;
 }
 :global(html[data-theme='light']) .btnSolid:hover {
-  background: #1abe6e;
-  border-color: #1abe6e;
+  background: var(--as-green-bright);
+  border-color: var(--as-green-bright);
   color: #f7fff9;
 }
 :global(html[data-theme='light']) .btnGhost {
@@ -1279,11 +1279,11 @@ img, video, canvas, svg { max-width: 100%; }
   background: rgba(255, 255, 255, 0.58);
 }
 :global(html[data-theme='light']) .btnGhost:hover {
-  color: #139256;
+  color: var(--as-green);
   border-color: rgba(19, 146, 86, 0.42);
 }
 :global(html[data-theme='light']) .btnText {
-  color: #139256;
+  color: var(--as-green);
   border-color: rgba(19, 146, 86, 0.28);
 }
 :global(html[data-theme='light']) .lbar,
@@ -1311,10 +1311,10 @@ img, video, canvas, svg { max-width: 100%; }
 }
 :global(html[data-theme='light']) .traceBar span:first-child,
 :global(html[data-theme='light']) .codeCardBar span:first-child {
-  background: #139256;
+  background: var(--as-green);
 }
 :global(html[data-theme='light']) .traceCaret {
-  background: #139256;
+  background: var(--as-green);
 }
 :global(html[data-theme='light']) .trDim,
 :global(html[data-theme='light']) .traceBar b,
@@ -1337,7 +1337,7 @@ img, video, canvas, svg { max-width: 100%; }
 :global(html[data-theme='light']) .sectionIndex,
 :global(html[data-theme='light']) .liveArrow,
 :global(html[data-theme='light']) .heroKicker {
-  color: #139256;
+  color: var(--as-green);
   text-shadow: none;
 }
 :global(html[data-theme='light']) .trOk,
@@ -1374,7 +1374,7 @@ img, video, canvas, svg { max-width: 100%; }
   color: #53635a;
 }
 :global(html[data-theme='light']) .linkRow a:hover {
-  color: #139256;
+  color: var(--as-green);
   border-color: rgba(19, 146, 86, 0.34);
   background: rgba(31, 216, 122, 0.07);
 }
@@ -1410,7 +1410,7 @@ img, video, canvas, svg { max-width: 100%; }
   background-image: radial-gradient(circle, rgba(19, 146, 86, 0.28) 1px, transparent 1.4px);
 }
 :global(html[data-theme='light']) .depthFill {
-  background: linear-gradient(180deg, transparent, #139256);
+  background: linear-gradient(180deg, transparent, var(--as-green));
 }
 :global(html[data-theme='light']) .depthAnt,
 :global(html[data-theme='light']) .journeyAnt {
@@ -1418,7 +1418,7 @@ img, video, canvas, svg { max-width: 100%; }
   filter: drop-shadow(0 0 5px rgba(11, 92, 56, 0.22));
 }
 :global(html[data-theme='light']) .journeySeed {
-  background: #139256;
+  background: var(--as-green);
   color: rgba(19, 146, 86, 0.72);
 }
 :global(html[data-theme='light']) .ledger {
@@ -1482,7 +1482,7 @@ img, video, canvas, svg { max-width: 100%; }
   border-color: rgba(19, 146, 86, 0.16);
 }
 :global(html[data-theme='light']) .faqChevronOpen {
-  color: #139256;
+  color: var(--as-green);
   background: rgba(19, 146, 86, 0.1);
   border-color: rgba(19, 146, 86, 0.32);
 }

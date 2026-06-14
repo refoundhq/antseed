@@ -168,7 +168,8 @@ const config: Config = {
       title: 'ANTSEED',
       logo: {
         alt: 'AntSeed',
-        src: 'logo.svg',
+        src: 'logo-light.svg',
+        srcDark: 'logo.svg',
       },
       items: [
         {

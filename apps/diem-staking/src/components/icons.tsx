@@ -109,7 +109,7 @@ export function AntsTokenLogo({ size = 48 }: { size?: number }) {
       </defs>
       <circle cx="24" cy="24" r="23" fill="url(#ants-coin-face)" />
       <circle cx="24" cy="24" r="23" fill="none" stroke="url(#ants-coin-edge)" strokeWidth="1.3" />
-      <circle cx="24" cy="24" r="20.5" fill="none" stroke="rgba(31,216,122,0.2)" strokeWidth="0.5" />
+      <circle cx="24" cy="24" r="20.5" fill="none" stroke="rgba(var(--green-rgb),0.2)" strokeWidth="0.5" />
       <path
         d="M 6.5 20 A 18 18 0 0 1 22 6.5"
         fill="none"
@@ -117,7 +117,7 @@ export function AntsTokenLogo({ size = 48 }: { size?: number }) {
         strokeWidth="0.8"
         strokeLinecap="round"
       />
-      <g transform="translate(8 8)" color="#1FD87A" filter="url(#ants-coin-glow)">
+      <g transform="translate(8 8)" color="var(--green)" filter="url(#ants-coin-glow)">
         <BrandAntPaths />
       </g>
     </svg>
@@ -131,7 +131,7 @@ export function AntsTokenCoinInline() {
     <g>
       <circle cx="24" cy="24" r="23" fill="url(#ants-coin-face)" />
       <circle cx="24" cy="24" r="23" fill="none" stroke="url(#ants-coin-edge)" strokeWidth="1.3" />
-      <circle cx="24" cy="24" r="20.5" fill="none" stroke="rgba(31,216,122,0.2)" strokeWidth="0.5" />
+      <circle cx="24" cy="24" r="20.5" fill="none" stroke="rgba(var(--green-rgb),0.2)" strokeWidth="0.5" />
       <path
         d="M 6.5 20 A 18 18 0 0 1 22 6.5"
         fill="none"
@@ -139,7 +139,7 @@ export function AntsTokenCoinInline() {
         strokeWidth="0.8"
         strokeLinecap="round"
       />
-      <g transform="translate(8 8)" color="#1FD87A">
+      <g transform="translate(8 8)" color="var(--green)">
         <BrandAntPaths />
       </g>
     </g>
@@ -150,7 +150,7 @@ export function AntsTokenCoinInline() {
  *  on light backgrounds. Used in AntStation marketing block + flow diagram. */
 export function AntIcon({ size = 22, light = false }: { size?: number; light?: boolean }) {
   const body = light ? '#ffffff' : '#1a1a1a';
-  const limb = light ? '#1FD87A' : '#8a8a8a';
+  const limb = light ? 'var(--green)' : '#8a8a8a';
   return (
     <svg width={size} height={size * 1.25} viewBox="-20 -25 40 50" aria-hidden="true">
       <line x1="-4" y1="-14" x2="-8" y2="-21" stroke={limb} strokeWidth="1.6" strokeLinecap="round" />
@@ -184,7 +184,7 @@ export function AntIcon({ size = 22, light = false }: { size?: number; light?: b
  *  `AntIcon` and centred on (0,0) so animateTransform translate tracks it. */
 export function AntInline({ light = false }: { light?: boolean }) {
   const body = light ? '#ffffff' : '#1a1a1a';
-  const limb = light ? '#1FD87A' : '#8a8a8a';
+  const limb = light ? 'var(--green)' : '#8a8a8a';
   return (
     <g>
       <line x1="-2.4" y1="-8.5" x2="-4.6" y2="-12.5" stroke={limb} strokeWidth="0.9" strokeLinecap="round" />

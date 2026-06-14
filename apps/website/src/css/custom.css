@@ -71,6 +71,9 @@
 html[data-theme='light'],
 :root {
   /* Light-mode brand tokens: dark ink on warm field-note surfaces. */
+  --as-green: #139256;
+  --as-green-bright: #0f7d4d;
+  --as-green-deep: #139256;
   --as-soil-0: #f5f5f0;
   --as-soil-1: #fbfbf5;
   --as-soil-2: #ffffff;
@@ -81,7 +84,7 @@ html[data-theme='light'],
   --as-line: rgba(10, 14, 20, 0.09);
   --as-line-strong: rgba(19, 146, 86, 0.22);
   --as-green-glow: rgba(19, 146, 86, 0.24);
-  --as-green-dim: rgba(31, 216, 122, 0.09);
+  --as-green-dim: rgba(19, 146, 86, 0.09);
   --as-surface-tint: rgba(10, 14, 20, 0.02);
   --as-risk: #c73a3a;
   --as-risk-deep: #9d2727;
@@ -96,19 +99,19 @@ html[data-theme='light'],
   --as-scrollbar-track: #f5f5f0;
   --as-scrollbar-thumb: #d0d0c8;
   --as-scrollbar-thumb-hover: #b0b0a8;
-  --as-selection-bg: rgba(46, 207, 133, 0.2);
+  --as-selection-bg: rgba(19, 146, 86, 0.18);
   --as-selection-text: #1a1a1a;
   --ifm-scrollbar-track-background-color: var(--as-scrollbar-track);
   --ifm-scrollbar-thumb-background-color: var(--as-scrollbar-thumb);
   --ifm-scrollbar-thumb-hover-background-color: var(--as-scrollbar-thumb-hover);
 
-  --ifm-color-primary: #1FD87A;
-  --ifm-color-primary-dark: #139256;
-  --ifm-color-primary-darker: #0f7d4d;
-  --ifm-color-primary-darkest: #0b5c38;
-  --ifm-color-primary-light: #1abe6e;
-  --ifm-color-primary-lighter: #1ec478;
-  --ifm-color-primary-lightest: #28d485;
+  --ifm-color-primary: #139256;
+  --ifm-color-primary-dark: #0f7d4d;
+  --ifm-color-primary-darker: #0b6a40;
+  --ifm-color-primary-darkest: #074d2f;
+  --ifm-color-primary-light: #16a863;
+  --ifm-color-primary-lighter: #1abe6e;
+  --ifm-color-primary-lightest: #2fc980;
   --ifm-color-warning: var(--as-risk);
   --ifm-color-warning-dark: var(--as-risk-deep);
   --ifm-color-warning-darker: #822020;
@@ -161,6 +164,9 @@ html[data-theme='light'],
 
 html[data-theme='dark'] {
   /* Dark-mode brand tokens: soil-dark is the default home surface. */
+  --as-green: #1FD87A;
+  --as-green-bright: #3ce892;
+  --as-green-deep: #139256;
   --as-soil-0: #070b09;
   --as-soil-1: #0a0e14;
   --as-soil-2: #0e141c;
@@ -268,6 +274,12 @@ nav.navbar {
   background: linear-gradient(to right, var(--as-logo-ink) 0%, var(--as-logo-ink) 42.86%, var(--ifm-color-primary) 42.86%, var(--ifm-color-primary) 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+html[data-theme='light'] .navbar__title {
+  background: linear-gradient(to right, #0a0e14 0%, #0a0e14 42.86%, var(--as-green-deep) 42.86%, var(--as-green-deep) 100%);
+  -webkit-background-clip: text;
   background-clip: text;
 }
 
@@ -438,7 +450,7 @@ nav.navbar {
 
 html[data-theme='light'] .custom-footer-link:hover,
 html[data-theme='light'] .custom-footer-link:focus-visible {
-  color: #139256 !important;
+  color: var(--as-green) !important;
 }
 
 html[data-theme='dark'] .custom-footer-link:hover,
@@ -467,7 +479,7 @@ html[data-theme='dark'] .custom-footer-link:focus-visible {
 
 html[data-theme='light'] .custom-footer-social:hover,
 html[data-theme='light'] .custom-footer-social:focus-visible {
-  color: #139256 !important;
+  color: var(--as-green) !important;
   filter: drop-shadow(0 0 7px rgba(19, 146, 86, 0.34));
 }
 
@@ -961,6 +973,9 @@ html[data-theme='light'] body:has(.homepage-wrapper) {
   background: #f5f5f0 !important;
 }
 html[data-theme='light'] .homepage-wrapper {
+  --as-green: #139256;
+  --as-green-bright: #0f7d4d;
+  --as-green-deep: #139256;
   --as-soil-0: #f5f5f0;
   --as-soil-1: #fbfbf5;
   --as-soil-2: #ffffff;
@@ -971,7 +986,7 @@ html[data-theme='light'] .homepage-wrapper {
   --as-line: rgba(10, 14, 20, 0.09);
   --as-line-strong: rgba(19, 146, 86, 0.22);
   --as-green-glow: rgba(19, 146, 86, 0.24);
-  --as-green-dim: rgba(31, 216, 122, 0.09);
+  --as-green-dim: rgba(19, 146, 86, 0.09);
 }
 html[data-theme='light'] .homepage-wrapper::before {
   background:
@@ -992,7 +1007,7 @@ html[data-theme='light']:has(.homepage-wrapper) .navbar--fixed-top {
   border-bottom-color: rgba(10, 14, 20, 0.08);
 }
 html[data-theme='light']:has(.homepage-wrapper) .navbar__title {
-  background: linear-gradient(to right, #0a0e14 0%, #0a0e14 42.86%, #139256 42.86%, #139256 100%);
+  background: linear-gradient(to right, #0a0e14 0%, #0a0e14 42.86%, var(--as-green) 42.86%, var(--as-green) 100%);
   -webkit-background-clip: text;
   background-clip: text;
 }
@@ -1014,7 +1029,7 @@ html[data-theme='light']:has(.homepage-wrapper) .navbar__toggle {
 }
 html[data-theme='light']:has(.homepage-wrapper) .navbar__toggle:hover,
 html[data-theme='light']:has(.homepage-wrapper) .navbar__toggle:focus-visible {
-  color: #139256 !important;
+  color: var(--as-green) !important;
   opacity: 1;
   background: rgba(19, 146, 86, 0.08);
 }
@@ -1035,7 +1050,7 @@ html[data-theme='dark']:has(.homepage-wrapper) .custom-footer-link:focus-visible
 
 html[data-theme='light']:has(.homepage-wrapper) .custom-footer-link:hover,
 html[data-theme='light']:has(.homepage-wrapper) .custom-footer-link:focus-visible {
-  color: #139256 !important;
+  color: var(--as-green) !important;
 }
 
 /* Selection on the dark homepage. */
@@ -1360,7 +1375,7 @@ html[data-theme='light'] .blog-wrapper .markdown a,
 html[data-theme='light'] .blog-wrapper article a:not([class*='tag']):not(.pagination-nav__link),
 html[data-theme='light'] .blog-wrapper footer a b,
 html[data-theme='light'] .blog-wrapper a[class*='readMore'] {
-  color: #139256 !important;
+  color: var(--as-green) !important;
 }
 html[data-theme='light'] .blog-wrapper .markdown code {
   color: #0b5c38;
@@ -1369,7 +1384,7 @@ html[data-theme='light'] .blog-wrapper .markdown code {
 }
 html[data-theme='light'] .blog-wrapper .markdown blockquote {
   background: rgba(19,146,86,0.055);
-  border-left-color: #139256;
+  border-left-color: var(--as-green);
 }
 html[data-theme='light'] .blog-wrapper a[class*='tag'],
 html[data-theme='light'] .blog-wrapper .tag,
@@ -1380,7 +1395,7 @@ html[data-theme='light'] .blog-wrapper .badge {
 }
 html[data-theme='light'] .blog-wrapper a[class*='tag']:hover,
 html[data-theme='light'] .blog-wrapper .tag:hover {
-  color: #139256 !important;
+  color: var(--as-green) !important;
   border-color: rgba(19,146,86,0.38) !important;
 }
 html[data-theme='light'] .blog-wrapper aside nav,

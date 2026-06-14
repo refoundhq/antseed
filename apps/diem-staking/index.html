@@ -22,7 +22,19 @@
     <!-- Same favicon as antseed.com (the AntSeed ant) so users see one brand. -->
     <link rel="icon" type="image/svg+xml" href="/logo.svg" />
 
-    <meta name="color-scheme" content="dark" />
+    <meta name="color-scheme" content="dark light" />
+    <script>
+      (() => {
+        try {
+          const theme = localStorage.getItem('diem-theme-mode') === 'light' ? 'light' : 'dark';
+          document.documentElement.setAttribute('data-theme', theme);
+          document.documentElement.style.colorScheme = theme;
+        } catch {
+          document.documentElement.setAttribute('data-theme', 'dark');
+          document.documentElement.style.colorScheme = 'dark';
+        }
+      })();
+    </script>
 
     <!-- Fonts — AntSeed Sci-Fi Soft brand pair. -->
     <link
