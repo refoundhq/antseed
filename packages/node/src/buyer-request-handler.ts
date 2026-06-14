@@ -16,6 +16,7 @@ import type { VerificationMux } from "./verification/verification-mux.js";
 import type { VerificationStorage } from "./verification/storage.js";
 import type { VerificationSampler } from "./verification/samples.js";
 import { verifyResponseAuth } from "./verification/response-auth.js";
+import { tryParseJsonObject } from "./utils/json-codec.js";
 
 export interface RequestStreamResponseMetadata {
   streaming: boolean;
@@ -360,11 +361,9 @@ export class BuyerRequestHandler {
 
 /** Extract the service/model name from a JSON request body, or undefined if not found. */
 function extractServiceFromBody(body: Uint8Array): string | undefined {
-  try {
-    const parsed = JSON.parse(new TextDecoder().decode(body)) as Record<string, unknown>;
-    const service = parsed.service ?? parsed.model;
-    if (typeof service === 'string' && service.length > 0) return service;
-  } catch { /* not JSON or no model field */ }
+  const parsed = tryParseJsonObject(body);
+  const service = parsed?.service ?? parsed?.model;
+  if (typeof service === 'string' && service.length > 0) return service;
   return undefined;
 }
 

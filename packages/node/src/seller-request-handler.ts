@@ -20,6 +20,7 @@ import { debugLog, debugWarn } from './utils/debug.js';
 import { CONNECTION_CAPABILITY_RESPONSE_AUTH_V1, PAYMENT_CODE_CHANNEL_EXHAUSTED } from './types/protocol.js';
 import { VerificationMux } from './verification/verification-mux.js';
 import { createResponseAuthPayload } from './verification/response-auth.js';
+import { hasJsonContentType, tryParseJsonObject } from './utils/json-codec.js';
 
 export interface SellerRequestHandlerDeps {
   identity: Identity;
@@ -594,28 +595,15 @@ export class SellerRequestHandler {
       && cachedPrice === 0;
   }
 
-  private _parseJsonObject(body: Uint8Array): Record<string, unknown> | null {
-    try {
-      const parsed = JSON.parse(new TextDecoder().decode(body)) as unknown;
-      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-        return null;
-      }
-      return parsed as Record<string, unknown>;
-    } catch {
-      return null;
-    }
-  }
-
   private _isJsonRequest(request: SerializedHttpRequest): boolean {
-    const contentType = request.headers["content-type"] ?? request.headers["Content-Type"] ?? "";
-    return contentType.toLowerCase().includes("application/json");
+    return hasJsonContentType(request.headers);
   }
 
   private _extractRequestedService(request: SerializedHttpRequest): string | null {
     if (!this._isJsonRequest(request)) {
       return null;
     }
-    const body = this._parseJsonObject(request.body);
+    const body = tryParseJsonObject(request.body);
     const service = body?.["service"] ?? body?.["model"];
     if (typeof service !== "string" || service.trim().length === 0) {
       return null;
@@ -639,7 +627,7 @@ export class SellerRequestHandler {
     if (!this._isJsonRequest(request)) {
       return null;
     }
-    const body = this._parseJsonObject(request.body);
+    const body = tryParseJsonObject(request.body);
     if (!body) {
       return null;
     }
