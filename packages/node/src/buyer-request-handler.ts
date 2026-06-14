@@ -12,6 +12,9 @@ import type { PaymentMux } from "./p2p/payment-mux.js";
 import { ConnectionState } from "./types/connection.js";
 import type { BuyerPaymentNegotiator } from "./payments/buyer-payment-negotiator.js";
 import { debugLog, debugWarn } from "./utils/debug.js";
+import type { VerificationMux } from "./verification/verification-mux.js";
+import type { VerificationStorage } from "./verification/storage.js";
+import { verifyResponseAuth } from "./verification/response-auth.js";
 
 export interface RequestStreamResponseMetadata {
   streaming: boolean;
@@ -33,14 +36,19 @@ export interface BuyerRequestHandlerConfig {
   requestTimeoutMs?: number;
   maxStreamBufferBytes?: number;
   maxStreamDurationMs?: number;
+  responseAuthTimeoutMs?: number;
 }
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 5 * 60_000;
+const DEFAULT_RESPONSE_AUTH_GRACE_MS = 30_000;
 
 export interface BuyerRequestHandlerDeps {
+  localPeerId: PeerId;
   negotiator: BuyerPaymentNegotiator | null;
+  verificationStorage: VerificationStorage | null;
   getConnection: (peer: PeerInfo) => Promise<PeerConnection>;
   getMux: (peerId: PeerId, conn: PeerConnection) => ProxyMux;
+  getVerificationMux: (peerId: PeerId, conn: PeerConnection) => VerificationMux;
   registerPaymentMux: (peerId: PeerId, mux: PaymentMux) => void;
 }
 
@@ -76,6 +84,7 @@ export class BuyerRequestHandler {
     const conn = await this._deps.getConnection(peer);
     debugLog(`[BuyerRequest] Connection to ${peer.peerId.slice(0, 12)}... state=${conn.state}`);
     const mux = this._deps.getMux(peer.peerId, conn);
+    const verificationMux = this._deps.getVerificationMux(peer.peerId, conn);
     const negotiator = this._deps.negotiator;
     if (negotiator) {
       this._deps.registerPaymentMux(peer.peerId, negotiator.getOrCreatePaymentMux(peer.peerId, conn));
@@ -280,6 +289,7 @@ export class BuyerRequestHandler {
       startTime = Date.now();
       const retriedResponse = await executeRequest();
       negotiator.estimateCostFromResponse(peer, retriedResponse, requestedService, req.requestId);
+      this._recordResponseAuth(peer, req, retriedResponse, requestedService, verificationMux);
       return retriedResponse;
     }
 
@@ -287,7 +297,52 @@ export class BuyerRequestHandler {
       negotiator.estimateCostFromResponse(peer, response, requestedService, req.requestId);
     }
 
+    this._recordResponseAuth(peer, req, response, requestedService, verificationMux);
     return response;
+  }
+
+  private _recordResponseAuth(
+    peer: PeerInfo,
+    request: SerializedHttpRequest,
+    response: SerializedHttpResponse,
+    requestedService: string | undefined,
+    verificationMux: VerificationMux,
+  ): void {
+    const storage = this._deps.verificationStorage;
+    const advertisedService = requestedService ?? 'unknown';
+    const expectedChannelId = this._deps.negotiator?.bpm?.getActiveSession(peer.peerId)?.sessionId ?? null;
+    const responseAuthPromise = verificationMux.waitForResponseAuth(
+      request.requestId,
+      this._config.responseAuthTimeoutMs ?? DEFAULT_RESPONSE_AUTH_GRACE_MS,
+    );
+
+    void responseAuthPromise
+      .then((payload) => {
+        const verification = verifyResponseAuth(payload, {
+          request,
+          response,
+          buyerPeerId: this._deps.localPeerId,
+          sellerPeerId: peer.peerId,
+          advertisedService,
+          channelId: expectedChannelId,
+        });
+
+        if (!verification.valid) {
+          debugWarn(
+            `[BuyerRequest] Invalid ResponseAuth for ${request.requestId.slice(0, 8)} from ${peer.peerId.slice(0, 12)}...: ${verification.reason ?? 'unknown'}`,
+          );
+        }
+
+        storage?.insertResponseAuth({
+          ...payload,
+          receivedAt: Date.now(),
+          verified: verification.valid,
+          verificationError: verification.reason ?? null,
+        });
+      })
+      .catch((err) => {
+        debugWarn(`[BuyerRequest] Missing ResponseAuth for ${request.requestId.slice(0, 8)} from ${peer.peerId.slice(0, 12)}...: ${err instanceof Error ? err.message : err}`);
+      });
   }
 }
 

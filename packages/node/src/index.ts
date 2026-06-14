@@ -77,6 +77,15 @@ export { getChainConfig, resolveChainConfig, DEFAULT_CHAIN_ID, CHAIN_CONFIGS } f
 export type { ChainConfig } from './payments/chain-config.js';
 export { formatUsdc, parseUsdc } from './payments/usdc-utils.js';
 export { ProxyMux } from './proxy/proxy-mux.js';
+export {
+  VerificationMux,
+  VerificationStorage,
+  createResponseAuthPayload,
+  verifyResponseAuth,
+  hashRequest,
+  hashResponse,
+  type StoredResponseAuth,
+} from './verification/index.js';
 export { resolveProvider } from './proxy/provider-detection.js';
 export {
   detectRequestServiceApiProtocol,
