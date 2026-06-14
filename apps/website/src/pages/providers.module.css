@@ -25,7 +25,9 @@
 .hero::before {
   content: '';
   position: absolute;
-  inset: 0 -16% auto;
+  top: 0;
+  left: 0;
+  right: 0;
   height: 420px;
   background:
     radial-gradient(circle at 50% 0%, rgba(31, 216, 122, 0.12), transparent 58%),

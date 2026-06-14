@@ -161,7 +161,7 @@ export default function VsOpenRouter(): JSX.Element {
 
         <section className={styles.footerCta}>
           <h2>Get started in one command.</h2>
-          <pre className={styles.code}>curl -fsSL https://antseed.com/install.sh | sh</pre>
+          <pre className={styles.code}>npm install -g @antseed/cli</pre>
           <p className={styles.footerNote}>
             Open source. Runs locally. <Link to="/docs/install">Full install guide →</Link>
           </p>

@@ -32,7 +32,9 @@
 .hero::before {
   content: '';
   position: absolute;
-  inset: 0 -18% auto;
+  top: 0;
+  left: 0;
+  right: 0;
   height: 430px;
   background:
     radial-gradient(circle at 50% 0%, rgba(232, 163, 61, 0.14), transparent 58%),

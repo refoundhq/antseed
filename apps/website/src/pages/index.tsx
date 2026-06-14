@@ -42,12 +42,18 @@ function LiveBar() {
   return (
     <a href="https://antseedstats.com/network" target="_blank" rel="noopener noreferrer" className={styles.lbar}>
       <span className={styles.litem}><span className={styles.ldot} /> network live</span>
-      {peerCount != null && (
-        <span className={styles.litem}><strong>{peerCount}</strong> active peers</span>
-      )}
-      {serviceCount != null && (
-        <span className={styles.litem}><strong>{serviceCount}</strong> services</span>
-      )}
+      <span className={styles.litem}>
+        <strong className={peerCount == null ? styles.lcountPending : undefined}>
+          {peerCount ?? '--'}
+        </strong>{' '}
+        active peers
+      </span>
+      <span className={styles.litem}>
+        <strong className={serviceCount == null ? styles.lcountPending : undefined}>
+          {serviceCount ?? '--'}
+        </strong>{' '}
+        services
+      </span>
       <span className={styles.liveArrow}>→</span>
     </a>
   );
@@ -383,61 +389,69 @@ const TRACE_LINES: {t: string; c: 'dim' | 'ok' | 'pay' | 'cmd'}[] = [
   {t: '0x3c5e…f102   score 4.6   $3.10/Mtok', c: 'dim'},
   {t: '$ antseed buyer connection set --peer 0x7f3a…c2e1', c: 'cmd'},
   {t: '✔ pinned — proxy live at localhost:8377', c: 'ok'},
-  {t: '⛓ payments settle per request · usdc → seller', c: 'pay'},
+  {t: '$ payments settle per request · usdc → seller', c: 'pay'},
 ];
 
 function RequestTrace() {
-  const ref = useRef<HTMLDivElement>(null);
-  const [chars, setChars] = useState(0);
-  const [lines, setLines] = useState(0);
-
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      setChars(TRACE_CMD.length);
-      setLines(TRACE_LINES.length);
-      return;
-    }
-
-    let timer: ReturnType<typeof setTimeout>;
-    let started = false;
-
-    const typeCmd = (i: number) => {
-      setChars(i);
-      if (i < TRACE_CMD.length) timer = setTimeout(() => typeCmd(i + 1), 16 + Math.random() * 36);
-      else timer = setTimeout(() => reveal(1), 360);
-    };
-    const reveal = (n: number) => {
-      setLines(n);
-      if (n < TRACE_LINES.length) timer = setTimeout(() => reveal(n + 1), 380 + Math.random() * 320);
-      else timer = setTimeout(restart, 4600);
-    };
-    const restart = () => {
-      setChars(0);
-      setLines(0);
-      timer = setTimeout(() => typeCmd(1), 700);
-    };
-
-    const obs = new IntersectionObserver((entries) => {
-      if (!entries[0].isIntersecting || started) return;
-      started = true;
-      timer = setTimeout(() => typeCmd(1), 500);
-      obs.disconnect();
-    }, {threshold: 0.3});
-    obs.observe(el);
-
-    return () => {
-      obs.disconnect();
-      clearTimeout(timer);
-    };
-  }, []);
-
+  const [frame, setFrame] = useState({
+    chars: TRACE_CMD.length,
+    lines: TRACE_LINES.length,
+    cursor: false,
+  });
   const lineCls = {dim: styles.trDim, ok: styles.trOk, pay: styles.trPay, cmd: styles.trCmd};
 
+  useEffect(() => {
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+
+    const typeMs = TRACE_CMD.length * 34;
+    const revealDelayMs = 360;
+    const lineMs = 440;
+    const holdMs = 4600;
+    const resetMs = 700;
+    const revealStartMs = typeMs + revealDelayMs;
+    const revealEndMs = revealStartMs + TRACE_LINES.length * lineMs;
+    const cycleMs = revealEndMs + holdMs + resetMs;
+    const startedAt = performance.now() + 450;
+    let raf = 0;
+
+    const tick = (now: number) => {
+      const elapsed = Math.max(0, now - startedAt) % cycleMs;
+      let next = {
+        chars: TRACE_CMD.length,
+        lines: TRACE_LINES.length,
+        cursor: false,
+      };
+
+      if (elapsed < typeMs) {
+        next = {
+          chars: Math.max(1, Math.floor((elapsed / typeMs) * TRACE_CMD.length)),
+          lines: 0,
+          cursor: true,
+        };
+      } else if (elapsed < revealStartMs) {
+        next = {chars: TRACE_CMD.length, lines: 0, cursor: true};
+      } else if (elapsed < revealEndMs) {
+        next = {
+          chars: TRACE_CMD.length,
+          lines: Math.min(TRACE_LINES.length, Math.floor((elapsed - revealStartMs) / lineMs) + 1),
+          cursor: false,
+        };
+      }
+
+      setFrame((prev) => (
+        prev.chars === next.chars && prev.lines === next.lines && prev.cursor === next.cursor
+          ? prev
+          : next
+      ));
+      raf = requestAnimationFrame(tick);
+    };
+
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, []);
+
   return (
-    <div className={styles.trace} ref={ref} aria-hidden="true">
+    <div className={styles.trace} aria-hidden="true">
       <MarchBorder />
       <div className={styles.traceBar}>
         <span /><span /><span />
@@ -445,11 +459,11 @@ function RequestTrace() {
       </div>
       <div className={styles.traceBody}>
         <div className={styles.traceCmd}>
-          <i>$</i> {TRACE_CMD.slice(0, chars)}
-          <span className={styles.traceCaret} />
+          <i>$</i> {TRACE_CMD.slice(0, frame.chars)}
+          {frame.cursor && <span className={styles.traceCaret} />}
         </div>
         {TRACE_LINES.map((l, i) => (
-          <div key={i} className={`${styles.traceLine} ${lineCls[l.c]} ${i < lines ? styles.traceShow : ''}`}>
+          <div key={i} className={`${styles.traceLine} ${lineCls[l.c]} ${i < frame.lines ? styles.traceShow : ''}`}>
             {l.t}
           </div>
         ))}
@@ -801,11 +815,15 @@ export default function Home(): JSX.Element {
             <pre className={styles.codeCardBody}>
               <span className={styles.cdC}># Claude Code, routed through the network</span>{'\n'}
               <span className={styles.cdP}>$</span> antseed claude{'\n\n'}
-              <span className={styles.cdC}># Codex, same endpoint</span>{'\n'}
-              <span className={styles.cdP}>$</span> antseed codex --model &lt;service-id&gt;{'\n\n'}
-              <span className={styles.cdC}># or any OpenAI/Anthropic-compatible client</span>{'\n'}
-              <span className={styles.cdP}>$</span> curl localhost:8377/v1/models{'\n'}
-              <span className={styles.cdO}>{'  '}minimax{'\n'}{'  '}deepseek-v3{'\n'}{'  '}llama-3-70b <span className={styles.cdDim}>· 23 more</span></span>
+              <span className={styles.cdC}># Codex, pinned to a peer for this model</span>{'\n'}
+              <span className={styles.cdP}>$</span> antseed codex --model 0x7f3a…c2e1@deepseek-v3{'\n\n'}
+              <span className={styles.cdC}># or pin a peer in any compatible client</span>{'\n'}
+              <span className={styles.cdP}>$</span> curl localhost:8377/v1/chat/completions {'\\'}{'\n'}
+              <span className={styles.cdO}>
+                {`  -H 'content-type: application/json' \\`}{'\n'}
+                {`  -d '{"model":"0x7f3a…c2e1@deepseek-v3",`}{'\n'}
+                {`       "messages":[{"role":"user","content":"hi"}]}'`}
+              </span>
             </pre>
             <div className={styles.codeCardFoot}>request → best peer → usdc settlement</div>
           </div>

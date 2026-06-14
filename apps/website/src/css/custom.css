@@ -654,7 +654,10 @@ aside.theme-doc-sidebar-container {
   font-family: var(--as-font-data);
   font-size: 12px;
   width: 100%;
-  display: table;
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .markdown table th {
@@ -1004,6 +1007,16 @@ html[data-theme='light']:has(.homepage-wrapper) .navbar__items--right .navbar__l
 html[data-theme='light']:has(.homepage-wrapper) .navbar__items--right .navbar__link.header-ants-link,
 html[data-theme='light']:has(.homepage-wrapper) .navbar__items--right .navbar__link.header-diem-link {
   color: var(--as-clay) !important;
+}
+html[data-theme='light']:has(.homepage-wrapper) .navbar__toggle {
+  color: #0a0e14 !important;
+  opacity: 0.84;
+}
+html[data-theme='light']:has(.homepage-wrapper) .navbar__toggle:hover,
+html[data-theme='light']:has(.homepage-wrapper) .navbar__toggle:focus-visible {
+  color: #139256 !important;
+  opacity: 1;
+  background: rgba(19, 146, 86, 0.08);
 }
 
 /* Footer — hairline + readable links on the dark field. */
