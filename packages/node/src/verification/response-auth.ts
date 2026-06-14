@@ -114,6 +114,7 @@ export function hashResponse(response: SerializedHttpResponse): string {
 }
 
 function buildResponseAuthSigningBytes(payload: Omit<ResponseAuthPayload, 'signature'>): Uint8Array {
+  const encoder = new TextEncoder();
   const fields = [
     RESPONSE_AUTH_DOMAIN,
     String(payload.version),
@@ -128,8 +129,19 @@ function buildResponseAuthSigningBytes(payload: Omit<ResponseAuthPayload, 'signa
     payload.responseHash,
     String(payload.responseStartedAt),
     String(payload.responseCompletedAt),
-  ];
-  return new TextEncoder().encode(fields.join('|'));
+  ].map((field) => encoder.encode(field));
+
+  const totalLength = fields.reduce((sum, field) => sum + 4 + field.length, 0);
+  const out = new Uint8Array(totalLength);
+  const view = new DataView(out.buffer);
+  let offset = 0;
+  for (const field of fields) {
+    view.setUint32(offset, field.length);
+    offset += 4;
+    out.set(field, offset);
+    offset += field.length;
+  }
+  return out;
 }
 
 function stripStreamingHeader(response: SerializedHttpResponse): SerializedHttpResponse {

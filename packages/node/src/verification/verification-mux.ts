@@ -60,6 +60,15 @@ export class VerificationMux {
     return promise;
   }
 
+  close(): void {
+    for (const pending of this._pendingResponseAuths.values()) {
+      clearTimeout(pending.timer);
+      pending.reject(new Error('VerificationMux closed'));
+    }
+    this._pendingResponseAuths.clear();
+    this._bufferedResponseAuths.clear();
+  }
+
   async handleFrame(frame: FramedMessage): Promise<boolean> {
     const name = MESSAGE_TYPE_NAME[frame.type];
     if (!name) return false;

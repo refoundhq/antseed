@@ -92,6 +92,41 @@ describe('ResponseAuth', () => {
     expect(result.reason).toBe('response_hash_mismatch');
   });
 
+  it('signs and verifies fields containing delimiter characters', () => {
+    const seller = identityFromPrivateKeyHex('11'.repeat(32));
+    const buyer = identityFromPrivateKeyHex('22'.repeat(32));
+    const request = {
+      ...makeRequest(),
+      requestId: 'req|with|pipes',
+    };
+    const response = {
+      ...makeResponse(),
+      requestId: request.requestId,
+    };
+    const channelId = 'channel|with|pipes';
+
+    const payload = createResponseAuthPayload({
+      request,
+      response,
+      buyerPeerId: buyer.peerId,
+      sellerPeerId: seller.peerId,
+      advertisedService: 'claude|sonnet|test',
+      provider: 'anthropic|test',
+      responseStartedAt: 100,
+      responseCompletedAt: 200,
+      channelId,
+    }, seller.wallet);
+
+    expect(verifyResponseAuth(payload, {
+      request,
+      response,
+      buyerPeerId: buyer.peerId,
+      sellerPeerId: seller.peerId,
+      advertisedService: 'claude|sonnet|test',
+      channelId,
+    })).toEqual({ valid: true });
+  });
+
   it('stores lightweight response auth records locally', () => {
     const tempDir = mkdtempSync(join(tmpdir(), 'verification-store-test-'));
     const storage = new VerificationStorage(join(tempDir, 'verification.db'));
@@ -121,6 +156,11 @@ describe('ResponseAuth', () => {
       expect(loaded!.requestHash).toBe(payload.requestHash);
       expect(loaded!.verified).toBe(true);
       expect(loaded!.verificationError).toBeNull();
+
+      (storage as unknown as { _db: { prepare: (sql: string) => { run: (...args: unknown[]) => void } } })
+        ._db.prepare('UPDATE response_auths SET version = ? WHERE request_id = ?')
+        .run(7, payload.requestId);
+      expect(storage.getResponseAuth(payload.requestId)!.version).toBe(7);
     } finally {
       storage.close();
       rmSync(tempDir, { recursive: true, force: true });

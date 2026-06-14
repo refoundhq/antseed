@@ -455,9 +455,7 @@ export class SellerRequestHandler {
           }
         }
 
-        const buyerSupportsResponseAuth =
-          typeof (conn as { hasRemoteCapability?: unknown }).hasRemoteCapability === 'function'
-          && conn.hasRemoteCapability(CONNECTION_CAPABILITY_RESPONSE_AUTH_V1);
+        const buyerSupportsResponseAuth = conn.hasRemoteCapability(CONNECTION_CAPABILITY_RESPONSE_AUTH_V1);
 
         if (responseForAuth && buyerSupportsResponseAuth) {
           const channelId = spm?.getChannelByPeer(buyerPeerId)?.sessionId ?? null;

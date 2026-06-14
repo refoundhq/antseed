@@ -53,6 +53,15 @@ function makeSpmMock(overrides: Record<string, unknown> = {}): any {
   };
 }
 
+function makeConn(sentFrames: Uint8Array[]): any {
+  return {
+    send(frame: Uint8Array) {
+      sentFrames.push(frame);
+    },
+    hasRemoteCapability: () => false,
+  };
+}
+
 describe('SellerRequestHandler payment pricing selection', () => {
   it('routes GET /v1/models to the local handler even when a query string is appended', async () => {
     const provider = makeProvider(1, 1, {
@@ -69,7 +78,7 @@ describe('SellerRequestHandler payment pricing selection', () => {
     });
 
     const sentFrames: Uint8Array[] = [];
-    const conn = { send(frame: Uint8Array) { sentFrames.push(frame); } } as any;
+    const conn = makeConn(sentFrames);
     const paymentMux = { sendNeedAuth: vi.fn(), sendPaymentRequired: vi.fn() } as any;
     const { mux } = handler.handleConnection(conn, 'b'.repeat(40), paymentMux);
 
@@ -109,7 +118,7 @@ describe('SellerRequestHandler payment pricing selection', () => {
     });
 
     const sentFrames: Uint8Array[] = [];
-    const conn = { send(frame: Uint8Array) { sentFrames.push(frame); } } as any;
+    const conn = makeConn(sentFrames);
     const paymentMux = { sendNeedAuth: vi.fn(), sendPaymentRequired: vi.fn() } as any;
     const { mux } = handler.handleConnection(conn, 'b'.repeat(40), paymentMux);
 
@@ -202,7 +211,7 @@ describe('SellerRequestHandler payment pricing selection', () => {
     });
 
     const sentFrames: Uint8Array[] = [];
-    const conn = { send(frame: Uint8Array) { sentFrames.push(frame); } } as any;
+    const conn = makeConn(sentFrames);
     const paymentMux = { sendNeedAuth, sendPaymentRequired: vi.fn() } as any;
 
     const { mux } = handler.handleConnection(conn, 'b'.repeat(40), paymentMux);
@@ -243,7 +252,7 @@ describe('SellerRequestHandler payment pricing selection', () => {
     });
 
     const sentFrames: Uint8Array[] = [];
-    const conn = { send(frame: Uint8Array) { sentFrames.push(frame); } } as any;
+    const conn = makeConn(sentFrames);
     const paymentMux = { sendNeedAuth, sendPaymentRequired: vi.fn() } as any;
     const { mux } = handler.handleConnection(conn, 'b'.repeat(40), paymentMux);
 
@@ -294,7 +303,7 @@ describe('SellerRequestHandler payment pricing selection', () => {
     });
 
     const sentFrames: Uint8Array[] = [];
-    const conn = { send(frame: Uint8Array) { sentFrames.push(frame); } } as any;
+    const conn = makeConn(sentFrames);
     const paymentMux = { sendNeedAuth, sendPaymentRequired: vi.fn() } as any;
     const { mux } = handler.handleConnection(conn, 'b'.repeat(40), paymentMux);
 
@@ -321,7 +330,7 @@ describe('SellerRequestHandler payment pricing selection', () => {
     });
 
     const sentFrames: Uint8Array[] = [];
-    const conn = { send(frame: Uint8Array) { sentFrames.push(frame); } } as any;
+    const conn = makeConn(sentFrames);
     const paymentMux = { sendNeedAuth, sendPaymentRequired } as any;
     const { mux } = handler.handleConnection(conn, 'b'.repeat(40), paymentMux);
 
@@ -355,7 +364,7 @@ describe('SellerRequestHandler payment pricing selection', () => {
     });
 
     const sentFrames: Uint8Array[] = [];
-    const conn = { send(frame: Uint8Array) { sentFrames.push(frame); } } as any;
+    const conn = makeConn(sentFrames);
     const paymentMux = { sendNeedAuth: vi.fn(), sendPaymentRequired } as any;
     const { mux } = handler.handleConnection(conn, 'b'.repeat(40), paymentMux);
 
@@ -389,7 +398,7 @@ describe('SellerRequestHandler payment pricing selection', () => {
     });
 
     const sentFrames: Uint8Array[] = [];
-    const conn = { send(frame: Uint8Array) { sentFrames.push(frame); } } as any;
+    const conn = makeConn(sentFrames);
     const paymentMux = { sendNeedAuth, sendPaymentRequired } as any;
     const { mux } = handler.handleConnection(conn, 'b'.repeat(40), paymentMux);
 
@@ -421,7 +430,7 @@ describe('SellerRequestHandler payment pricing selection', () => {
     });
 
     const sentFrames: Uint8Array[] = [];
-    const conn = { send(frame: Uint8Array) { sentFrames.push(frame); } } as any;
+    const conn = makeConn(sentFrames);
     const paymentMux = { sendNeedAuth, sendPaymentRequired } as any;
     const { mux } = handler.handleConnection(conn, 'b'.repeat(40), paymentMux);
 
@@ -458,7 +467,7 @@ describe('SellerRequestHandler payment pricing selection', () => {
     });
 
     const sentFrames: Uint8Array[] = [];
-    const conn = { send(frame: Uint8Array) { sentFrames.push(frame); } } as any;
+    const conn = makeConn(sentFrames);
     const paymentMux = { sendNeedAuth, sendPaymentRequired } as any;
     const { mux } = handler.handleConnection(conn, 'b'.repeat(40), paymentMux);
 
@@ -494,7 +503,7 @@ describe('SellerRequestHandler payment pricing selection', () => {
     });
 
     const sentFrames: Uint8Array[] = [];
-    const conn = { send(frame: Uint8Array) { sentFrames.push(frame); } } as any;
+    const conn = makeConn(sentFrames);
     const paymentMux = { sendNeedAuth, sendPaymentRequired } as any;
     const { mux } = handler.handleConnection(conn, 'b'.repeat(40), paymentMux);
 
@@ -534,7 +543,7 @@ describe('SellerRequestHandler payment pricing selection', () => {
     });
 
     const sentFrames: Uint8Array[] = [];
-    const conn = { send(frame: Uint8Array) { sentFrames.push(frame); } } as any;
+    const conn = makeConn(sentFrames);
     const paymentMux = { sendNeedAuth: vi.fn(), sendPaymentRequired } as any;
     const { mux } = handler.handleConnection(conn, 'b'.repeat(40), paymentMux);
 
@@ -564,7 +573,7 @@ describe('SellerRequestHandler payment pricing selection', () => {
     });
 
     const sentFrames: Uint8Array[] = [];
-    const conn = { send(frame: Uint8Array) { sentFrames.push(frame); } } as any;
+    const conn = makeConn(sentFrames);
     const paymentMux = { sendNeedAuth: vi.fn(), sendPaymentRequired } as any;
     const { mux } = handler.handleConnection(conn, 'b'.repeat(40), paymentMux);
 
@@ -601,7 +610,7 @@ describe('SellerRequestHandler payment pricing selection', () => {
     });
 
     const sentFrames: Uint8Array[] = [];
-    const conn = { send(frame: Uint8Array) { sentFrames.push(frame); } } as any;
+    const conn = makeConn(sentFrames);
     const paymentMux = { sendNeedAuth, sendPaymentRequired } as any;
     const { mux } = handler.handleConnection(conn, 'b'.repeat(40), paymentMux);
 
@@ -644,7 +653,7 @@ describe('SellerRequestHandler payment pricing selection', () => {
     });
 
     const sentFrames: Uint8Array[] = [];
-    const conn = { send(frame: Uint8Array) { sentFrames.push(frame); } } as any;
+    const conn = makeConn(sentFrames);
     const paymentMux = { sendNeedAuth: vi.fn(), sendPaymentRequired } as any;
     const { mux } = handler.handleConnection(conn, 'b'.repeat(40), paymentMux);
 
@@ -677,7 +686,7 @@ describe('SellerRequestHandler payment pricing selection', () => {
     });
 
     const sentFrames: Uint8Array[] = [];
-    const conn = { send(frame: Uint8Array) { sentFrames.push(frame); } } as any;
+    const conn = makeConn(sentFrames);
     const paymentMux = { sendNeedAuth, sendPaymentRequired } as any;
     const { mux } = handler.handleConnection(conn, 'b'.repeat(40), paymentMux);
 

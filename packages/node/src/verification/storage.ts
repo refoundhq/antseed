@@ -131,7 +131,7 @@ interface ResponseAuthRow {
 
 function rowToResponseAuth(row: ResponseAuthRow): StoredResponseAuth {
   return {
-    version: 1,
+    version: row.version as 1,
     requestId: row.request_id,
     ...(row.channel_id ? { channelId: row.channel_id } : {}),
     buyerPeerId: row.buyer_peer_id,

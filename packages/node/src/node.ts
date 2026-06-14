@@ -408,6 +408,9 @@ export class AntseedNode extends EventEmitter {
     // Close all proxy muxes
     this._muxes.clear();
     this._paymentMuxes.clear();
+    for (const verificationMux of this._verificationMuxes.values()) {
+      verificationMux.close();
+    }
     this._verificationMuxes.clear();
     this._decoders.clear();
 
@@ -1038,6 +1041,8 @@ export class AntseedNode extends EventEmitter {
         this._muxes.get(peerId)?.abortPendingUploads();
         this._muxes.delete(peerId);
         this._paymentMuxes.delete(peerId);
+        this._verificationMuxes.get(peerId)?.close();
+        this._verificationMuxes.delete(peerId);
         this._decoders.delete(peerId);
         // Clean up buyer-side payment state on disconnect
         this._buyerNegotiator?.onPeerDisconnect(peerId);

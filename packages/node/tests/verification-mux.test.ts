@@ -44,4 +44,15 @@ describe('VerificationMux', () => {
       advertisedService: 'claude-sonnet-test',
     });
   });
+
+  it('rejects pending response auth waits when closed', async () => {
+    const mux = new VerificationMux({
+      send: () => {},
+    } as unknown as PeerConnection);
+
+    const waiter = mux.waitForResponseAuth('req-1', 10_000);
+    mux.close();
+
+    await expect(waiter).rejects.toThrow('VerificationMux closed');
+  });
 });
