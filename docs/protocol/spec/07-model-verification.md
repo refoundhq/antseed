@@ -330,6 +330,24 @@ evidence. Strong enforcement requires cross-family agreement or arbiter
 confirmation. Active verifier families send dedicated audit probes; passive
 families can also score ordinary signed traffic that the Buyer already sampled.
 
+The family names below are protocol categories. They intentionally map to several
+public research directions and tools that AntSeed can track or implement over
+time without treating any single paper as authoritative:
+
+| Spec family | Related public direction | AntSeed role |
+|---|---|---|
+| F1 KBF | KBF / knowledge-boundary fingerprints | Active numeric recall probes near model knowledge boundaries |
+| F2 Behavioral | LLMmap-style behavioral/model-identification probes | Active black-box behavior and style classification |
+| F3 Adversarial triggers | TRAP-style targeted adversarial prompt honeypots; LLMPrint-style prompt-injection fingerprints | Private active triggers and robust prompt-derived fingerprints |
+| F4 Perturbation | ZeroPrint-style perturbation / zeroth-order evidence | Response-surface fingerprints across semantic-preserving changes |
+| F5 Tokenizer / rare-token | UTF / under-trained token fingerprints | Rare-token, tokenizer-sensitive, and under-trained-token probes |
+| F7 Output distribution | Logprob, seed, repeated-sampling, and output-statistic methods | Distributional checks when the upstream-compatible API exposes enough signal |
+| F8 Runtime / service | Julius-style LLM service fingerprinting | Serving stack, relay, protocol, and platform fingerprints |
+| F9 Passive authorship | READER-style dynamic black-box provenance | Passive authorship evidence over ordinary signed Seller responses |
+
+These references are inspirations and target verifier families, not implemented
+integrations unless the implementation status section says otherwise.
+
 ### F1 — Knowledge Boundary Fingerprinting (KBF)
 
 KBF probes facts near the claimed model's knowledge boundary: the reference model
@@ -380,7 +398,9 @@ routing and triage signal unless combined with stronger evidence.
 
 The Buyer sends private trigger prompts that produce distinctive behavior in the
 reference model but not in common substitutes. These prompts can include unusual
-formatting, suffixes, ordering constraints, or instruction conflicts.
+formatting, suffixes, ordering constraints, or instruction conflicts. This family
+covers TRAP-style targeted adversarial prompt honeypots and LLMPrint-style
+prompt-injection fingerprints when adapted to AntSeed's evidence format.
 
 Triggers MUST be private and rotatable. Public triggers become defeat devices:
 the Seller can route trigger-looking traffic to the real model and cheap traffic
@@ -391,6 +411,9 @@ elsewhere.
 The Buyer sends a base prompt and a set of semantic-preserving perturbations:
 synonym swaps, clause reordering, punctuation changes, or equivalent JSON key
 orderings. The verifier scores how output changes across the perturbation set.
+This family can host ZeroPrint-style black-box perturbation and zeroth-order
+fingerprint methods when their reference and scoring artifacts are represented
+as signed fingerprint packs.
 
 This tests the model's response surface, not only its final answer. It is more
 expensive than KBF because one logical probe expands into multiple requests.
@@ -399,7 +422,8 @@ expensive than KBF because one logical probe expands into multiple requests.
 
 The Buyer uses prompts containing rare token fragments, unusual Unicode, or
 tokenizer-sensitive strings. Models with different tokenizers or pretraining
-distributions often degrade differently.
+distributions often degrade differently. UTF-style under-trained-token probes
+belong in this family when they can be represented as Buyer-run black-box tests.
 
 This family is useful for detecting model families and serving stacks. It is
 fragile across sanitizers, relays, and wrapper systems, so it SHOULD NOT be the
@@ -430,7 +454,8 @@ or upstream-compatible API. Missing logprobs is not an adverse signal by itself.
 The Buyer observes protocol and runtime behavior: error shapes, streaming chunk
 cadence, headers, timeout behavior, context-window failure modes, and
 OpenAI/Anthropic compatibility quirks. This identifies serving software or relay
-type more than model identity.
+type more than model identity. Julius-style LLM service fingerprinting belongs
+in this family.
 
 Runtime fingerprints are triage signals. They can justify increasing KBF or
 shadow-sampling budget, but they MUST NOT drive slashing directly.
