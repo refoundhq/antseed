@@ -341,12 +341,16 @@ time without treating any single paper as authoritative:
 | F3 Adversarial triggers | TRAP-style targeted adversarial prompt honeypots; LLMPrint-style prompt-injection fingerprints | Private active triggers and robust prompt-derived fingerprints |
 | F4 Perturbation | ZeroPrint-style perturbation / zeroth-order evidence | Response-surface fingerprints across semantic-preserving changes |
 | F5 Tokenizer / rare-token | UTF / under-trained token fingerprints | Rare-token, tokenizer-sensitive, and under-trained-token probes |
-| F7 Output distribution | Logprob, seed, repeated-sampling, and output-statistic methods | Distributional checks when the upstream-compatible API exposes enough signal |
+| F7 Output distribution | Logprob, seed, repeated-sampling, output-statistic methods; adjacent real-time output-verification primitives | Distributional checks when the upstream-compatible API exposes enough signal |
 | F8 Runtime / service | Julius-style LLM service fingerprinting | Serving stack, relay, protocol, and platform fingerprints |
 | F9 Passive authorship | READER-style dynamic black-box provenance | Passive authorship evidence over ordinary signed Seller responses |
+| Adjacent ownership/IP | DNF-style nested/model-ownership fingerprints | Future evidence family for ownership and derivative-model disputes, not day-one API substitution enforcement |
 
 These references are inspirations and target verifier families, not implemented
-integrations unless the implementation status section says otherwise.
+integrations unless the implementation status section says otherwise. Adjacent
+ownership or generic output-verification work can inform future modules, but it
+MUST NOT be treated as a live AntSeed verifier until represented as reproducible
+Buyer-run code, references, and audit-result schemas.
 
 ### F1 — Knowledge Boundary Fingerprinting (KBF)
 
@@ -444,7 +448,9 @@ including wrappers. For model-identity slashing, the verifier MUST distinguish
 
 When an API supports seeds, logprobs, top-token data, or repeated stochastic
 sampling, the verifier compares output distributions instead of single answers.
-This is strong when available and unavailable on many endpoints.
+This is strong when available and unavailable on many endpoints. Adjacent
+real-time output-verification primitives may fit here when they can be calibrated
+against signed AntSeed response samples.
 
 The verifier MUST record which distribution features were exposed by the Seller
 or upstream-compatible API. Missing logprobs is not an adverse signal by itself.
@@ -459,6 +465,16 @@ in this family.
 
 Runtime fingerprints are triage signals. They can justify increasing KBF or
 shadow-sampling budget, but they MUST NOT drive slashing directly.
+
+### Adjacent — Ownership / Derivative-Model Fingerprints
+
+Some fingerprinting work is aimed less at live API substitution and more at
+model ownership, derivative-model detection, or intellectual-property disputes.
+DNF-style nested fingerprinting belongs in this adjacent bucket. It can inform
+future AntSeed evidence formats, especially for disputes about copied or
+derived models, but it SHOULD NOT be mixed with day-one API-substitution
+verdicts unless adapted into a Buyer-run black-box verifier with reproducible
+reference artifacts.
 
 ### F9 — Passive Authorship / Provenance Fingerprints
 
