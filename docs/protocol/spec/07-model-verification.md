@@ -1,9 +1,9 @@
 # 07 - Model Verification
 
-**Status:** Proposed / design. `ResponseAuth` and buyer-local verification
-samples may be implemented independently of this document; the model
-fingerprint verifiers, reference store, audit runner, and slashing path described
-below are the next implementation targets.
+**Status:** Mixed. `ResponseAuth`, `VerificationMux`, buyer-side response-auth
+storage, and random buyer-side request/response evidence samples are implemented
+in `@antseed/node`. Fingerprint verifiers, fingerprint swarm distribution,
+reference storage, audit runners, and slashing are proposed next-step work.
 
 ## Overview
 
@@ -26,6 +26,91 @@ response evidence. The Seller is not trusted to provide the fingerprint result.
 
 There is no central verification authority. Every mechanism here is either
 Buyer-local or settled through existing peer-to-peer and on-chain primitives.
+
+---
+
+## Implementation Status
+
+This spec intentionally separates the evidence substrate that already exists
+from the fingerprint/audit layers that still need to be built.
+
+### Implemented
+
+Implemented in the `@antseed/node` package:
+
+- `ResponseAuthPayload` protocol type:
+  - `version`;
+  - `requestId`;
+  - optional `channelId`;
+  - `buyerPeerId`;
+  - `sellerPeerId`;
+  - `advertisedService`;
+  - `provider`;
+  - `statusCode`;
+  - `requestHash`;
+  - `responseHash`;
+  - `responseStartedAt`;
+  - `responseCompletedAt`;
+  - `signature`.
+- Connection capability:
+  - `verification.response-auth.v1`.
+- Verification frame:
+  - `MessageType.VerificationResponseAuth = 0x80`.
+- `VerificationMux`:
+  - sends response-auth frames;
+  - waits by `requestId`;
+  - buffers out-of-order auths;
+  - allows one listener for unsolicited response-auth handling;
+  - reserves `0x80-0x8f` for verification messages.
+- Seller behavior:
+  - creates `ResponseAuth` after a completed inference response;
+  - signs with the Seller identity;
+  - sends it only when the Buyer advertised `verification.response-auth.v1`,
+    preserving compatibility with older Buyers.
+- Buyer behavior:
+  - waits for `ResponseAuth` after receiving the response;
+  - verifies request hash, response hash, request id, status code, buyer id,
+    seller id, advertised service, optional channel id, and Seller signature;
+  - stores the auth and verification result in `verification.db`.
+- Verification storage:
+  - SQLite table `response_auths`;
+  - indexed by seller, advertised service, and received timestamp.
+- Buyer-side full evidence sampling:
+  - random sample rate default `0.01`;
+  - max encoded request + response bytes default `16 MiB`;
+  - default directory `<dataDir>/verification_samples`;
+  - stores `manifest.json`, `request.bin`, and `response.bin`;
+  - stores only verified `ResponseAuth` samples.
+
+The implemented evidence chain is:
+
+```text
+encoded request bytes
+  -> requestHash
+  -> ResponseAuth.signature
+  -> response_auths row
+  -> optional verification_samples/<sellerPeerId>/<sampleId>/
+```
+
+### Not Implemented Yet
+
+Still proposed:
+
+- `@antseed/fingerprints` package;
+- KBF verifier implementation;
+- non-KBF verifier families;
+- public fingerprint swarm;
+- buyer-local fingerprint reference store;
+- KBF/fingerprint audit runner;
+- audit result manifests under `<dataDir>/fingerprints/audits`;
+- forced evidence storage for audit probes;
+- local routing policy based on fingerprint verdicts;
+- commit-reveal for slashable audits;
+- off-chain exhibit verifier;
+- on-chain slash signal for confirmed substitution.
+
+The next implementation should build on the existing `ResponseAuth` and
+verification sample substrate instead of replacing it.
 
 ---
 
@@ -122,21 +207,63 @@ M1 and M2 let a Buyer adjust its **own** routing. They do not, by themselves,
 support a verdict any third party can trust, because an unsigned response is
 hearsay: the Seller can claim the Buyer fabricated it.
 
-To make verdicts portable, the Seller signs every response:
+To make verdicts portable, the Seller signs a `ResponseAuthPayload` after every
+completed response when the Buyer supports `verification.response-auth.v1`.
 
-```
-responseAuth = sign_secp256k1( DOMAIN_TAG || keccak256(requestBytes) || keccak256(responseBytes) )
+```jsonc
+{
+  "version": 1,
+  "requestId": "req-...",
+  "channelId": "0x...",
+  "buyerPeerId": "0x...",
+  "sellerPeerId": "0x...",
+  "advertisedService": "gpt-5.4",
+  "provider": "openai",
+  "statusCode": 200,
+  "requestHash": "0x...",
+  "responseHash": "0x...",
+  "responseStartedAt": 1790000000000,
+  "responseCompletedAt": 1790000001200,
+  "signature": "0x..."
+}
 ```
 
-- Signature format per [00-conventions.md](./00-conventions.md): 130-hex
-  secp256k1 (EIP-191), recovered to the Seller's PeerId (its EVM address).
-- The signature is attached to the per-request receipt (see
-  [03-metering.md](./03-metering.md)), **not** requested per-response. Requesting
-  a signature on specific responses would itself be a distinguishable probe (M1's
-  flaw); the Seller signs unconditionally so it cannot know which responses will
-  later be scrutinized.
-- The signature binds *who emitted which bytes for which request*. It carries no
-  quality claim on its own — quality comes from M2's statistics.
+The merged implementation signs the following length-prefixed fields under the
+domain tag `antseed-response-auth-v1`:
+
+```text
+domainTag
+version
+requestId
+channelId || ""
+buyerPeerId
+sellerPeerId
+advertisedService
+provider
+statusCode
+requestHash
+responseHash
+responseStartedAt
+responseCompletedAt
+```
+
+- `requestHash = keccak256(encodeHttpRequest(request))`.
+- `responseHash = keccak256(encodeHttpResponse(responseWithoutStreamingHeader))`.
+- The streaming marker header is stripped before response hashing so streamed
+  and reconstructed responses hash consistently.
+- Signature verification recovers against the normalized Seller PeerId.
+- The Buyer verifies request hash, response hash, request id, status code, buyer
+  id, seller id, advertised service, optional channel id, and signature.
+- `ResponseAuth` is transported via `VerificationMux` as
+  `MessageType.VerificationResponseAuth = 0x80`.
+- The Buyer stores all received auths and verification results in the
+  `response_auths` SQLite table.
+- The Buyer may randomly store full request/response evidence in
+  `<dataDir>/verification_samples`.
+
+The signature binds *who emitted which bytes for which request*. It carries no
+quality claim on its own — quality comes from M2's statistics or the fingerprint
+verifiers in this spec.
 
 The hash is a binding commitment, not a privacy mechanism: the Buyer retains full
 plaintext. Hashing only avoids signing megabytes and lets a third party recompute
@@ -145,9 +272,14 @@ and verify cheaply.
 Any Seller participating in a verifiable/signed trust tier MUST sign every
 response requested by a Buyer that advertises `ResponseAuth` support. The
 signature is unconditional: the Seller does not learn which responses the Buyer
-will later sample, audit, or dispute. Backward compatibility with old Buyers is
-handled at connection-capability negotiation time; it is not a Seller opt-out
-from signing when the Buyer supports the mechanism.
+will later sample, audit, or dispute.
+
+Backward compatibility is implemented by connection-capability negotiation:
+
+- new Seller + new Buyer: Seller sends `ResponseAuth`;
+- new Seller + old Buyer: Seller does not send unsupported verification frames;
+- old Seller + new Buyer: Buyer logs missing `ResponseAuth` and treats it as
+  unavailable evidence, not a transport failure.
 
 ### M4 — Passive Fingerprinting (free; always on; triage only)
 
@@ -596,8 +728,11 @@ package only if it is transport-agnostic. Actual sending belongs in
 
 ### ResponseAuth Requirement
 
-Every audit request MUST require a valid `ResponseAuth` before its response can
-enter a verifier result. Missing or invalid auth produces:
+The underlying `ResponseAuth` mechanism is implemented for normal Buyer/Seller
+requests when both peers support `verification.response-auth.v1`. The fingerprint
+audit runner is not implemented yet, but when it is, every audit request MUST
+require a valid `ResponseAuth` before its response can enter a verifier result.
+Missing or invalid auth produces:
 
 ```text
 auditProbeStatus = "unauthenticated"
@@ -608,8 +743,11 @@ non-cooperation for routing/reputation policy.
 
 ### Evidence Sampling
 
-Audit requests SHOULD be stored even if the normal random verification sampler
-would skip them. The sample directory format remains:
+Random buyer-side evidence sampling is implemented today for verified
+`ResponseAuth` records. Audit-specific forced sampling is not implemented yet.
+When fingerprint audits are added, audit requests SHOULD be stored even if the
+normal random verification sampler would skip them. The sample directory format
+remains:
 
 ```text
 <dataDir>/verification_samples/
@@ -722,9 +860,11 @@ sampled, and what is rare:
 
 **Every request (100%):**
 
-1. Buyer → Seller request; Seller → response with `responseAuth` (M3).
+1. Buyer → Seller request; Seller → response; Seller also sends `ResponseAuth`
+   when both peers negotiated `verification.response-auth.v1` (M3).
 2. Buyer verifies `responseAuth` recovers to the Seller's PeerId and stores the
-   auth payload in verification storage.
+   auth payload in verification storage. If no auth arrives, Buyer logs missing
+   evidence rather than failing the HTTP response.
 3. Buyer may store full request/response bytes in the verification sample
    directory according to local sampling policy.
 4. Buyer updates passive fingerprint statistics (M4).
@@ -901,6 +1041,9 @@ step 9, which does not depend on the Buyer's samples at all.
 
 | Parameter | Symbol | Default | Notes |
 |---|---|---|---|
+| ResponseAuth wait grace | — | 30s | Implemented Buyer wait after response before logging missing auth |
+| Verification sample rate | — | 0.01 | Implemented random full evidence sample rate for verified auths |
+| Verification sample byte cap | — | 16 MiB | Implemented max encoded request + response bytes per sample |
 | Sample rate | `p` | 0.02 | Fraction of real requests duplicated to reference (M2) |
 | Min samples per verdict | `N` | 30 | Below this, no M2 verdict is emitted |
 | Distributional fail threshold | — | tuned on real traffic | Drives *local* flagging only |
@@ -918,6 +1061,16 @@ decision in step 9, not a Buyer-side constant.
 ---
 
 ## Implementation Milestones
+
+Completed milestones:
+
+1. ResponseAuth substrate:
+   - protocol type and codec;
+   - `VerificationMux`;
+   - capability-gated Seller sending;
+   - Buyer verification;
+   - `verification.db` response-auth storage;
+   - random verified request/response evidence samples.
 
 The next implementation SHOULD proceed in small PRs with clean package
 boundaries:
@@ -1018,11 +1171,13 @@ commit-reveal, reproducible verifier code, and independent adjudication.
 | F1 KBF | low to medium | knowledge-boundary mismatch | Local routing; slashing only after dispute |
 | F2-F8 Fingerprint suite | variable | behavioral/runtime/model-family mismatch | Local routing and triage unless independently confirmed |
 
-The recommended next implementation is **M3 + `@antseed/fingerprints` + public
-fingerprint packs + buyer-local audit storage**: sign every response, implement
-the shared fingerprint package with KBF as the first verifier, publish and mirror
-signed public fingerprint packs, store trusted references by content hash, run
-Buyer-side audits through the normal request path, and persist auditable
-manifests that point to signed request/response samples. M2 remains the stronger
-long-term distributional check for real traffic; F2-F8 expand the suite through
-the same package and public fingerprint swarm. On-chain slashing comes last.
+The implemented base is **M3 ResponseAuth + buyer-side verification storage +
+random verified evidence samples**. The recommended next implementation is
+**`@antseed/fingerprints` + public fingerprint packs + buyer-local audit
+storage**: implement the shared fingerprint package with KBF as the first
+verifier, publish and mirror signed public fingerprint packs, store trusted
+references by content hash, run Buyer-side audits through the normal request
+path, and persist auditable manifests that point to signed request/response
+samples. M2 remains the stronger long-term distributional check for real
+traffic; F2-F8 expand the suite through the same package and public fingerprint
+swarm. On-chain slashing comes last.
