@@ -97,11 +97,12 @@ encoded request bytes
 Still proposed:
 
 - `@antseed/fingerprints` package;
-- KBF verifier implementation;
-- non-KBF verifier families, including passive authorship/provenance verifiers;
+- initial verifier set implementation, including KBF, behavioral probes,
+  service/runtime fingerprints, and passive authorship/provenance verifiers;
+- remaining verifier families behind the same shared interface;
 - public fingerprint swarm;
 - buyer-local fingerprint reference store;
-- KBF/fingerprint audit runner;
+- fingerprint audit runners for active probes and passive sample analysis;
 - audit result manifests under `<dataDir>/fingerprints/audits`;
 - forced evidence storage for audit probes;
 - local routing policy based on fingerprint verdicts;
@@ -475,8 +476,9 @@ orchestration.
 
 Day-one pure TypeScript package. No P2P, payment, SQLite, or provider
 dependencies. This package is the canonical home for verifier interfaces,
-reference schemas, public fingerprint-pack schemas, and the first implemented
-verifier family.
+reference schemas, public fingerprint-pack schemas, and the initial implemented
+verifier set. KBF is important, but it is one module in the set, not the whole
+verification strategy.
 
 Responsibilities:
 
@@ -484,13 +486,13 @@ Responsibilities:
 - shared reference, probe, audit-result, and fingerprint-pack schemas;
 - canonical JSON hashing for reference IDs, pack IDs, and audit IDs;
 - verifier registry and dispatch by `kind`;
-- KBF schemas and validators;
-- domain definitions and tolerances;
-- prompt construction;
-- numeric parser;
-- match-vector scoring;
-- CP99 / binomial statistics;
-- verdict computation;
+- kind-specific schemas and validators for the initial verifier set;
+- active-probe prompt construction;
+- passive-sample feature extraction;
+- parsers for numeric, structural, tokenizer-sensitive, and runtime features;
+- match-vector, classifier, distributional, and evidence-accumulation scoring;
+- CP99 / binomial and other verifier-specific statistics;
+- deterministic verdict computation;
 - fixtures and tests using small public reference files;
 - import/export helpers for public fingerprint packs.
 
@@ -503,7 +505,8 @@ Non-responsibilities:
 - fingerprint swarm discovery, fetching, seeding, and mirroring;
 - slashing.
 
-KBF is implemented as the first verifier module inside this package:
+The package SHOULD implement a small initial verifier set instead of a
+KBF-only package:
 
 ```text
 packages/fingerprints/
@@ -512,17 +515,19 @@ packages/fingerprints/
     types.ts
     canonical-json.ts
     verifiers/
-      kbf/
-        index.ts
-        domains.ts
-        parser.ts
-        scoring.ts
-        verdict.ts
+      kbf/                  # active knowledge-boundary probes
+      behavioral/           # active behavioral/classifier probes
+      runtime/              # service/runtime fingerprints
+      passive-authorship/   # READER-style evidence accumulation over samples
 ```
 
-Future verifier families (behavioral classifiers, perturbation tests, rare-token
-tests, runtime fingerprints) MUST plug into the same package-level interfaces
-instead of creating one-off package APIs.
+KBF can still be the first active probe module because it is mechanically scored
+and cheap enough for routine audits. The package boundary MUST NOT assume KBF is
+the only day-one verifier. Behavioral classifiers, runtime fingerprints, and
+passive authorship/provenance verifiers SHOULD plug into the same interfaces from
+the start. Perturbation, rare-token/tokenizer, adversarial-trigger,
+instruction-hierarchy, and output-distribution modules can then be added without
+creating one-off package APIs.
 
 ### `@antseed/fingerprint-swarm`
 
@@ -1109,17 +1114,17 @@ boundaries:
 
 1. `@antseed/fingerprints` pure package:
    - shared `FingerprintVerifier` interface;
-   - schema types for references, fingerprint packs, probes, match vectors, and
-     results;
+   - schema types for references, fingerprint packs, probes, match vectors,
+     passive samples, and results;
    - canonical JSON hash helper;
    - verifier registry;
    - public pack import/export helpers;
-   - KBF verifier module;
-   - numeric parser;
-   - tolerance matcher;
-   - CP99 and binomial functions;
-   - verdict computation;
-   - unit tests with small fixture references.
+   - initial verifier modules for KBF, behavioral probes, service/runtime
+     fingerprints, and passive authorship/provenance;
+   - shared parsers, feature extractors, tolerance matchers, evidence
+     accumulators, CP99/binomial helpers, and verifier-specific statistics;
+   - deterministic verdict computation;
+   - unit tests with small fixture references and signed sample manifests.
 
 2. Fingerprint swarm support:
    - define pack signing bytes;
@@ -1138,12 +1143,15 @@ boundaries:
    - write under `<dataDir>/fingerprints/references/<referenceId>.json`;
    - list references by `serviceAliases`.
 
-4. KBF audit runner in `@antseed/node`:
-   - select Seller/service/reference;
-   - construct KBF request batches;
-   - send through the ordinary Buyer request path;
-   - require verified `ResponseAuth`;
-   - force-store audit request/response samples;
+4. Fingerprint audit runners in `@antseed/node`:
+   - select Seller/service/reference/verifier kind;
+   - construct request batches for active verifiers such as KBF and behavioral
+     probes;
+   - send active probes through the ordinary Buyer request path;
+   - consume verified historical samples for passive authorship/provenance
+     verifiers;
+   - require verified `ResponseAuth` before any response enters an audit result;
+   - force-store active audit request/response samples;
    - call `@antseed/fingerprints` to compute the verdict;
    - write `<dataDir>/fingerprints/audits/<sellerPeerId>/<auditId>.json`.
 
@@ -1152,10 +1160,12 @@ boundaries:
    - increase audit rate for `UNDETERMINED` or unauthenticated probes;
    - surface audit status in diagnostics without broadcasting raw prompts.
 
-6. Additional fingerprint families:
-   - add behavioral-classifier, perturbation, rare-token, instruction-hierarchy,
-     output-distribution, runtime, and passive authorship/provenance verifier
-     modules behind the day-one `FingerprintVerifier` interface;
+6. Expand the verifier suite:
+   - add adversarial-trigger, perturbation, rare-token/tokenizer,
+     instruction-hierarchy, and output-distribution modules behind the same
+     `FingerprintVerifier` interface;
+   - improve KBF, behavioral, runtime, and passive-authorship modules as better
+     public research and references become available;
    - keep each verifier module transport-agnostic;
    - reuse the same reference store, sample store, and audit-result schema.
 
@@ -1206,10 +1216,10 @@ commit-reveal, reproducible verifier code, and independent adjudication.
 The implemented base is **M3 ResponseAuth + buyer-side verification storage +
 random verified evidence samples**. The recommended next implementation is
 **`@antseed/fingerprints` + public fingerprint packs + buyer-local audit
-storage**: implement the shared fingerprint package with KBF as the first
-verifier, publish and mirror signed public fingerprint packs, store trusted
-references by content hash, run Buyer-side audits through the normal request
-path, and persist auditable manifests that point to signed request/response
-samples. M2 remains the stronger long-term distributional check for real
-traffic; F2-F9 expand the suite through the same package and public fingerprint
+storage**: implement the shared fingerprint package with an initial verifier set
+rather than a KBF-only path, publish and mirror signed public fingerprint packs,
+store trusted references by content hash, run Buyer-side audits through the
+normal request path, and persist auditable manifests that point to signed
+request/response samples. M2 remains the stronger long-term distributional check
+for real traffic; F1-F9 expand through the same package and public fingerprint
 swarm. On-chain slashing comes last.
