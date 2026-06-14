@@ -14,6 +14,7 @@ import type { BuyerPaymentNegotiator } from "./payments/buyer-payment-negotiator
 import { debugLog, debugWarn } from "./utils/debug.js";
 import type { VerificationMux } from "./verification/verification-mux.js";
 import type { VerificationStorage } from "./verification/storage.js";
+import type { VerificationSampler } from "./verification/samples.js";
 import { verifyResponseAuth } from "./verification/response-auth.js";
 
 export interface RequestStreamResponseMetadata {
@@ -46,6 +47,7 @@ export interface BuyerRequestHandlerDeps {
   localPeerId: PeerId;
   negotiator: BuyerPaymentNegotiator | null;
   verificationStorage: VerificationStorage | null;
+  verificationSampler: VerificationSampler | null;
   getConnection: (peer: PeerInfo) => Promise<PeerConnection>;
   getMux: (peerId: PeerId, conn: PeerConnection) => ProxyMux;
   getVerificationMux: (peerId: PeerId, conn: PeerConnection) => VerificationMux;
@@ -338,6 +340,16 @@ export class BuyerRequestHandler {
           receivedAt: Date.now(),
           verified: verification.valid,
           verificationError: verification.reason ?? null,
+        });
+
+        void this._deps.verificationSampler?.maybeStoreResponseAuthSample({
+          request,
+          response,
+          responseAuth: payload,
+          verified: verification.valid,
+          verificationError: verification.reason ?? null,
+        }).catch((err) => {
+          debugWarn(`[BuyerRequest] Failed to store ResponseAuth sample for ${request.requestId.slice(0, 8)}: ${err instanceof Error ? err.message : err}`);
         });
       })
       .catch((err) => {

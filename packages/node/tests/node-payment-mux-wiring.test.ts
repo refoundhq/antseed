@@ -54,6 +54,7 @@ describe('BuyerRequestHandler payment mux wiring', () => {
           recordResponseContent: vi.fn(),
         } as any,
         verificationStorage: null,
+        verificationSampler: null,
         getConnection: vi.fn(async () => conn) as any,
         getMux: vi.fn(() => ({
           sendProxyRequest,
@@ -132,6 +133,7 @@ describe('BuyerRequestHandler payment mux wiring', () => {
           recordResponseContent: vi.fn(),
         } as any,
         verificationStorage: null,
+        verificationSampler: null,
         getConnection: vi.fn(async () => conn) as any,
         getMux: vi.fn(() => ({
           sendProxyRequest,

@@ -79,12 +79,16 @@ export { formatUsdc, parseUsdc } from './payments/usdc-utils.js';
 export { ProxyMux } from './proxy/proxy-mux.js';
 export {
   VerificationMux,
+  VerificationSampler,
   VerificationStorage,
   createResponseAuthPayload,
   verifyResponseAuth,
   hashRequest,
   hashResponse,
+  type ResponseAuthSampleInput,
   type StoredResponseAuth,
+  type StoredVerificationSample,
+  type VerificationSampleConfig,
 } from './verification/index.js';
 export { resolveProvider } from './proxy/provider-detection.js';
 export {
