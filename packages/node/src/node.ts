@@ -466,6 +466,7 @@ export class AntseedNode extends EventEmitter {
       }
       this._verificationStorage = null;
     }
+    this._verificationSampler = null;
 
     if (this._timeoutCheckerInterval) {
       clearInterval(this._timeoutCheckerInterval);

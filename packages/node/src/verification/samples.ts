@@ -1,4 +1,4 @@
-import { randomInt } from 'node:crypto';
+import { randomBytes, randomInt } from 'node:crypto';
 import { mkdir, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { SerializedHttpRequest, SerializedHttpResponse } from '../types/http.js';
@@ -89,6 +89,9 @@ export class VerificationSampler {
 
     await writeFileAtomic(join(directory, 'request.bin'), requestBytes);
     await writeFileAtomic(join(directory, 'response.bin'), responseBytes);
+    // The manifest is the completion marker. Readers should ignore sample
+    // directories without manifest.json because the process may have stopped
+    // between evidence writes.
     await writeFileAtomic(
       join(directory, 'manifest.json'),
       new TextEncoder().encode(JSON.stringify(manifest, null, 2)),
@@ -142,7 +145,7 @@ function cryptoRandomFloat(): number {
 }
 
 async function writeFileAtomic(path: string, data: Uint8Array): Promise<void> {
-  const tmp = `${path}.${process.pid}.${Date.now()}.tmp`;
+  const tmp = `${path}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`;
   await writeFile(tmp, data);
   await rename(tmp, path);
 }
