@@ -20,6 +20,10 @@ describe('json-codec utilities', () => {
       maxBytes: 4,
       payloadName: 'Test payload',
     })).toThrow('Test payload too large');
+    expect(() => parseJsonObject(new TextEncoder().encode('{"too":"large"}'), {
+      maxBytes: 4,
+      payloadName: 'Test payload',
+    })).toThrow('Test payload too large');
   });
 
   it('returns null from tryParseJsonObject for invalid inputs', () => {
@@ -40,5 +44,7 @@ describe('json-codec utilities', () => {
     expect(requireFiniteNumberField(obj, 'count')).toBe(3);
     expect(() => requireStringField(obj, 'missing')).toThrow('Missing or invalid string field');
     expect(() => requireFiniteNumberField({ count: Number.NaN }, 'count')).toThrow('Missing or invalid number field');
+    expect(() => requireFiniteNumberField({ count: Infinity }, 'count')).toThrow('Missing or invalid number field');
+    expect(() => requireFiniteNumberField({ count: -Infinity }, 'count')).toThrow('Missing or invalid number field');
   });
 });
