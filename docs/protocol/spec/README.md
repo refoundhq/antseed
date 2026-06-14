@@ -1,6 +1,6 @@
 # Antseed Network Protocol Specification
 
-**Version:** 1.0 (current discovery metadata format uses `METADATA_VERSION = 8`)
+**Version:** 1.4 (current discovery metadata format uses `METADATA_VERSION = 8`)
 
 ## Overview
 
@@ -42,7 +42,7 @@ A single node may act as both a Seller and a Buyer simultaneously.
 
 ## Protocol Layers
 
-The Antseed protocol is organized into five functional layers plus one cross-cutting security layer:
+The Antseed protocol is organized into seven functional layers plus one cross-cutting security layer:
 
 ### 1. Discovery
 
@@ -86,6 +86,12 @@ How a buyer gains confidence that the model it paid for is the model it received
 
 See: [07-model-verification.md](./07-model-verification.md)
 
+### 8. Fingerprint Swarm
+
+How public model fingerprints are distributed like a torrent: signed pack announcements, content-addressed pack fetches, peer seeding, mirrors, and local trust policy. Proposed / design.
+
+See: [08-fingerprint-swarm.md](./08-fingerprint-swarm.md)
+
 ## Specification Documents
 
 | Document | Layer | Description |
@@ -98,11 +104,14 @@ See: [07-model-verification.md](./07-model-verification.md)
 | [05-reputation.md](./05-reputation.md) | Reputation | Trust and reputation system |
 | [06-security-overview.md](./06-security-overview.md) | Security | Cross-layer security model, controls, and hardening priorities |
 | [07-model-verification.md](./07-model-verification.md) | Verification | Verifying that the served model matches the advertised model (proposed) |
+| [08-fingerprint-swarm.md](./08-fingerprint-swarm.md) | Fingerprint Swarm | Torrent-style public distribution of signed fingerprint packs (proposed) |
 
 ## Version History
 
 | Version | Date | Notes |
 |---|---|---|
+| 1.4 | 2026-06-14 | Split torrent-style fingerprint swarm into its own spec and linked it from model verification |
+| 1.3 | 2026-06-14 | Expanded model-verification spec with day-one fingerprint suite, decentralized public fingerprint packs, reference storage, audit manifests, and slashing roadmap |
 | 1.2 | 2026-06-13 | Added model-verification design spec (proposed) |
 | 1.1 | 2026-03-01 | Added cross-layer security overview for buyer-seller flow |
 | 1.0 | 2026-02-18 | Initial protocol specification |
