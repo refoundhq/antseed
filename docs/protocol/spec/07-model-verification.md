@@ -98,7 +98,7 @@ Still proposed:
 
 - `@antseed/fingerprints` package;
 - KBF verifier implementation;
-- non-KBF verifier families;
+- non-KBF verifier families, including passive authorship/provenance verifiers;
 - public fingerprint swarm;
 - buyer-local fingerprint reference store;
 - KBF/fingerprint audit runner;
@@ -326,7 +326,8 @@ Every verifier MUST follow the same contract:
 The initial suite SHOULD include the following verifier families. Each family is
 independent; a failure by one family is routing evidence, not automatic slashing
 evidence. Strong enforcement requires cross-family agreement or arbiter
-confirmation.
+confirmation. Active verifier families send dedicated audit probes; passive
+families can also score ordinary signed traffic that the Buyer already sampled.
 
 ### F1 — Knowledge Boundary Fingerprinting (KBF)
 
@@ -432,6 +433,36 @@ type more than model identity.
 
 Runtime fingerprints are triage signals. They can justify increasing KBF or
 shadow-sampling budget, but they MUST NOT drive slashing directly.
+
+### F9 — Passive Authorship / Provenance Fingerprints
+
+The Buyer scores ordinary signed Seller responses after the fact, instead of
+only sending dedicated audit prompts. A passive verifier maps black-box outputs
+into a reference or proxy representation space, extracts model-authorship
+evidence from each response, and accumulates evidence across independently
+sampled prompts.
+
+This family is useful for AntSeed because `ResponseAuth` already makes historical
+responses attributable: the Buyer can prove which Seller served each response
+hash, then run a provenance verifier over the retained response samples. A
+READER-style verifier, for example, can treat a frozen proxy LLM as a reader of
+hidden authorship evidence and aggregate per-response log-posterior evidence
+across normal traffic.
+
+Passive authorship fingerprints are complementary to active probes such as KBF:
+
+- active probes ask targeted questions chosen by the Buyer;
+- passive provenance verifiers audit real traffic the Seller did not know would
+  be scored;
+- both depend on verified response evidence before their output can be used in
+  routing or disputes.
+
+The verifier MUST record the proxy model, feature extractor, calibration set,
+reference labels, prompt/sample selection policy, and confidence calibration used
+for a verdict. A passive `SAME` or top-1 attribution score MUST NOT be presented
+as cryptographic proof of model identity. Adverse passive verdicts SHOULD be
+treated as routing evidence or as a trigger for active probes unless confirmed by
+independent verifier families.
 
 ---
 
@@ -867,7 +898,8 @@ sampled, and what is rare:
    evidence rather than failing the HTTP response.
 3. Buyer may store full request/response bytes in the verification sample
    directory according to local sampling policy.
-4. Buyer updates passive fingerprint statistics (M4).
+4. Buyer updates passive fingerprint statistics (M4), including any configured
+   F9 authorship/provenance accumulators over verified historical responses.
 
 **Sampled request (`p`, Seller cannot tell which):**
 
@@ -1122,8 +1154,8 @@ boundaries:
 
 6. Additional fingerprint families:
    - add behavioral-classifier, perturbation, rare-token, instruction-hierarchy,
-     output-distribution, and runtime verifier modules behind the day-one
-     `FingerprintVerifier` interface;
+     output-distribution, runtime, and passive authorship/provenance verifier
+     modules behind the day-one `FingerprintVerifier` interface;
    - keep each verifier module transport-agnostic;
    - reuse the same reference store, sample store, and audit-result schema.
 
@@ -1169,7 +1201,7 @@ commit-reveal, reproducible verifier code, and independent adjudication.
 | M4 Passive fingerprinting | free | gross outliers | No (triage) |
 | M5 TEE attestation | premium | proves served endpoint/weights | Authoritative |
 | F1 KBF | low to medium | knowledge-boundary mismatch | Local routing; slashing only after dispute |
-| F2-F8 Fingerprint suite | variable | behavioral/runtime/model-family mismatch | Local routing and triage unless independently confirmed |
+| F2-F9 Fingerprint suite | variable | behavioral/runtime/model-family/authorship mismatch | Local routing and triage unless independently confirmed |
 
 The implemented base is **M3 ResponseAuth + buyer-side verification storage +
 random verified evidence samples**. The recommended next implementation is
@@ -1179,5 +1211,5 @@ verifier, publish and mirror signed public fingerprint packs, store trusted
 references by content hash, run Buyer-side audits through the normal request
 path, and persist auditable manifests that point to signed request/response
 samples. M2 remains the stronger long-term distributional check for real
-traffic; F2-F8 expand the suite through the same package and public fingerprint
+traffic; F2-F9 expand the suite through the same package and public fingerprint
 swarm. On-chain slashing comes last.
