@@ -16,6 +16,7 @@ import { SellerAuthorizationError } from '../discovery/seller-address-resolver.j
 import { parseResponseUsage } from '../utils/response-usage.js';
 import { computeCostUsdc, type ServicePricing } from './pricing.js';
 import { formatUsdc } from './usdc-utils.js';
+import { parseJsonObject, tryParseJsonObject } from '../utils/json-codec.js';
 
 export interface BuyerNegotiatorConfig {}
 
@@ -44,12 +45,7 @@ interface LastResponseCost {
 }
 
 function parsePaymentRequiredBody(body: Uint8Array): Record<string, unknown> | null {
-  try {
-    const parsed = JSON.parse(new TextDecoder().decode(body)) as Record<string, unknown>;
-    return parsed && typeof parsed === 'object' ? parsed : null;
-  } catch {
-    return null;
-  }
+  return tryParseJsonObject(body);
 }
 
 function safeBigInt(value: string): bigint | null {
@@ -520,7 +516,7 @@ export class BuyerPaymentNegotiator {
     };
     try {
       const decoded = Buffer.from(headerValue, 'base64').toString('utf-8');
-      payload = JSON.parse(decoded);
+      payload = parseJsonObject(decoded) as typeof payload;
     } catch {
       throw new Error('Invalid x-antseed-spending-auth header: failed to decode');
     }
