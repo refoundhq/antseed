@@ -97,11 +97,12 @@ encoded request bytes
 Still proposed:
 
 - `@antseed/fingerprints` package;
-- KBF verifier implementation;
-- non-KBF verifier families, including passive authorship/provenance verifiers;
+- initial verifier set implementation, including KBF, behavioral probes,
+  service/runtime fingerprints, and passive authorship/provenance verifiers;
+- remaining verifier families behind the same shared interface;
 - public fingerprint swarm;
 - buyer-local fingerprint reference store;
-- KBF/fingerprint audit runner;
+- fingerprint audit runners for active probes and passive sample analysis;
 - audit result manifests under `<dataDir>/fingerprints/audits`;
 - forced evidence storage for audit probes;
 - local routing policy based on fingerprint verdicts;
@@ -329,6 +330,28 @@ evidence. Strong enforcement requires cross-family agreement or arbiter
 confirmation. Active verifier families send dedicated audit probes; passive
 families can also score ordinary signed traffic that the Buyer already sampled.
 
+The family names below are protocol categories. They intentionally map to several
+public research directions and tools that AntSeed can track or implement over
+time without treating any single paper as authoritative:
+
+| Spec family | Related public direction | AntSeed role |
+|---|---|---|
+| F1 KBF | KBF / knowledge-boundary fingerprints | Active numeric recall probes near model knowledge boundaries |
+| F2 Behavioral | LLMmap-style behavioral/model-identification probes | Active black-box behavior and style classification |
+| F3 Adversarial triggers | TRAP-style targeted adversarial prompt honeypots; LLMPrint-style prompt-injection fingerprints | Private active triggers and robust prompt-derived fingerprints |
+| F4 Perturbation | ZeroPrint-style perturbation / zeroth-order evidence | Response-surface fingerprints across semantic-preserving changes |
+| F5 Tokenizer / rare-token | UTF / under-trained token fingerprints | Rare-token, tokenizer-sensitive, and under-trained-token probes |
+| F7 Output distribution | Logprob, seed, repeated-sampling, output-statistic methods; adjacent real-time output-verification primitives | Distributional checks when the upstream-compatible API exposes enough signal |
+| F8 Runtime / service | Julius-style LLM service fingerprinting | Serving stack, relay, protocol, and platform fingerprints |
+| F9 Passive authorship | READER-style dynamic black-box provenance | Passive authorship evidence over ordinary signed Seller responses |
+| Adjacent ownership/IP | DNF-style nested/model-ownership fingerprints | Future evidence family for ownership and derivative-model disputes, not day-one API substitution enforcement |
+
+These references are inspirations and target verifier families, not implemented
+integrations unless the implementation status section says otherwise. Adjacent
+ownership or generic output-verification work can inform future modules, but it
+MUST NOT be treated as a live AntSeed verifier until represented as reproducible
+Buyer-run code, references, and audit-result schemas.
+
 ### F1 — Knowledge Boundary Fingerprinting (KBF)
 
 KBF probes facts near the claimed model's knowledge boundary: the reference model
@@ -379,7 +402,9 @@ routing and triage signal unless combined with stronger evidence.
 
 The Buyer sends private trigger prompts that produce distinctive behavior in the
 reference model but not in common substitutes. These prompts can include unusual
-formatting, suffixes, ordering constraints, or instruction conflicts.
+formatting, suffixes, ordering constraints, or instruction conflicts. This family
+covers TRAP-style targeted adversarial prompt honeypots and LLMPrint-style
+prompt-injection fingerprints when adapted to AntSeed's evidence format.
 
 Triggers MUST be private and rotatable. Public triggers become defeat devices:
 the Seller can route trigger-looking traffic to the real model and cheap traffic
@@ -390,6 +415,9 @@ elsewhere.
 The Buyer sends a base prompt and a set of semantic-preserving perturbations:
 synonym swaps, clause reordering, punctuation changes, or equivalent JSON key
 orderings. The verifier scores how output changes across the perturbation set.
+This family can host ZeroPrint-style black-box perturbation and zeroth-order
+fingerprint methods when their reference and scoring artifacts are represented
+as signed fingerprint packs.
 
 This tests the model's response surface, not only its final answer. It is more
 expensive than KBF because one logical probe expands into multiple requests.
@@ -398,7 +426,8 @@ expensive than KBF because one logical probe expands into multiple requests.
 
 The Buyer uses prompts containing rare token fragments, unusual Unicode, or
 tokenizer-sensitive strings. Models with different tokenizers or pretraining
-distributions often degrade differently.
+distributions often degrade differently. UTF-style under-trained-token probes
+belong in this family when they can be represented as Buyer-run black-box tests.
 
 This family is useful for detecting model families and serving stacks. It is
 fragile across sanitizers, relays, and wrapper systems, so it SHOULD NOT be the
@@ -419,7 +448,9 @@ including wrappers. For model-identity slashing, the verifier MUST distinguish
 
 When an API supports seeds, logprobs, top-token data, or repeated stochastic
 sampling, the verifier compares output distributions instead of single answers.
-This is strong when available and unavailable on many endpoints.
+This is strong when available and unavailable on many endpoints. Adjacent
+real-time output-verification primitives may fit here when they can be calibrated
+against signed AntSeed response samples.
 
 The verifier MUST record which distribution features were exposed by the Seller
 or upstream-compatible API. Missing logprobs is not an adverse signal by itself.
@@ -429,10 +460,21 @@ or upstream-compatible API. Missing logprobs is not an adverse signal by itself.
 The Buyer observes protocol and runtime behavior: error shapes, streaming chunk
 cadence, headers, timeout behavior, context-window failure modes, and
 OpenAI/Anthropic compatibility quirks. This identifies serving software or relay
-type more than model identity.
+type more than model identity. Julius-style LLM service fingerprinting belongs
+in this family.
 
 Runtime fingerprints are triage signals. They can justify increasing KBF or
 shadow-sampling budget, but they MUST NOT drive slashing directly.
+
+### Adjacent — Ownership / Derivative-Model Fingerprints
+
+Some fingerprinting work is aimed less at live API substitution and more at
+model ownership, derivative-model detection, or intellectual-property disputes.
+DNF-style nested fingerprinting belongs in this adjacent bucket. It can inform
+future AntSeed evidence formats, especially for disputes about copied or
+derived models, but it SHOULD NOT be mixed with day-one API-substitution
+verdicts unless adapted into a Buyer-run black-box verifier with reproducible
+reference artifacts.
 
 ### F9 — Passive Authorship / Provenance Fingerprints
 
@@ -475,8 +517,9 @@ orchestration.
 
 Day-one pure TypeScript package. No P2P, payment, SQLite, or provider
 dependencies. This package is the canonical home for verifier interfaces,
-reference schemas, public fingerprint-pack schemas, and the first implemented
-verifier family.
+reference schemas, public fingerprint-pack schemas, and the initial implemented
+verifier set. KBF is important, but it is one module in the set, not the whole
+verification strategy.
 
 Responsibilities:
 
@@ -484,13 +527,13 @@ Responsibilities:
 - shared reference, probe, audit-result, and fingerprint-pack schemas;
 - canonical JSON hashing for reference IDs, pack IDs, and audit IDs;
 - verifier registry and dispatch by `kind`;
-- KBF schemas and validators;
-- domain definitions and tolerances;
-- prompt construction;
-- numeric parser;
-- match-vector scoring;
-- CP99 / binomial statistics;
-- verdict computation;
+- kind-specific schemas and validators for the initial verifier set;
+- active-probe prompt construction;
+- passive-sample feature extraction;
+- parsers for numeric, structural, tokenizer-sensitive, and runtime features;
+- match-vector, classifier, distributional, and evidence-accumulation scoring;
+- CP99 / binomial and other verifier-specific statistics;
+- deterministic verdict computation;
 - fixtures and tests using small public reference files;
 - import/export helpers for public fingerprint packs.
 
@@ -503,7 +546,8 @@ Non-responsibilities:
 - fingerprint swarm discovery, fetching, seeding, and mirroring;
 - slashing.
 
-KBF is implemented as the first verifier module inside this package:
+The package SHOULD implement a small initial verifier set instead of a
+KBF-only package:
 
 ```text
 packages/fingerprints/
@@ -512,17 +556,19 @@ packages/fingerprints/
     types.ts
     canonical-json.ts
     verifiers/
-      kbf/
-        index.ts
-        domains.ts
-        parser.ts
-        scoring.ts
-        verdict.ts
+      kbf/                  # active knowledge-boundary probes
+      behavioral/           # active behavioral/classifier probes
+      runtime/              # service/runtime fingerprints
+      passive-authorship/   # READER-style evidence accumulation over samples
 ```
 
-Future verifier families (behavioral classifiers, perturbation tests, rare-token
-tests, runtime fingerprints) MUST plug into the same package-level interfaces
-instead of creating one-off package APIs.
+KBF can still be the first active probe module because it is mechanically scored
+and cheap enough for routine audits. The package boundary MUST NOT assume KBF is
+the only day-one verifier. Behavioral classifiers, runtime fingerprints, and
+passive authorship/provenance verifiers SHOULD plug into the same interfaces from
+the start. Perturbation, rare-token/tokenizer, adversarial-trigger,
+instruction-hierarchy, and output-distribution modules can then be added without
+creating one-off package APIs.
 
 ### `@antseed/fingerprint-swarm`
 
@@ -1109,17 +1155,17 @@ boundaries:
 
 1. `@antseed/fingerprints` pure package:
    - shared `FingerprintVerifier` interface;
-   - schema types for references, fingerprint packs, probes, match vectors, and
-     results;
+   - schema types for references, fingerprint packs, probes, match vectors,
+     passive samples, and results;
    - canonical JSON hash helper;
    - verifier registry;
    - public pack import/export helpers;
-   - KBF verifier module;
-   - numeric parser;
-   - tolerance matcher;
-   - CP99 and binomial functions;
-   - verdict computation;
-   - unit tests with small fixture references.
+   - initial verifier modules for KBF, behavioral probes, service/runtime
+     fingerprints, and passive authorship/provenance;
+   - shared parsers, feature extractors, tolerance matchers, evidence
+     accumulators, CP99/binomial helpers, and verifier-specific statistics;
+   - deterministic verdict computation;
+   - unit tests with small fixture references and signed sample manifests.
 
 2. Fingerprint swarm support:
    - define pack signing bytes;
@@ -1138,12 +1184,15 @@ boundaries:
    - write under `<dataDir>/fingerprints/references/<referenceId>.json`;
    - list references by `serviceAliases`.
 
-4. KBF audit runner in `@antseed/node`:
-   - select Seller/service/reference;
-   - construct KBF request batches;
-   - send through the ordinary Buyer request path;
-   - require verified `ResponseAuth`;
-   - force-store audit request/response samples;
+4. Fingerprint audit runners in `@antseed/node`:
+   - select Seller/service/reference/verifier kind;
+   - construct request batches for active verifiers such as KBF and behavioral
+     probes;
+   - send active probes through the ordinary Buyer request path;
+   - consume verified historical samples for passive authorship/provenance
+     verifiers;
+   - require verified `ResponseAuth` before any response enters an audit result;
+   - force-store active audit request/response samples;
    - call `@antseed/fingerprints` to compute the verdict;
    - write `<dataDir>/fingerprints/audits/<sellerPeerId>/<auditId>.json`.
 
@@ -1152,10 +1201,12 @@ boundaries:
    - increase audit rate for `UNDETERMINED` or unauthenticated probes;
    - surface audit status in diagnostics without broadcasting raw prompts.
 
-6. Additional fingerprint families:
-   - add behavioral-classifier, perturbation, rare-token, instruction-hierarchy,
-     output-distribution, runtime, and passive authorship/provenance verifier
-     modules behind the day-one `FingerprintVerifier` interface;
+6. Expand the verifier suite:
+   - add adversarial-trigger, perturbation, rare-token/tokenizer,
+     instruction-hierarchy, and output-distribution modules behind the same
+     `FingerprintVerifier` interface;
+   - improve KBF, behavioral, runtime, and passive-authorship modules as better
+     public research and references become available;
    - keep each verifier module transport-agnostic;
    - reuse the same reference store, sample store, and audit-result schema.
 
@@ -1206,10 +1257,10 @@ commit-reveal, reproducible verifier code, and independent adjudication.
 The implemented base is **M3 ResponseAuth + buyer-side verification storage +
 random verified evidence samples**. The recommended next implementation is
 **`@antseed/fingerprints` + public fingerprint packs + buyer-local audit
-storage**: implement the shared fingerprint package with KBF as the first
-verifier, publish and mirror signed public fingerprint packs, store trusted
-references by content hash, run Buyer-side audits through the normal request
-path, and persist auditable manifests that point to signed request/response
-samples. M2 remains the stronger long-term distributional check for real
-traffic; F2-F9 expand the suite through the same package and public fingerprint
+storage**: implement the shared fingerprint package with an initial verifier set
+rather than a KBF-only path, publish and mirror signed public fingerprint packs,
+store trusted references by content hash, run Buyer-side audits through the
+normal request path, and persist auditable manifests that point to signed
+request/response samples. M2 remains the stronger long-term distributional check
+for real traffic; F1-F9 expand through the same package and public fingerprint
 swarm. On-chain slashing comes last.
