@@ -124,8 +124,8 @@ function HalvingCurve({currentEpoch, currentBudget}: {currentEpoch: number; curr
       <svg viewBox={`0 0 ${W} ${H}`} className={styles.halvingSvg}>
         <defs>
           <linearGradient id="curveFill" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#1FD87A" stopOpacity="0.18" />
-            <stop offset="100%" stopColor="#1FD87A" stopOpacity="0" />
+            <stop offset="0%" stopColor="var(--as-green)" stopOpacity="0.18" />
+            <stop offset="100%" stopColor="var(--as-green)" stopOpacity="0" />
           </linearGradient>
         </defs>
 
@@ -162,7 +162,7 @@ function HalvingCurve({currentEpoch, currentBudget}: {currentEpoch: number; curr
         <path d={areaD} fill="url(#curveFill)" />
 
         {/* Main curve */}
-        <path d={pathD} fill="none" stroke="#1FD87A" strokeWidth="2" strokeLinejoin="round" />
+        <path d={pathD} fill="none" stroke="var(--as-green)" strokeWidth="2" strokeLinejoin="round" />
 
         {/* Vertical "now" line */}
         <line
@@ -175,7 +175,7 @@ function HalvingCurve({currentEpoch, currentBudget}: {currentEpoch: number; curr
 
         {/* Pulse + core dot */}
         <circle cx={curX} cy={curY} r="10" className={styles.halvingPulse} />
-        <circle cx={curX} cy={curY} r="5" fill="#1FD87A" stroke="#fff" strokeWidth="2" />
+        <circle cx={curX} cy={curY} r="5" fill="var(--as-green)" stroke="#fff" strokeWidth="2" />
 
         {/* "You are here" pill */}
         <g>

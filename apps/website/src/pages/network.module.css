@@ -20,13 +20,13 @@
 }
 
 .back:hover {
-  color: #1FD87A;
+  color: var(--as-green);
   text-decoration: none;
 }
 
 .eyebrow {
   font-size: 12px;
-  color: #1FD87A;
+  color: var(--as-green);
   letter-spacing: 3px;
   text-transform: uppercase;
   font-family: 'Share Tech Mono', monospace;
@@ -133,7 +133,7 @@
 }
 
 .searchInput:focus {
-  border-color: #1FD87A;
+  border-color: var(--as-green);
   box-shadow: 0 0 0 3px rgba(31,216,122,0.12);
 }
 
@@ -180,8 +180,8 @@
 }
 
 .chip:hover {
-  border-color: #1FD87A;
-  color: #1FD87A;
+  border-color: var(--as-green);
+  color: var(--as-green);
 }
 
 .chipActive {
@@ -337,11 +337,11 @@
 /* Tag color variants — applied via data attribute or inline style in TSX */
 .tagCoding    { background: #eff6ff; color: #3b82f6; }
 .tagPrivacy   { background: #fef3f2; color: #ef4444; }
-.tagTee       { background: #f0fdf4; color: #16a34a; }
+.tagTee       { background: #f0fdf4; color: var(--as-green); }
 .tagChat      { background: #f5f3ff; color: #8b5cf6; }
 .tagCode      { background: #eff6ff; color: #3b82f6; }
 .tagFast      { background: #fefce8; color: #ca8a04; }
-.tagCheap     { background: #f0fdf4; color: #16a34a; }
+.tagCheap     { background: #f0fdf4; color: var(--as-green); }
 .tagReasoning { background: #fff7ed; color: #ea580c; }
 .tagOpenSource { background: #f0f9ff; color: #0284c7; }
 .tagRag       { background: #fdf4ff; color: #c026d3; }
@@ -372,12 +372,12 @@
 }
 
 .priceFree {
-  color: #1FD87A;
+  color: var(--as-green);
   font-weight: 700;
 }
 
 .priceGood {
-  color: #1FD87A;
+  color: var(--as-green);
 }
 
 .priceNormal {
@@ -397,7 +397,7 @@
   height: 28px;
   border-radius: 50%;
   background: #f0faf4;
-  color: #1FD87A;
+  color: var(--as-green);
   font-family: 'Share Tech Mono', monospace;
   font-size: 12px;
   font-weight: 700;
@@ -452,14 +452,14 @@
 }
 
 .filterToggle:hover {
-  border-color: #1FD87A;
+  border-color: var(--as-green);
   color: #0d1117;
 }
 
 .filterToggleActive {
-  border-color: #1FD87A;
+  border-color: var(--as-green);
   background: #f0fdf4;
-  color: #16a34a;
+  color: var(--as-green);
 }
 
 /* ── Advanced filters panel ───────────────────────────────────────── */
@@ -558,7 +558,7 @@
 .checkbox {
   width: 16px;
   height: 16px;
-  accent-color: #1FD87A;
+  accent-color: var(--as-green);
   cursor: pointer;
 }
 
@@ -589,7 +589,7 @@
   font-family: 'Share Tech Mono', monospace;
   font-size: 18px;
   font-weight: 700;
-  color: #1FD87A;
+  color: var(--as-green);
   margin-bottom: 8px;
 }
 
@@ -597,16 +597,16 @@
   width: 10px;
   height: 10px;
   border-radius: 50%;
-  background: #1FD87A;
-  box-shadow: 0 0 8px #1FD87A;
+  background: var(--as-green);
+  box-shadow: 0 0 8px var(--as-green);
   animation: pulse 2s infinite;
   display: inline-block;
   flex-shrink: 0;
 }
 
 @keyframes pulse {
-  0%, 100% { opacity: 1; box-shadow: 0 0 8px #1FD87A; }
-  50% { opacity: 0.5; box-shadow: 0 0 3px #1FD87A; }
+  0%, 100% { opacity: 1; box-shadow: 0 0 8px var(--as-green); }
+  50% { opacity: 0.5; box-shadow: 0 0 3px var(--as-green); }
 }
 
 .bestPeer {
@@ -627,7 +627,7 @@
 }
 
 .footer a {
-  color: #1FD87A;
+  color: var(--as-green);
   text-decoration: none;
 }
 
