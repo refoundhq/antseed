@@ -10,8 +10,15 @@ import {
   topicToInfoHash,
 } from "./dht-node.js";
 import type { PeerOffering } from "../types/capability.js";
-import type { PeerMetadata, ProviderAnnouncement } from "./peer-metadata.js";
+import type { DomainVerificationClaim, DomainVerificationMethod, GithubVerificationClaim, PeerMetadata, PeerVerifications, ProviderAnnouncement } from "./peer-metadata.js";
 import { METADATA_VERSION } from "./peer-metadata.js";
+import {
+  MAX_DOMAIN_LENGTH,
+  MAX_DOMAIN_VERIFICATION_CLAIMS,
+  MAX_GITHUB_REPOSITORY_LENGTH,
+  MAX_GITHUB_USERNAME_LENGTH,
+  MAX_GITHUB_VERIFICATION_CLAIMS,
+} from "./metadata-validator.js";
 
 import type { ServiceApiProtocol } from "../types/service-api.js";
 import { isKnownServiceApiProtocol } from "../types/service-api.js";
@@ -50,6 +57,8 @@ export interface AnnouncerConfig {
   }>;
   displayName?: string;
   publicAddress?: string;
+  /** External ownership claims to include in signed metadata for client verification. */
+  verifications?: PeerVerifications;
   region: string;
   pricing: Map<
     string,
@@ -187,6 +196,51 @@ export class PeerAnnouncer {
     return cfg.sellerContract.toLowerCase().replace(/^0x/, "");
   }
 
+  private _normalizedVerifications(): PeerVerifications | undefined {
+    const claims = this.config.verifications?.domains ?? [];
+    const domains: DomainVerificationClaim[] = [];
+    const seen = new Set<string>();
+    const methodOrder: DomainVerificationMethod[] = ["dns-txt", "https-well-known"];
+    for (const claim of claims) {
+      const normalizedDomain = claim.domain.trim().toLowerCase();
+      if (!normalizedDomain || normalizedDomain.length > MAX_DOMAIN_LENGTH || seen.has(normalizedDomain)) continue;
+      seen.add(normalizedDomain);
+      const methods = claim.methods
+        ? methodOrder.filter((method) => claim.methods!.includes(method))
+        : undefined;
+      domains.push({
+        domain: normalizedDomain,
+        ...(methods && methods.length > 0 ? { methods } : {}),
+      });
+    }
+    // Code-unit sorts (matching the codec) so signed claim order is locale-independent.
+    domains.sort((a, b) => (a.domain < b.domain ? -1 : a.domain > b.domain ? 1 : 0));
+
+    const githubClaims = this.config.verifications?.github ?? [];
+    const github: GithubVerificationClaim[] = [];
+    const seenGithub = new Set<string>();
+    for (const claim of githubClaims) {
+      const username = claim.username.trim().toLowerCase();
+      const repository = claim.repository ? claim.repository.trim().toLowerCase() : "";
+      const key = `${username}/${repository}`;
+      if (!username || username.length > MAX_GITHUB_USERNAME_LENGTH) continue;
+      if (repository.length > MAX_GITHUB_REPOSITORY_LENGTH || seenGithub.has(key)) continue;
+      seenGithub.add(key);
+      github.push({
+        username,
+        ...(repository ? { repository } : {}),
+      });
+    }
+    github.sort((a, b) => (a.username < b.username ? -1 : a.username > b.username ? 1
+      : (a.repository ?? "") < (b.repository ?? "") ? -1 : (a.repository ?? "") > (b.repository ?? "") ? 1 : 0));
+
+    if (domains.length === 0 && github.length === 0) return undefined;
+    return {
+      ...(domains.length > 0 ? { domains: domains.slice(0, MAX_DOMAIN_VERIFICATION_CLAIMS) } : {}),
+      ...(github.length > 0 ? { github: github.slice(0, MAX_GITHUB_VERIFICATION_CLAIMS) } : {}),
+    };
+  }
+
   private async _buildSignedMetadata(includeOnChainReputation = true): Promise<PeerMetadata> {
     const providers: ProviderAnnouncement[] = this.config.providers.map((p) => {
       const pricing = p.pricing ?? this.config.pricing.get(p.provider) ?? {
@@ -231,6 +285,10 @@ export class PeerAnnouncer {
     }
     if (this.config.stakeAmountUSDC != null) {
       metadata.stakeAmountUSDC = this.config.stakeAmountUSDC;
+    }
+    const verifications = this._normalizedVerifications();
+    if (verifications) {
+      metadata.verifications = verifications;
     }
 
     if (this.config.paymentsEnabled) {

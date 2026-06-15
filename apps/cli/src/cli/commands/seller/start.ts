@@ -552,6 +552,14 @@ export function registerSellerStartCommand(sellerCmd: Command): void {
       if (maxUploadBodyBytes !== undefined) {
         console.log(chalk.dim(`  max upload body bytes: ${maxUploadBodyBytes}`))
       }
+      const verificationDomains = (effectiveSellerConfig.verifications?.domains ?? []).map((claim) => claim.domain)
+      if (verificationDomains.length > 0) {
+        console.log(chalk.dim(`  domain verification: ${verificationDomains.join(', ')}`))
+      }
+      const verificationGithub = (effectiveSellerConfig.verifications?.github ?? []).map((claim) => claim.username)
+      if (verificationGithub.length > 0) {
+        console.log(chalk.dim(`  github verification: ${verificationGithub.join(', ')}`))
+      }
       console.log('')
 
       const nodeSpinner = ora('Starting seeding daemon...').start()
@@ -568,6 +576,7 @@ export function registerSellerStartCommand(sellerCmd: Command): void {
         role: 'seller',
         displayName: config.identity.displayName,
         ...(config.seller.publicAddress ? { publicAddress: config.seller.publicAddress } : {}),
+        ...(effectiveSellerConfig.verifications ? { verifications: effectiveSellerConfig.verifications } : {}),
         bootstrapNodes,
         dataDir: globalOpts.dataDir,
         ...(dhtPort ? { dhtPort } : {}),
