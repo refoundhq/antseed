@@ -56,14 +56,18 @@ test('awk system()/getline/shell-pipe must not auto-allow', () => {
 });
 
 test('sed e command/flag and -f script-from-file must not auto-allow', () => {
-  // sed's `e` flag on s/// substitutions and `e` command after an address
-  // both execute arbitrary shell. `-f` reads a script from a file whose
-  // contents we cannot verify.
+  // sed's `e` flag on s/// substitutions and `e` command both execute
+  // arbitrary shell. `w` commands/flags write files without a shell redirect.
+  // `-f` reads a script from a file whose contents we cannot verify.
   const bypasses = [
+    "sed 'e id' file",
     "sed -n '1e cat /etc/passwd' file",
+    "sed -n '/foo/e id' file",
     "sed 's/a/b/e' file",
     "sed -n '1,$e id' file",
     "sed 's/a/b/ge' file",
+    "sed -n 'w /tmp/pwn' file",
+    "sed 's/a/b/w /tmp/pwn' file",
     "sed -f script.sed file",
   ];
   for (const command of bypasses) {
@@ -76,10 +80,14 @@ test('sed e command/flag and -f script-from-file must not auto-allow', () => {
   }
 });
 
-test('find -fprintf / -fprint / -fls must not auto-allow', () => {
-  // These find predicates write arbitrary content to an arbitrary path with
-  // no `>` operator, bypassing hasShellWriteOperator.
+test('find -exec / -fprintf / -fprint / -fls must not auto-allow', () => {
+  // These find predicates either execute commands or write arbitrary content
+  // to an arbitrary path with no `>` operator, bypassing the shell-level
+  // composition and write-operator checks.
   const bypasses = [
+    "find . -exec python3 -c 'print(1)' {} +",
+    "find . -execdir sh -c 'id' {} +",
+    "find . -ok python3 -c 'print(1)' {} +",
     "find . -fprintf /tmp/pwn '%p\\n'",
     "find . -fprint /tmp/list",
     "find . -fprint0 /tmp/list0",
