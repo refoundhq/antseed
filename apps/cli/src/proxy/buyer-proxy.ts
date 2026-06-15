@@ -575,26 +575,15 @@ export class BuyerProxy {
       const metadata = peer.metadata || prev.metadata
         ? { ...(prev.metadata ?? {}), ...(peer.metadata ?? {}) } as PeerMetadata
         : undefined
-      return {
+      const mergedPeer: PeerInfo = {
+        ...prev,
         ...peer,
         ...(metadata ? { metadata } : {}),
-        ...(prev.lastReachedAt && (!peer.lastReachedAt || prev.lastReachedAt > peer.lastReachedAt)
-          ? { lastReachedAt: prev.lastReachedAt }
-          : {}),
-        verificationResults: peer.verificationResults ?? prev.verificationResults,
-        onChainAgentId: peer.onChainAgentId ?? prev.onChainAgentId,
-        onChainStakeUsdcMicros: peer.onChainStakeUsdcMicros ?? prev.onChainStakeUsdcMicros,
-        onChainChannelCount: peer.onChainChannelCount ?? prev.onChainChannelCount,
-        onChainGhostCount: peer.onChainGhostCount ?? prev.onChainGhostCount,
-        onChainTotalVolumeUsdcMicros: peer.onChainTotalVolumeUsdcMicros ?? prev.onChainTotalVolumeUsdcMicros,
-        onChainLastSettledAtSec: peer.onChainLastSettledAtSec ?? prev.onChainLastSettledAtSec,
-        onChainStakedAtSec: peer.onChainStakedAtSec ?? prev.onChainStakedAtSec,
-        onChainReputationScore: peer.onChainReputationScore ?? prev.onChainReputationScore,
-        onChainTrustScore: peer.onChainTrustScore ?? prev.onChainTrustScore,
-        onChainSybilRisk: peer.onChainSybilRisk ?? prev.onChainSybilRisk,
-        onChainSybilFlags: peer.onChainSybilFlags ?? prev.onChainSybilFlags,
-        onChainStatsFetchedAt: peer.onChainStatsFetchedAt ?? prev.onChainStatsFetchedAt,
       }
+      if (prev.lastReachedAt && (!peer.lastReachedAt || prev.lastReachedAt > peer.lastReachedAt)) {
+        mergedPeer.lastReachedAt = prev.lastReachedAt
+      }
+      return mergedPeer
     })
 
     // Carry forward previously known peers that are missing from this scan.
