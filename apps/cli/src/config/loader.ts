@@ -311,6 +311,32 @@ function normalizeMinPeerReputation(value: unknown, fallback: number): number {
   return value === 50 ? fallback : value;
 }
 
+function cloneBuyerVerification(
+  value: AntseedConfig['buyer']['verification'],
+): AntseedConfig['buyer']['verification'] {
+  if (!value) return undefined;
+  return {
+    ...(value.sampleRate !== undefined ? { sampleRate: value.sampleRate } : {}),
+    ...(value.maxSampleBytes !== undefined ? { maxSampleBytes: value.maxSampleBytes } : {}),
+  };
+}
+
+function normalizeBuyerVerification(
+  value: unknown,
+  fallback?: AntseedConfig['buyer']['verification'],
+): { verification: NonNullable<AntseedConfig['buyer']['verification']> } | Record<string, never> {
+  if (!isRecord(value)) {
+    const cloned = cloneBuyerVerification(fallback);
+    return cloned ? { verification: cloned } : {};
+  }
+  return {
+    verification: {
+      ...(value['sampleRate'] !== undefined ? { sampleRate: toFiniteOrNaN(value['sampleRate']) } : {}),
+      ...(value['maxSampleBytes'] !== undefined ? { maxSampleBytes: toFiniteOrNaN(value['maxSampleBytes']) } : {}),
+    },
+  };
+}
+
 function mergeBuyerConfig(
   defaults: AntseedConfig['buyer'],
   value: unknown
@@ -322,6 +348,7 @@ function mergeBuyerConfig(
       proxyPort: defaults.proxyPort,
       peerRefreshIntervalMs: defaults.peerRefreshIntervalMs,
       metadataFetchTimeoutMs: defaults.metadataFetchTimeoutMs,
+      ...(normalizeBuyerVerification(undefined, defaults.verification)),
     };
   }
   return {
@@ -336,6 +363,7 @@ function mergeBuyerConfig(
     metadataFetchTimeoutMs: typeof value['metadataFetchTimeoutMs'] === 'number'
       ? value['metadataFetchTimeoutMs']
       : defaults.metadataFetchTimeoutMs,
+    ...(normalizeBuyerVerification(value['verification'], defaults.verification)),
   };
 }
 

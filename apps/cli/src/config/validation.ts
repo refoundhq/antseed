@@ -270,6 +270,30 @@ function validateVerifications(
   }
 }
 
+function validateBuyerVerification(
+  path: string,
+  verification: AntseedConfig['buyer']['verification'],
+  errors: string[],
+): void {
+  if (verification === undefined) return;
+  if (!verification || typeof verification !== 'object' || Array.isArray(verification)) {
+    errors.push(`${path} must be an object when provided`);
+    return;
+  }
+  if (
+    verification.sampleRate !== undefined &&
+    (!Number.isFinite(verification.sampleRate) || verification.sampleRate < 0 || verification.sampleRate > 1)
+  ) {
+    errors.push(`${path}.sampleRate must be a number in range 0-1`);
+  }
+  if (
+    verification.maxSampleBytes !== undefined &&
+    (!Number.isInteger(verification.maxSampleBytes) || verification.maxSampleBytes < 1)
+  ) {
+    errors.push(`${path}.maxSampleBytes must be an integer >= 1`);
+  }
+}
+
 /**
  * Validate the full config and return all issues.
  */
@@ -294,6 +318,8 @@ export function validateConfig(config: AntseedConfig): string[] {
   if (!Number.isInteger(config.buyer.metadataFetchTimeoutMs) || config.buyer.metadataFetchTimeoutMs < MIN_BUYER_METADATA_FETCH_TIMEOUT_MS) {
     errors.push('buyer.metadataFetchTimeoutMs must be an integer >= 100');
   }
+
+  validateBuyerVerification('buyer.verification', config.buyer.verification, errors);
 
   if (!Number.isInteger(config.seller.maxConcurrentBuyers) || config.seller.maxConcurrentBuyers < 1) {
     errors.push('seller.maxConcurrentBuyers must be an integer >= 1');

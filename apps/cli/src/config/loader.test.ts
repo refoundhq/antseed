@@ -120,6 +120,44 @@ test('loadConfig preserves explicit buyer peerRefreshIntervalMs and metadataFetc
   );
 });
 
+test('loadConfig preserves buyer verification sampling settings', async () => {
+  await withTempConfig(
+    JSON.stringify({
+      buyer: {
+        verification: {
+          sampleRate: 1,
+          maxSampleBytes: 1048576,
+        },
+      },
+    }),
+    async (configPath) => {
+      const config = await loadConfig(configPath);
+      assert.deepEqual(config.buyer.verification, {
+        sampleRate: 1,
+        maxSampleBytes: 1048576,
+      });
+    }
+  );
+});
+
+test('loadConfig rejects invalid buyer verification sampleRate', async () => {
+  await withTempConfig(
+    JSON.stringify({
+      buyer: {
+        verification: {
+          sampleRate: 1.1,
+        },
+      },
+    }),
+    async (configPath) => {
+      await assert.rejects(
+        async () => loadConfig(configPath),
+        /buyer\.verification\.sampleRate/
+      );
+    }
+  );
+});
+
 test('loadConfig rejects invalid buyer peerRefreshIntervalMs', async () => {
   await withTempConfig(
     JSON.stringify({
