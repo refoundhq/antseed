@@ -4,6 +4,9 @@ import { homedir } from 'node:os';
 import type {
   HierarchicalPricingConfig,
   AntseedConfig,
+  DomainVerificationConfig,
+  DomainVerificationMethod,
+  GithubVerificationConfig,
   SellerProviderConfig,
   SellerServiceConfig,
   TokenPricingUsdPerMillion,
@@ -180,6 +183,92 @@ function normalizeAgentDir(
   return fallback ? { agentDir: fallback } : {};
 }
 
+// Normalizes shape only (trim + lowercase domains). Invalid domains, unknown
+// methods, duplicates, and empty arrays are preserved so validateConfig can
+// reject them loudly instead of the loader silently dropping them — dropping
+// a typo'd methods entry would widen the claim to "all methods".
+function normalizeDomainVerification(
+  value: unknown,
+): DomainVerificationConfig[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const out: DomainVerificationConfig[] = [];
+  for (const rawClaim of value) {
+    if (!isRecord(rawClaim)) continue;
+    const rawDomain = rawClaim['domain'];
+    const domain = typeof rawDomain === 'string' ? rawDomain.trim().toLowerCase() : '';
+    const claim: DomainVerificationConfig = { domain };
+    if (Array.isArray(rawClaim['methods'])) {
+      claim.methods = [...rawClaim['methods']] as DomainVerificationMethod[];
+    }
+    out.push(claim);
+  }
+  return out;
+}
+
+// Same shape-only normalization contract as normalizeDomainVerification.
+function normalizeGithubVerification(
+  value: unknown,
+): GithubVerificationConfig[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const out: GithubVerificationConfig[] = [];
+  for (const rawClaim of value) {
+    if (!isRecord(rawClaim)) continue;
+    const rawUsername = rawClaim['username'];
+    const username = typeof rawUsername === 'string' ? rawUsername.trim().toLowerCase() : '';
+    const claim: GithubVerificationConfig = { username };
+    if (rawClaim['repository'] !== undefined) {
+      claim.repository = typeof rawClaim['repository'] === 'string'
+        ? rawClaim['repository'].trim().toLowerCase()
+        : '';
+    }
+    out.push(claim);
+  }
+  return out;
+}
+
+function cloneVerifications(
+  value: AntseedConfig['seller']['verifications'],
+): AntseedConfig['seller']['verifications'] {
+  if (!value) return undefined;
+  const domains = value.domains
+    ? value.domains.map((claim) => ({
+      domain: claim.domain,
+      ...(claim.methods ? { methods: [...claim.methods] } : {}),
+    }))
+    : undefined;
+  const github = value.github
+    ? value.github.map((claim) => ({
+      username: claim.username,
+      ...(claim.repository !== undefined ? { repository: claim.repository } : {}),
+    }))
+    : undefined;
+  const cloned = {
+    ...(domains && domains.length > 0 ? { domains } : {}),
+    ...(github && github.length > 0 ? { github } : {}),
+  };
+  return Object.keys(cloned).length > 0 ? cloned : undefined;
+}
+
+function normalizeVerifications(
+  value: unknown,
+  fallback?: AntseedConfig['seller']['verifications'],
+): { verifications: NonNullable<AntseedConfig['seller']['verifications']> } | Record<string, never> {
+  if (!isRecord(value)) {
+    const cloned = cloneVerifications(fallback);
+    return cloned ? { verifications: cloned } : {};
+  }
+  // Keep the user-supplied object (even when empty or malformed) so
+  // validateConfig reports the problem instead of silently ignoring it.
+  const domains = normalizeDomainVerification(value['domains']);
+  const github = normalizeGithubVerification(value['github']);
+  return {
+    verifications: {
+      ...(domains !== undefined ? { domains } : {}),
+      ...(github !== undefined ? { github } : {}),
+    },
+  };
+}
+
 function mergeSellerConfig(
   defaults: AntseedConfig['seller'],
   value: unknown
@@ -192,6 +281,7 @@ function mergeSellerConfig(
       publicAddress: defaults.publicAddress,
       ...(typeof defaults.maxUploadBodyBytes === 'number' ? { maxUploadBodyBytes: defaults.maxUploadBodyBytes } : {}),
       ...(defaults.agentDir ? { agentDir: defaults.agentDir } : {}),
+      ...(normalizeVerifications(undefined, defaults.verifications)),
     };
   }
 
@@ -206,6 +296,7 @@ function mergeSellerConfig(
     publicAddress: typeof value['publicAddress'] === 'string'
       ? value['publicAddress']
       : defaults.publicAddress,
+    ...(normalizeVerifications(value['verifications'], defaults.verifications)),
     ...(typeof value['maxUploadBodyBytes'] === 'number'
       ? { maxUploadBodyBytes: value['maxUploadBodyBytes'] }
       : typeof defaults.maxUploadBodyBytes === 'number'

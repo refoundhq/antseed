@@ -35,6 +35,7 @@ import {
   type AnnouncerConfig,
   type SellerContractConfig,
 } from "./discovery/announcer.js";
+import type { PeerVerifications } from "./discovery/peer-metadata.js";
 import {
   PeerLookup,
   DEFAULT_LOOKUP_CONFIG,
@@ -147,6 +148,8 @@ export interface NodeConfig {
   displayName?: string;
   /** Publicly reachable seller address override ("host:port") announced in metadata. */
   publicAddress?: string;
+  /** External ownership claims announced in signed peer metadata. */
+  verifications?: PeerVerifications;
   dataDir?: string;           // Default: ~/.antseed
   dhtPort?: number;           // Default: 6881 for seller, 0 for buyer
   signalingPort?: number;     // Default: 6882 for seller
@@ -1163,6 +1166,7 @@ export class AntseedNode extends EventEmitter {
         })),
         ...(this._config.displayName ? { displayName: this._config.displayName } : {}),
         ...(this._config.publicAddress ? { publicAddress: this._config.publicAddress } : {}),
+        ...(this._config.verifications ? { verifications: this._config.verifications } : {}),
         region: "unknown",
         pricing: new Map(
           this._providers.map((p) => [

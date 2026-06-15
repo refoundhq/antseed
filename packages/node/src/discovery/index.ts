@@ -17,7 +17,39 @@ export { PeerLookup, DEFAULT_LOOKUP_CONFIG, type LookupConfig, type LookupResult
 export { OFFICIAL_BOOTSTRAP_NODES, parseBootstrapList, mergeBootstrapNodes, toBootstrapConfig, type BootstrapNode } from './bootstrap.js';
 export { encodeMetadata, encodeMetadataForSigning, decodeMetadata } from './metadata-codec.js';
 export { validateMetadata, MAX_METADATA_SIZE, MAX_PROVIDERS, type ValidationError } from './metadata-validator.js';
-export { METADATA_VERSION, WELL_KNOWN_SERVICE_CATEGORIES, type PeerMetadata, type ProviderAnnouncement } from './peer-metadata.js';
+export {
+  METADATA_VERSION,
+  WELL_KNOWN_SERVICE_CATEGORIES,
+  type DomainVerificationClaim,
+  type DomainVerificationMethod,
+  type GithubVerificationClaim,
+  type PeerMetadata,
+  type PeerVerifications,
+  type ProviderAnnouncement,
+} from './peer-metadata.js';
+export {
+  DOMAIN_VERIFICATION_TXT_PREFIX,
+  DOMAIN_VERIFICATION_TXT_NAME_PREFIX,
+  DOMAIN_VERIFICATION_WELL_KNOWN_PATH,
+  DOMAIN_VERIFICATION_WELL_KNOWN_TYPE,
+  buildDomainVerificationTxtValue,
+  buildDomainVerificationWellKnownProof,
+  verifyDomainVerificationClaim,
+  verifyPeerMetadataDomains,
+  type DomainVerificationAttemptResult,
+  type DomainVerificationOptions,
+  type DomainVerificationResult,
+} from './domain-verification.js';
+export {
+  GITHUB_VERIFICATION_PROOF_FILE,
+  GITHUB_VERIFICATION_PROOF_TYPE,
+  buildGithubVerificationProof,
+  buildGithubVerificationProofUrl,
+  verifyGithubVerificationClaim,
+  verifyPeerMetadataGithub,
+  type GithubVerificationOptions,
+  type GithubVerificationResult,
+} from './github-verification.js';
 export { parsePublicAddress, MAX_PUBLIC_ADDRESS_LENGTH, type ParsedPublicAddress } from './public-address.js';
 export { type MetadataResolver, type PeerEndpoint } from './metadata-resolver.js';
 export { HttpMetadataResolver, type HttpMetadataResolverConfig } from './http-metadata-resolver.js';
