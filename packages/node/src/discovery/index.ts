@@ -50,6 +50,12 @@ export {
   type GithubVerificationOptions,
   type GithubVerificationResult,
 } from './github-verification.js';
+export {
+  collectPeerVerificationLinks,
+  isGithubName,
+  isGithubRepository,
+  type PeerVerificationLink,
+} from './verification-links.js';
 export { parsePublicAddress, MAX_PUBLIC_ADDRESS_LENGTH, type ParsedPublicAddress } from './public-address.js';
 export { type MetadataResolver, type PeerEndpoint } from './metadata-resolver.js';
 export { HttpMetadataResolver, type HttpMetadataResolverConfig } from './http-metadata-resolver.js';

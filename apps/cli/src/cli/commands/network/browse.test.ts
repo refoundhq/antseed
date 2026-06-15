@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { peerMatchesServiceFilter } from './browse.js';
+import { collectPeerVerificationLinks } from '@antseed/node/discovery';
 import type { PeerInfo } from '@antseed/node';
 
 function peerWithServices(services: string[], providers: string[] = ['minimax']): PeerInfo {
@@ -36,4 +37,50 @@ test('network browse service filter still matches providers', () => {
 
 test('network browse service filter rejects unrelated services', () => {
   assert.equal(peerMatchesServiceFilter(peerWithServices(['minimax-m3']), 'claude'), false);
+});
+
+test('network browse builds links for verified external claims only', () => {
+  const peer = peerWithServices(['minimax-m3']);
+  peer.verificationResults = {
+    verified: false,
+    checkedAtMs: 123,
+    domains: [
+      {
+        domain: 'Example.com',
+        peerId: peer.peerId,
+        verified: true,
+        method: 'dns-txt',
+        checkedAtMs: 123,
+        attempts: [{ method: 'dns-txt', verified: true }],
+      },
+      {
+        domain: 'unverified.example',
+        peerId: peer.peerId,
+        verified: false,
+        checkedAtMs: 123,
+        attempts: [{ method: 'dns-txt', verified: false }],
+      },
+    ],
+    github: [
+      {
+        username: 'OctoCat',
+        repository: 'antseed-proof',
+        peerId: peer.peerId,
+        verified: true,
+        checkedAtMs: 123,
+      },
+      {
+        username: 'bad user',
+        repository: 'repo',
+        peerId: peer.peerId,
+        verified: true,
+        checkedAtMs: 123,
+      },
+    ],
+  };
+
+  assert.deepEqual(collectPeerVerificationLinks(peer), [
+    { kind: 'domain', label: 'example.com', href: 'https://example.com' },
+    { kind: 'github', label: '@octocat/antseed-proof', href: 'https://github.com/octocat/antseed-proof' },
+  ]);
 });

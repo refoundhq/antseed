@@ -12,6 +12,10 @@ import {
   type PeerInfo,
 } from '@antseed/node';
 import { parseBootstrapList, toBootstrapConfig } from '@antseed/node/discovery';
+import {
+  collectPeerVerificationLinks,
+  type PeerVerificationLink,
+} from '@antseed/node/discovery';
 import { parsePersistedPeers } from '../../../proxy/buyer-proxy.js';
 import { buildPaymentsConfig } from './chain-config-helper.js';
 import { resolveEffectiveBuyerConfig } from '../../../config/effective.js';
@@ -245,6 +249,7 @@ type PeerInfoJson = Omit<PeerInfo, 'onChainReputationScore'> & {
   onChainReputationScore: number | null;
   sellerAddress: string;
   isDelegatedSeller: boolean;
+  verificationLinks: PeerVerificationLink[];
 };
 
 function normalizeAddressHex(raw: string | undefined): string | null {
@@ -267,6 +272,19 @@ function delegatedSellerAddress(peer: PeerInfo): string | null {
   return sellerAddress !== peerAddress ? sellerAddress : null;
 }
 
+function formatVerificationLinks(peer: PeerInfo): string {
+  const links = collectPeerVerificationLinks(peer);
+  if (links.length === 0) return chalk.dim('—');
+  return links
+    .map((link) => {
+      if (link.kind === 'domain') {
+        return `${chalk.cyan('🌐')} ${chalk.underline(link.href)}`;
+      }
+      return `${chalk.magenta('GH')} ${chalk.underline(link.href)}`;
+    })
+    .join('\n');
+}
+
 function peerWithReputationScore(peer: PeerInfo): PeerInfoJson {
   const sellerAddress = sellerAddressForPeer(peer);
   return {
@@ -274,6 +292,7 @@ function peerWithReputationScore(peer: PeerInfo): PeerInfoJson {
     onChainReputationScore: effectiveOnChainReputationScore(peer),
     sellerAddress,
     isDelegatedSeller: delegatedSellerAddress(peer) !== null,
+    verificationLinks: collectPeerVerificationLinks(peer),
   };
 }
 
@@ -399,6 +418,7 @@ function renderCompactTable(peers: PeerInfo[], hasChainData: boolean): void {
   // Show the "Seller" column when at least one peer has a sellerContract
   // that differs from its peerId (i.e. a delegated/proxy seller).
   const anyDelegatedSeller = peers.some((peer) => delegatedSellerAddress(peer) !== null);
+  const anyVerificationLinks = peers.some((peer) => collectPeerVerificationLinks(peer).length > 0);
 
   const head: string[] = [
     chalk.bold('Peer'),
@@ -406,6 +426,9 @@ function renderCompactTable(peers: PeerInfo[], hasChainData: boolean): void {
   if (anyDelegatedSeller) head.push(chalk.bold('On-chain seller'));
   head.push(
     chalk.bold('Name'),
+  );
+  if (anyVerificationLinks) head.push(chalk.bold('Verified'));
+  head.push(
     chalk.bold('Providers'),
     chalk.bold('Services'),
     chalk.bold('Min In $/1M'),
@@ -458,6 +481,9 @@ function renderCompactTable(peers: PeerInfo[], hasChainData: boolean): void {
     if (anyDelegatedSeller) row.push(sellerCell);
     row.push(
       peer.displayName ?? chalk.dim('—'),
+    );
+    if (anyVerificationLinks) row.push(formatVerificationLinks(peer));
+    row.push(
       peer.providers.join(', ') || chalk.dim('—'),
       servicesCell,
       formatUsdPerMillion(pricing.input),
@@ -489,6 +515,9 @@ function renderCompactTable(peers: PeerInfo[], hasChainData: boolean): void {
   }
   if (anyDelegatedSeller) {
     console.log(chalk.dim(`  ${chalk.yellow('On-chain seller')} is the contract address that receives payments — differs from Peer when a delegated/proxy operator runs the node.`));
+  }
+  if (anyVerificationLinks) {
+    console.log(chalk.dim(`  Verified shows buyer-verified external claims: ${chalk.cyan('🌐')} domain, ${chalk.magenta('GH')} GitHub.`));
   }
   console.log('');
 }
@@ -526,6 +555,7 @@ function renderExpandedTable(peers: PeerInfo[], requestedTags: Set<string>): voi
   // Show the "Seller" column when at least one peer has a sellerContract
   // that differs from its peerId (i.e. a delegated/proxy seller).
   const anyDelegatedSeller = peers.some((peer) => delegatedSellerAddress(peer) !== null);
+  const anyVerificationLinks = peers.some((peer) => collectPeerVerificationLinks(peer).length > 0);
 
   for (const peer of peers) {
     const pricing = peer.providerPricing;
@@ -594,6 +624,7 @@ function renderExpandedTable(peers: PeerInfo[], requestedTags: Set<string>): voi
     chalk.bold('Peer'),
   ];
   if (anyDelegatedSeller) head.push(chalk.bold('On-chain seller'));
+  if (anyVerificationLinks) head.push(chalk.bold('Verified'));
   head.push(
     chalk.bold('Provider'),
     chalk.bold('Service'),
@@ -615,6 +646,10 @@ function renderExpandedTable(peers: PeerInfo[], requestedTags: Set<string>): voi
       const rowPeer = peers.find((p) => p.peerId === r.peerId);
       const sellerAddress = rowPeer ? delegatedSellerAddress(rowPeer) : null;
       row.push(sellerAddress !== null ? chalk.yellow(sellerAddress) : chalk.dim('—'));
+    }
+    if (anyVerificationLinks) {
+      const rowPeer = peers.find((p) => p.peerId === r.peerId);
+      row.push(rowPeer ? formatVerificationLinks(rowPeer) : chalk.dim('—'));
     }
     row.push(
       r.provider,
@@ -644,6 +679,9 @@ function renderExpandedTable(peers: PeerInfo[], requestedTags: Set<string>): voi
   }
   if (anyDelegatedSeller) {
     console.log(chalk.dim(`  ${chalk.yellow('On-chain seller')} is the contract address that receives payments — differs from Peer when a delegated/proxy operator runs the node.`));
+  }
+  if (anyVerificationLinks) {
+    console.log(chalk.dim(`  Verified shows buyer-verified external claims: ${chalk.cyan('🌐')} domain, ${chalk.magenta('GH')} GitHub.`));
   }
   console.log('');
 }
