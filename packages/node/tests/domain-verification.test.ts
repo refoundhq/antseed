@@ -58,6 +58,43 @@ describe("domain verification", () => {
     expect(result.method).toBe("https-well-known");
   });
 
+  it("rejects an HTTPS well-known proof without a domain", async () => {
+    const result = await verifyDomainVerificationClaim(
+      { domain: "example.com", methods: ["https-well-known"] },
+      PEER_ID,
+      {
+        fetch: async () => new Response(JSON.stringify({
+          type: DOMAIN_VERIFICATION_WELL_KNOWN_TYPE,
+          peerId: PEER_ID,
+        }), { status: 200 }),
+      },
+    );
+
+    expect(result.verified).toBe(false);
+    expect(result.attempts[0]).toMatchObject({
+      method: "https-well-known",
+      verified: false,
+      error: "Proof domain mismatch",
+    });
+  });
+
+  it("rejects an HTTPS well-known proof for a different domain", async () => {
+    const result = await verifyDomainVerificationClaim(
+      { domain: "example.com", methods: ["https-well-known"] },
+      PEER_ID,
+      {
+        fetch: async () => new Response(JSON.stringify({
+          type: DOMAIN_VERIFICATION_WELL_KNOWN_TYPE,
+          peerId: PEER_ID,
+          domain: "other.example.com",
+        }), { status: 200 }),
+      },
+    );
+
+    expect(result.verified).toBe(false);
+    expect(result.attempts[0]?.error).toBe("Proof domain mismatch");
+  });
+
   it("rejects oversized well-known proof bodies", async () => {
     const result = await verifyDomainVerificationClaim(
       { domain: "example.com", methods: ["https-well-known"] },

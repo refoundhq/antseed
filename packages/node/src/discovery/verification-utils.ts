@@ -58,7 +58,7 @@ export async function readBodyWithLimit(response: Response, maxBytes: number): P
   }
   if (!response.body) {
     const text = await response.text();
-    if (text.length > maxBytes) {
+    if (new TextEncoder().encode(text).byteLength > maxBytes) {
       throw new Error(`Proof body exceeds ${maxBytes} bytes`);
     }
     return text;

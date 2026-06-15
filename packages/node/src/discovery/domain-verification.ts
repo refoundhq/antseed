@@ -107,7 +107,7 @@ async function verifyWellKnown(
     }
     const proof = JSON.parse(await readBodyWithLimit(response, MAX_VERIFICATION_PROOF_BYTES)) as WellKnownDomainProof;
     const proofPeerId = typeof proof.peerId === "string" ? normalizePeerId(proof.peerId) : "";
-    const proofDomain = typeof proof.domain === "string" ? normalizeDomain(proof.domain) : domain;
+    const proofDomain = typeof proof.domain === "string" ? normalizeDomain(proof.domain) : "";
     if (proof.type !== DOMAIN_VERIFICATION_WELL_KNOWN_TYPE) {
       return { method: "https-well-known", verified: false, error: "Proof type mismatch" };
     }
