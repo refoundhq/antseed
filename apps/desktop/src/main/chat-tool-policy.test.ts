@@ -36,6 +36,95 @@ test('read-looking shell commands with mutation operators are not auto-allowed',
   assert.equal(describeBash('sed -i s/foo/bar/g file.txt').permissionKey, 'bash:other');
 });
 
+test('awk system()/getline/shell-pipe must not auto-allow', () => {
+  // POSIX awk's system() and getline-via-pipe execute arbitrary shell. The
+  // first-word allowlist would otherwise classify these as `bash:read` and
+  // skip the approval prompt entirely.
+  const bypasses = [
+    "awk 'BEGIN{system(\"env\")}'",
+    "awk 'BEGIN{\"id\" | getline x; print x}' /dev/null",
+    "awk '{print | \"sh\"}' file",
+  ];
+  for (const command of bypasses) {
+    const approval = describeBash(command);
+    assert.equal(
+      isToolPermissionAutoAllowed(approval.permissionKey),
+      false,
+      `expected ${command} to require explicit approval, got ${approval.permissionKey}`,
+    );
+  }
+});
+
+test('sed e command/flag and -f script-from-file must not auto-allow', () => {
+  // sed's `e` flag on s/// substitutions and `e` command both execute
+  // arbitrary shell. `w` commands/flags write files without a shell redirect.
+  // `-f` reads a script from a file whose contents we cannot verify.
+  const bypasses = [
+    "sed 'e id' file",
+    "sed -n '1e cat /etc/passwd' file",
+    "sed -n '/foo/e id' file",
+    "sed 's/a/b/e' file",
+    "sed -n '1,$e id' file",
+    "sed 's/a/b/ge' file",
+    "sed -n 'w /tmp/pwn' file",
+    "sed 's/a/b/w /tmp/pwn' file",
+    "sed -f script.sed file",
+  ];
+  for (const command of bypasses) {
+    const approval = describeBash(command);
+    assert.equal(
+      isToolPermissionAutoAllowed(approval.permissionKey),
+      false,
+      `expected ${command} to require explicit approval, got ${approval.permissionKey}`,
+    );
+  }
+});
+
+test('find -exec / -fprintf / -fprint / -fls must not auto-allow', () => {
+  // These find predicates either execute commands or write arbitrary content
+  // to an arbitrary path with no `>` operator, bypassing the shell-level
+  // composition and write-operator checks.
+  const bypasses = [
+    "find . -exec python3 -c 'print(1)' {} +",
+    "find . -execdir sh -c 'id' {} +",
+    "find . -ok python3 -c 'print(1)' {} +",
+    "find . -fprintf /tmp/pwn '%p\\n'",
+    "find . -fprint /tmp/list",
+    "find . -fprint0 /tmp/list0",
+    "find . -fls /tmp/listing",
+  ];
+  for (const command of bypasses) {
+    const approval = describeBash(command);
+    assert.equal(
+      isToolPermissionAutoAllowed(approval.permissionKey),
+      false,
+      `expected ${command} to require explicit approval, got ${approval.permissionKey}`,
+    );
+  }
+});
+
+test('benign awk/sed/find invocations stay auto-allowed', () => {
+  // Regression guard against the new interpreter blocks: ordinary read-only
+  // usages of these tools must still classify as bash:read.
+  const benign = [
+    "awk '{print $1}' file",
+    "awk '/pattern/ {print}' file",
+    "sed 's/foo/bar/' file",
+    "sed -n '1,10p' file",
+    "sed 's/red/blue/g' file",
+    "find . -name '*.ts'",
+    "find . -type f -print",
+  ];
+  for (const command of benign) {
+    const approval = describeBash(command);
+    assert.equal(
+      approval.permissionKey,
+      'bash:read',
+      `expected ${command} to classify as bash:read, got ${approval.permissionKey}`,
+    );
+  }
+});
+
 test('sensitive commands cannot be saved as reusable peer approvals', () => {
   for (const command of ['sudo make install', 'rm -rf dist', 'git reset --hard HEAD']) {
     const approval = describeBash(command);
