@@ -5,7 +5,7 @@ import { join } from "node:path";
 import type { Identity, IdentityStore } from "./p2p/identity.js";
 import { loadOrCreateIdentity } from "./p2p/identity.js";
 import type { PeerId } from "./types/peer.js";
-import type { PeerInfo, TokenPricingUsdPerMillion } from "./types/peer.js";
+import type { PeerInfo, PeerVerificationResults, TokenPricingUsdPerMillion } from "./types/peer.js";
 import { peerIdToAddress } from "./types/peer.js";
 import type {
   SerializedHttpRequest,
@@ -36,6 +36,8 @@ import {
   type SellerContractConfig,
 } from "./discovery/announcer.js";
 import type { PeerVerifications } from "./discovery/peer-metadata.js";
+import { verifyPeerMetadataDomains } from "./discovery/domain-verification.js";
+import { verifyPeerMetadataGithub } from "./discovery/github-verification.js";
 import {
   PeerLookup,
   DEFAULT_LOOKUP_CONFIG,
@@ -226,6 +228,8 @@ const EMPTY_BUYER_USAGE: BuyerUsageTotals = {
   channels: [],
 };
 
+const EXTERNAL_VERIFICATION_RESULT_TTL_MS = 15 * 60_000;
+
 export class AntseedNode extends EventEmitter {
   private _config: NodeConfig;
   private _identity: Identity | null = null;
@@ -276,6 +280,14 @@ export class AntseedNode extends EventEmitter {
   private _backgroundPeerDiscoveryPromise: Promise<PeerInfo[]> | null = null;
   /** Serializes non-blocking on-chain enrichment for incrementally discovered peers. */
   private _partialPeerEnrichmentChain: Promise<void> = Promise.resolve();
+  /** Serializes non-blocking external claim verification for discovered peers. */
+  private _externalVerificationChain: Promise<void> = Promise.resolve();
+  private _externalVerificationCache = new Map<PeerId, {
+    claimsKey: string;
+    checkedAtMs: number;
+    results: PeerVerificationResults;
+  }>();
+  private _externalVerificationInFlight = new Set<string>();
 
   constructor(config: NodeConfig) {
     super();
@@ -537,6 +549,8 @@ export class AntseedNode extends EventEmitter {
     }
 
     const filtered = service ? peers.filter((p) => peerOffersService(p, service)) : peers;
+    this._attachCachedExternalVerificationResults(filtered);
+    this._queueExternalVerification(filtered);
 
     // On-chain enrichment runs after the metadata filter so we don't waste
     // RPC calls on peers we'll discard.
@@ -575,7 +589,9 @@ export class AntseedNode extends EventEmitter {
           + `${context.subnet !== undefined ? ` ${context.subnet}/${SUBNET_COUNT - 1}` : ""}`
           + ` emitted ${peers.length} peer(s) from ${context.endpointCount} endpoint(s)`,
         );
+        this._attachCachedExternalVerificationResults(peers);
         this.emit("peers:discovered", peers);
+        this._queueExternalVerification(peers);
         this._queuePartialPeerEnrichment(peers);
       });
       debugLog(`[Node] Background DHT sweep returned ${results.length} result(s)`);
@@ -611,6 +627,120 @@ export class AntseedNode extends EventEmitter {
       this.emit("peers:discovered", enriched);
     }).catch((err) => {
       debugWarn(`[Node] Background DHT partial on-chain enrichment failed: ${err instanceof Error ? err.message : err}`);
+    });
+  }
+
+  private _attachCachedExternalVerificationResults(peers: PeerInfo[]): void {
+    const nowMs = Date.now();
+    for (const peer of peers) {
+      const claimsKey = this._externalVerificationClaimsKey(peer);
+      if (!claimsKey) continue;
+      const cached = this._externalVerificationCache.get(peer.peerId);
+      if (
+        cached
+        && cached.claimsKey === claimsKey
+        && nowMs - cached.checkedAtMs < EXTERNAL_VERIFICATION_RESULT_TTL_MS
+      ) {
+        peer.verificationResults = cached.results;
+      }
+    }
+  }
+
+  private _queueExternalVerification(peers: PeerInfo[]): void {
+    const queued: PeerInfo[] = [];
+    const nowMs = Date.now();
+    for (const peer of peers) {
+      const claimsKey = this._externalVerificationClaimsKey(peer);
+      if (!claimsKey) continue;
+      const cacheKey = `${peer.peerId}:${claimsKey}`;
+      if (this._externalVerificationInFlight.has(cacheKey)) continue;
+      const cached = this._externalVerificationCache.get(peer.peerId);
+      if (
+        cached
+        && cached.claimsKey === claimsKey
+        && nowMs - cached.checkedAtMs < EXTERNAL_VERIFICATION_RESULT_TTL_MS
+      ) {
+        continue;
+      }
+      this._externalVerificationInFlight.add(cacheKey);
+      queued.push({ ...peer });
+    }
+    if (queued.length === 0) return;
+
+    this._externalVerificationChain = this._externalVerificationChain.then(async () => {
+      if (!this._started) return;
+      const verifiedPeers = await this._verifyExternalClaimsForPeers(queued);
+      if (!this._started || verifiedPeers.length === 0) return;
+      debugLog(`[Node] External verification emitted ${verifiedPeers.length} peer update(s)`);
+      this.emit("peers:discovered", verifiedPeers);
+    }).catch((err) => {
+      debugWarn(`[Node] External verification failed: ${err instanceof Error ? err.message : err}`);
+    }).finally(() => {
+      for (const peer of queued) {
+        const claimsKey = this._externalVerificationClaimsKey(peer);
+        if (claimsKey) {
+          this._externalVerificationInFlight.delete(`${peer.peerId}:${claimsKey}`);
+        }
+      }
+    });
+  }
+
+  private async _verifyExternalClaimsForPeers(peers: PeerInfo[]): Promise<PeerInfo[]> {
+    const queue = peers.slice();
+    const verifiedPeers: PeerInfo[] = [];
+    const EXTERNAL_VERIFICATION_CONCURRENCY = 2;
+    const workers = Array.from({ length: Math.min(EXTERNAL_VERIFICATION_CONCURRENCY, queue.length) }, async () => {
+      for (;;) {
+        const peer = queue.shift();
+        if (!peer) return;
+        const verified = await this._verifyExternalClaimsForPeer(peer);
+        if (verified) {
+          verifiedPeers.push(verified);
+        }
+      }
+    });
+    await Promise.all(workers);
+    return verifiedPeers;
+  }
+
+  private async _verifyExternalClaimsForPeer(peer: PeerInfo): Promise<PeerInfo | null> {
+    const metadata = peer.metadata;
+    const claimsKey = this._externalVerificationClaimsKey(peer);
+    if (!metadata || !claimsKey) return null;
+
+    try {
+      const [domains, github] = await Promise.all([
+        verifyPeerMetadataDomains(metadata),
+        verifyPeerMetadataGithub(metadata),
+      ]);
+      const checkedAtMs = Date.now();
+      const allResults = [...domains, ...github];
+      const results: PeerVerificationResults = {
+        verified: allResults.length > 0 && allResults.every((result) => result.verified),
+        checkedAtMs,
+        domains,
+        github,
+      };
+      this._externalVerificationCache.set(peer.peerId, {
+        claimsKey,
+        checkedAtMs,
+        results,
+      });
+      return { ...peer, verificationResults: results };
+    } catch (err) {
+      debugWarn(`[Node] External verification failed for ${peer.peerId.slice(0, 12)}...: ${err instanceof Error ? err.message : err}`);
+      return null;
+    }
+  }
+
+  private _externalVerificationClaimsKey(peer: PeerInfo): string | null {
+    const verifications = peer.metadata?.verifications;
+    const domainCount = verifications?.domains?.length ?? 0;
+    const githubCount = verifications?.github?.length ?? 0;
+    if (domainCount + githubCount === 0) return null;
+    return JSON.stringify({
+      domains: verifications?.domains ?? [],
+      github: verifications?.github ?? [],
     });
   }
 
@@ -656,6 +786,8 @@ export class AntseedNode extends EventEmitter {
       r.metadata.timestamp > acc.metadata.timestamp ? r : acc,
     );
     const peer = this._lookupResultToPeerInfo(best);
+    this._attachCachedExternalVerificationResults([peer]);
+    this._queueExternalVerification([peer]);
     await this._enrichPeersWithOnChainStats([peer]);
     return peer;
   }
