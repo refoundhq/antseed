@@ -107,7 +107,7 @@ export interface PeerInfo {
   onChainStakeUsdcMicros?: number;
   /** Buyer-computed displayed on-chain score (0-100). */
   onChainReputationScore?: number;
-  /** Raw trust: channels × volume × ticket × recency × stake. */
+  /** Raw on-chain trust: credited settled USDC volume. */
   onChainTrustScore?: number;
   /** Sybil-risk heuristic in [0, 1]. */
   onChainSybilRisk?: number;
