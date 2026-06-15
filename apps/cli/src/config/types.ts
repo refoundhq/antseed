@@ -88,6 +88,13 @@ export interface VerificationConfig {
   github?: GithubVerificationConfig[];
 }
 
+export interface BuyerVerificationConfig {
+  /** Random sample rate for storing full response-auth evidence, from 0 to 1. */
+  sampleRate?: number;
+  /** Maximum combined encoded request + response bytes per sample. */
+  maxSampleBytes?: number;
+}
+
 /**
  * Seller-specific configuration within the Antseed config.
  */
@@ -134,6 +141,8 @@ export interface BuyerCLIConfig {
   peerRefreshIntervalMs: number;
   /** Timeout in ms for each HTTP metadata fetch during peer discovery */
   metadataFetchTimeoutMs: number;
+  /** Buyer-side response-auth evidence sampling settings. */
+  verification?: BuyerVerificationConfig;
 }
 
 /**

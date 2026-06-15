@@ -357,6 +357,7 @@ export function registerBuyerStartCommand(buyerCmd: Command): void {
         configPath: globalOpts.config,
         metadataFetchTimeoutMs: effectiveBuyerConfig.metadataFetchTimeoutMs,
         payments: paymentsConfig,
+        verification: effectiveBuyerConfig.verification,
       })
 
       node.setRouter(router)

@@ -27,6 +27,14 @@ function makeResponse(body = JSON.stringify({ content: [{ type: 'text', text: 's
 }
 
 describe('VerificationSampler', () => {
+  it('defaults to a 20 percent sample rate', () => {
+    const samplerHit = new VerificationSampler('/tmp/unused', { random: () => 0.199 });
+    const samplerMiss = new VerificationSampler('/tmp/unused', { random: () => 0.2 });
+
+    expect(samplerHit.shouldSample()).toBe(true);
+    expect(samplerMiss.shouldSample()).toBe(false);
+  });
+
   it('stores sampled request and response evidence with the response auth manifest', async () => {
     const tempDir = mkdtempSync(join(tmpdir(), 'verification-samples-test-'));
     try {
