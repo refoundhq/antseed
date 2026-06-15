@@ -62,6 +62,7 @@ Use `config.json` for durable node behavior. Use env vars for secrets and tempor
 | `baseUrl` for OpenAI-compatible providers | `ANTSEED_IDENTITY_HEX` |
 | Service list and categories | `ANTSEED_DEBUG=1` |
 | Pricing defaults and per-service pricing | One-off runtime overrides in deployment scripts |
+| Domain/GitHub verification claims | |
 | `payments.crypto.rpcUrl` for durable RPC config | `ANTSEED_BASE_RPC_URL` for deployment-specific Base RPC endpoints |
 | Buyer proxy port and peer refresh interval | `ANTSEED_DATA_DIR` for per-process buyer state isolation |
 | Bootstrap nodes | |
@@ -284,6 +285,85 @@ ANTSEED_BUYER_METADATA_FETCH_TIMEOUT_MS=1500 antseed buyer start
 antseed config set identity.displayName "Acme Inference - us-east-1"
 antseed config seller set publicAddress "peer.example.com:6882"
 ```
+
+## Domain and GitHub Verification
+
+Sellers can publish optional ownership claims in signed peer metadata. These claims let buyers and directories show that a peer is connected to a public domain or GitHub account controlled by the operator.
+
+Verification claims bind to the seller **peer ID** — the EVM address derived from the seller identity key. If your deployment also advertises a seller contract, such as a staking proxy, the external proof still contains the peer ID, not the contract address. Buyers verify the seller-contract relationship separately on-chain.
+
+Add claims under `seller.verifications`:
+
+```json
+{
+  "seller": {
+    "verifications": {
+      "domains": [
+        {
+          "domain": "provider.example.com",
+          "methods": ["dns-txt"]
+        }
+      ],
+      "github": [
+        {
+          "username": "example-org",
+          "repository": "antseed-verification"
+        }
+      ]
+    }
+  }
+}
+```
+
+### Domain proof
+
+For DNS TXT verification, create a TXT record at `_antseed.<domain>`:
+
+```text
+Name:  _antseed.provider.example.com
+Type:  TXT
+Value: antseed-peer=<peer-id-without-0x>
+```
+
+Example:
+
+```text
+antseed-peer=9e8f9aaee684298b7f2af2ae008e3692f0e9f4f7
+```
+
+If you prefer HTTPS verification, serve this JSON at `https://<domain>/.well-known/antseed.json` and configure the claim with `"methods": ["https-well-known"]`:
+
+```json
+{
+  "type": "antseed-domain-verification",
+  "peerId": "9e8f9aaee684298b7f2af2ae008e3692f0e9f4f7",
+  "domain": "provider.example.com"
+}
+```
+
+Do not redirect the well-known URL; verifiers require the proof to be served directly from the claimed domain.
+
+### GitHub proof
+
+Create a public repository and place `antseed.json` at the repository root. AntSeed fetches:
+
+```text
+https://raw.githubusercontent.com/<username>/<repository>/HEAD/antseed.json
+```
+
+The file must contain:
+
+```json
+{
+  "type": "antseed-github-verification",
+  "peerId": "9e8f9aaee684298b7f2af2ae008e3692f0e9f4f7",
+  "username": "example-org"
+}
+```
+
+The `repository` field is configured in `config.json`; it is not included in the proof file. If `repository` is omitted, verifiers use the profile repository named after the username.
+
+After updating config and publishing proofs, restart the seller. Startup logs will print the configured verification claims, and `/metadata` will include `verifications`.
 
 ## Provider Authentication
 

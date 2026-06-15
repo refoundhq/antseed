@@ -67,7 +67,7 @@ Custom bootstrap nodes can be supplied and are merged (deduplicated by `host:por
 **Source:** `node/src/discovery/peer-metadata.ts`
 
 ```
-METADATA_VERSION = 8
+METADATA_VERSION = 10
 ```
 
 ### Data Structures
@@ -77,12 +77,19 @@ METADATA_VERSION = 8
 | Field       | Type                    | Description                             |
 |-------------|-------------------------|-----------------------------------------|
 | peerId      | PeerId (string)         | 40 hex chars (20-byte EVM address)      |
-| version     | number                  | Must equal `METADATA_VERSION` (8)       |
+| version     | number                  | Must equal `METADATA_VERSION` (10)      |
 | displayName | string                  | Optional human-readable node label      |
 | publicAddress | string                | Optional public `host:port` buyers should dial instead of the raw DHT source address |
 | providers   | ProviderAnnouncement[]  | List of provider offerings              |
+| offerings   | PeerOffering[]          | Optional higher-level capability offerings |
 | region      | string                  | Geographic region identifier            |
 | timestamp   | number                  | Unix epoch milliseconds                 |
+| stakeAmountUSDC | number              | Optional stake amount, when available   |
+| onChainChannelCount | number          | Optional on-chain channel count         |
+| onChainGhostCount | number            | Optional on-chain ghost count           |
+| capabilities | string[]               | Optional peer-level protocol capabilities |
+| sellerContract | string               | Optional 40-hex-char on-chain seller contract used for payment channels |
+| verifications | PeerVerifications     | Optional signed domain/GitHub ownership claims |
 | signature   | string                  | 130 hex chars (65-byte secp256k1 signature) |
 
 #### ProviderAnnouncement
@@ -156,10 +163,23 @@ Post-provider sections:
   [publicAddressFlag:1]                           // v5+
   if publicAddressFlag == 1:
     [publicAddressLen:1][publicAddress:N]
+  [sellerContractFlag:1]                          // v8+
+  if sellerContractFlag == 1:
+    [sellerContract:20]
+  [domainVerificationCount:1]                     // v9+
+  Per domain verification entry:
+    [domainLen:1][domain:N][methodCount:1][methodIds...]
+    method id 0 = dns-txt, 1 = https-well-known
+  [githubVerificationCount:1]                     // v9+
+  Per GitHub verification entry:
+    [usernameLen:1][username:N][repositoryLen:1][repository:N]
+    repositoryLen 0 means the profile repository `<username>/<username>`
   [offeringCount:2]                               // uint16
   [offeringEntries...]
-  [evmAddressFlag:1] + [evmAddress:20 if present]
   [onChainStatsFlag:1] + [statsData:10 if present]
+  [capabilityCount:1]                             // v10+
+  Per capability entry:
+    [capabilityLen:1][capability:N]
 
 Trailer:
   [signature     : 65 bytes        ]   // secp256k1 signature
@@ -173,24 +193,36 @@ The body (everything except the trailing 65-byte signature) is the data that is 
 
 | Constant                  | Value | Description                                 |
 |---------------------------|-------|---------------------------------------------|
-| MAX_METADATA_SIZE         | 1000  | Maximum encoded size in bytes               |
+| MAX_METADATA_SIZE         | 1400  | Maximum encoded size in bytes               |
 | MAX_PROVIDERS             | 10    | Maximum provider entries per metadata       |
 | MAX_SERVICES_PER_PROVIDER | 20    | Maximum services per provider entry         |
 | MAX_SERVICE_NAME_LENGTH   | 64    | Maximum service name length in characters   |
 | MAX_REGION_LENGTH         | 32    | Maximum region string length in characters  |
 | MAX_DISPLAY_NAME_LENGTH   | 64    | Maximum display name length in characters   |
 | MAX_PUBLIC_ADDRESS_LENGTH | 255   | Maximum public address length in characters |
+| MAX_DOMAIN_VERIFICATION_CLAIMS | 5 | Maximum domain verification claims          |
+| MAX_DOMAIN_LENGTH         | 253   | Maximum domain claim length in characters   |
+| MAX_GITHUB_VERIFICATION_CLAIMS | 5 | Maximum GitHub verification claims          |
+| MAX_GITHUB_USERNAME_LENGTH | 39   | Maximum GitHub username length              |
+| MAX_GITHUB_REPOSITORY_LENGTH | 100 | Maximum GitHub repository name length       |
 | MAX_SERVICE_CATEGORIES_PER_SERVICE | 8 | Maximum categories per service           |
 | MAX_SERVICE_CATEGORY_LENGTH | 32  | Maximum category length in characters       |
 | MAX_SERVICE_API_PROTOCOLS_PER_SERVICE | 4 | Maximum protocol entries per service |
+| MAX_PEER_CAPABILITIES     | 16    | Maximum peer-level capability entries       |
+| MAX_PEER_CAPABILITY_LENGTH | 64   | Maximum peer-level capability length        |
 
 Additional validation rules enforced by `validateMetadata()`:
 
-- `version` must equal `METADATA_VERSION` (8).
+- `version` must equal `METADATA_VERSION` (10).
 - `peerId` must be exactly 40 lowercase hex characters.
 - `region` must not be empty.
 - `displayName` is optional, but when present it must be non-empty and <= 64 chars.
 - `publicAddress` is optional, but when present it must be a valid `host:port` and is signed as part of the metadata.
+- `sellerContract` is optional, but when present it must be exactly 40 lowercase hex characters and is signed as part of the metadata.
+- `verifications` is optional, but when present it must contain at least one supported namespace: `domains` or `github`.
+- Domain verification claims must be unique, lower-case hostnames with at least two labels, and may list unique methods from `dns-txt` and `https-well-known`. When `methods` is omitted, clients may try every known method.
+- GitHub verification claims must be unique. Usernames must be valid lower-case GitHub usernames, and repository names must be valid lower-case GitHub repository names when provided.
+- `capabilities` is optional, but when present values must be unique lower-case strings using letters, digits, hyphen, or dot.
 - `timestamp` must be a positive finite number.
 - At least one provider must be present.
 - `defaultPricing.inputUsdPerMillion` and `defaultPricing.outputUsdPerMillion` must be non-negative.
@@ -209,6 +241,71 @@ Additional validation rules enforced by `validateMetadata()`:
 - The full encoded payload must not exceed `MAX_METADATA_SIZE`.
 
 ---
+
+## External Verification Claims
+
+External verification claims are signed inside `PeerMetadata.verifications`, but the actual ownership proof is fetched outside the DHT metadata document. Proofs bind to `peerId`, not to `sellerContract`. When `sellerContract` is present, buyers verify the peer-to-contract delegation separately on-chain, for example by calling `sellerContract.isOperator(peerAddress)`.
+
+### Domain verification
+
+A domain claim has this metadata shape:
+
+```json
+{
+  "domain": "provider.example.com",
+  "methods": ["dns-txt"]
+}
+```
+
+Supported methods:
+
+- `dns-txt`: resolve `_antseed.<domain>` and look for `antseed-peer=<peerId>`.
+- `https-well-known`: fetch `https://<domain>/.well-known/antseed.json` without following redirects.
+
+The DNS TXT proof is:
+
+```text
+_antseed.provider.example.com TXT "antseed-peer=a1b2c3d4...40hex"
+```
+
+The HTTPS well-known proof body is:
+
+```json
+{
+  "type": "antseed-domain-verification",
+  "peerId": "a1b2c3d4...40hex",
+  "domain": "provider.example.com"
+}
+```
+
+### GitHub verification
+
+A GitHub claim has this metadata shape:
+
+```json
+{
+  "username": "example-org",
+  "repository": "antseed-verification"
+}
+```
+
+The verifier fetches the proof from:
+
+```text
+https://raw.githubusercontent.com/<username>/<repository>/HEAD/antseed.json
+```
+
+If `repository` is omitted, the profile repository named after the username is used. Redirects are rejected, so renamed or transferred repositories must republish the proof under the claimed account path.
+
+The proof body is:
+
+```json
+{
+  "type": "antseed-github-verification",
+  "peerId": "a1b2c3d4...40hex",
+  "username": "example-org"
+}
+```
 
 ## Metadata HTTP Endpoint
 
@@ -287,10 +384,11 @@ The `PeerLookup` class orchestrates the full discovery flow:
 The `PeerAnnouncer` class handles the seller-side announcement lifecycle:
 
 1. Build a `PeerMetadata` object from the configured providers, current pricing, current load, and region.
-2. Set `version` to `METADATA_VERSION` (8) and `timestamp` to `Date.now()`.
-3. Encode the body (without signature) via `encodeMetadataForSigning()`.
-4. Sign the body with the seller's secp256k1 private key (via EIP-191 personal_sign).
-5. Announce DHT topics in parallel at the configured signaling port (constant in service count):
+2. Set `version` to `METADATA_VERSION` (10) and `timestamp` to `Date.now()`.
+3. Include configured seller contract, verification claims, and peer capabilities when present.
+4. Encode the body (without signature) via `encodeMetadataForSigning()`.
+5. Sign the body with the seller's secp256k1 private key (via EIP-191 personal_sign).
+6. Announce DHT topics in parallel at the configured signaling port (constant in service count):
    - subnet topic (`subnetTopic(subnetOf(peerId))`)
    - wildcard topic (`ANTSEED_WILDCARD_TOPIC`) — kept during the subnet rollout so older buyers still find this peer
    - per-peer topic (`peerTopic(peerId)`)
