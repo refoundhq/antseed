@@ -392,11 +392,22 @@
 .card-stats {
   display: flex;
   align-items: center;
+  justify-content: flex-start;
   gap: 6px;
   font-size: 11px;
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.card-stats-values {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 6px;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
 }
@@ -565,14 +576,6 @@
   min-width: 0;
 }
 
-.card-provider-by {
-  font-size: 12px;
-  font-weight: 400;
-  color: var(--text-muted);
-  line-height: 12px;
-  flex-shrink: 0;
-}
-
 .provider-avatar {
   width: 16px;
   height: 16px;
@@ -606,6 +609,13 @@
   flex-shrink: 0;
 }
 
+.card-badges {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex-shrink: 0;
+}
+
 /* ── Proxy / pool identification badge ───────────────────────────────
    Surfaces "this peer settles through a known on-chain pool" (e.g. the
    DIEM Staking Pool). Intentionally styled as a neutral identifier *icon*,
@@ -621,7 +631,6 @@
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  margin-left: 4px;
   width: 16px;
   height: 16px;
   padding: 0;
@@ -641,6 +650,61 @@
   &:focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: 1px;
+  }
+}
+
+.verification-badges {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex-shrink: 0;
+}
+
+.verification-badge {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #059669;
+  line-height: 0;
+  cursor: pointer;
+  transition: color 0.12s ease, background 0.12s ease;
+
+  &:hover,
+  &:focus-visible {
+    color: #047857;
+    background: rgba(5, 150, 105, 0.08);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+  }
+}
+
+.verification-badge-domain {
+  color: #0284c7;
+
+  &:hover,
+  &:focus-visible {
+    color: #0369a1;
+    background: rgba(2, 132, 199, 0.08);
+  }
+}
+
+.verification-badge-github {
+  color: var(--text-primary);
+
+  &:hover,
+  &:focus-visible {
+    color: var(--accent);
   }
 }
 
@@ -802,6 +866,16 @@
      `var(--text-primary)` which flips automatically, so no color override is
      needed here. `.card-score-tooltip` lives in InfoTooltip.module.scss and
      carries its own dark-theme rule. */
+
+  .verification-badge-domain {
+    color: #38bdf8;
+
+    &:hover,
+    &:focus-visible {
+      color: #7dd3fc;
+      background: rgba(56, 189, 248, 0.12);
+    }
+  }
 
   .filter-trigger {
     border-color: rgba(255, 255, 255, 0.08) !important;

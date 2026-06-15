@@ -71,6 +71,12 @@ export type ChatServiceOptionEntry = {
   description: string;
 };
 
+export type DiscoverVerificationLink = {
+  kind: 'domain' | 'github';
+  label: string;
+  href: string;
+};
+
 export type DiscoverRow = {
   // Identity
   rowKey: string;              // `${peerId}:${serviceId}`
@@ -92,6 +98,7 @@ export type DiscoverRow = {
    * identification badge on the Discover card. See docs/protocol/diem-proxy.md.
    */
   sellerContract: string | null;
+  verificationLinks: DiscoverVerificationLink[];
   peerDisplayName: string | null;
   peerLabel: string;
 
