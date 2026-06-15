@@ -56,7 +56,7 @@ By default, metadata is fetched from `http://{host}:{port}/metadata` (`metadataP
 ```json title="metadata structure"
 {
   "peerId": "a1b2c3d4...40 hex chars (EVM address)",
-  "version": 5,
+  "version": 10,
   "displayName": "Acme Inference - us-east-1",
   "publicAddress": "peer.example.com:6882",
   "providers": [{
@@ -82,6 +82,16 @@ By default, metadata is fetched from `http://{host}:{port}/metadata` (`metadataP
   }],
   "region": "us-east",
   "timestamp": 1708272000000,
+  "capabilities": ["verification.response-auth.v1"],
+  "sellerContract": "1f228613116e2d08014dfdcc198377c8dedf18c9",
+  "verifications": {
+    "domains": [
+      { "domain": "provider.example.com", "methods": ["dns-txt"] }
+    ],
+    "github": [
+      { "username": "example-org", "repository": "antseed-verification" }
+    ]
+  },
   "signature": "eip191...130 hex chars"
 }
 ```
@@ -89,6 +99,62 @@ By default, metadata is fetched from `http://{host}:{port}/metadata` (`metadataP
 Recommended category tags: `privacy`, `legal`, `uncensored`, `coding`, `finance`, `tee` (custom tags are allowed).
 
 `publicAddress` is optional. When present, buyers should prefer it over the raw host learned from the DHT announcement. This is intended for deployments where DHT traffic exits from one IP but buyers must connect to another address, such as a Kubernetes load balancer.
+
+`sellerContract` is optional. When present, buyers use the contract as the on-chain seller address and verify separately that the peer identity is an authorized operator of that contract.
+
+`verifications` is optional. It carries external ownership claims that are included in the signed metadata. Domain and GitHub proofs bind to `peerId` — not to `sellerContract` — because the peer identity is the key that signs discovery metadata and operates the node.
+
+## Domain and GitHub Verification Claims
+
+Domain verification supports two proof transports:
+
+- DNS TXT at `_antseed.<domain>` with value `antseed-peer=<peer-id-without-0x>`
+- HTTPS well-known JSON at `https://<domain>/.well-known/antseed.json`
+
+A DNS-backed claim looks like:
+
+```json
+{
+  "domain": "provider.example.com",
+  "methods": ["dns-txt"]
+}
+```
+
+The matching DNS record is:
+
+```text
+_antseed.provider.example.com TXT "antseed-peer=a1b2c3d4...40hex"
+```
+
+An HTTPS well-known proof uses this JSON shape:
+
+```json
+{
+  "type": "antseed-domain-verification",
+  "peerId": "a1b2c3d4...40hex",
+  "domain": "provider.example.com"
+}
+```
+
+GitHub verification fetches a public file from:
+
+```text
+https://raw.githubusercontent.com/<username>/<repository>/HEAD/antseed.json
+```
+
+The proof file shape is:
+
+```json
+{
+  "type": "antseed-github-verification",
+  "peerId": "a1b2c3d4...40hex",
+  "username": "example-org"
+}
+```
+
+The repository name is part of the metadata claim, not the proof file. If no repository is provided, verifiers use the profile repository named after the username.
+
+Verifiers reject redirected proof URLs. Domain and GitHub proofs must be served directly from the claimed domain or GitHub account path.
 
 ## Peer Scoring
 

@@ -1,6 +1,6 @@
 # Antseed Network Protocol Specification
 
-**Version:** 1.7 (current discovery metadata format uses `METADATA_VERSION = 8`)
+**Version:** 1.8 (current discovery metadata format uses `METADATA_VERSION = 10`)
 
 ## Overview
 
@@ -110,6 +110,7 @@ See: [08-fingerprint-swarm.md](./08-fingerprint-swarm.md)
 
 | Version | Date | Notes |
 |---|---|---|
+| 1.8 | 2026-06-15 | Updated discovery spec for metadata v10, seller contracts, peer capabilities, and domain/GitHub verification claims |
 | 1.7 | 2026-06-15 | Added Real Money, Fake Models as model-substitution motivation for model verification |
 | 1.6 | 2026-06-15 | Added READER-style passive proxy-reader provenance to the model-verification verifier suite |
 | 1.5 | 2026-06-14 | Updated model-verification spec with implemented ResponseAuth, verification storage, and evidence sampling status |
