@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { collectVerificationLinks, peerMatchesServiceFilter } from './browse.js';
+import { peerMatchesServiceFilter } from './browse.js';
+import { collectPeerVerificationLinks } from '@antseed/node/discovery';
 import type { PeerInfo } from '@antseed/node';
 
 function peerWithServices(services: string[], providers: string[] = ['minimax']): PeerInfo {
@@ -78,7 +79,7 @@ test('network browse builds links for verified external claims only', () => {
     ],
   };
 
-  assert.deepEqual(collectVerificationLinks(peer), [
+  assert.deepEqual(collectPeerVerificationLinks(peer), [
     { kind: 'domain', label: 'example.com', href: 'https://example.com' },
     { kind: 'github', label: '@octocat/antseed-proof', href: 'https://github.com/octocat/antseed-proof' },
   ]);

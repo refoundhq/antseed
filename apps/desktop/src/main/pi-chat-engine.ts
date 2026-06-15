@@ -72,6 +72,7 @@ import {
   type NetworkPeerAddress,
 } from './chat-service-catalog.js';
 import { resolveChainConfig } from '@antseed/node';
+import { collectPeerVerificationLinks, type PeerVerificationLink } from '@antseed/node/discovery';
 import {
   AuthStorage,
   createAgentSession,
@@ -299,11 +300,7 @@ type DiscoverRowEntry = {
   selectionValue: string;
 };
 
-type DiscoverVerificationLink = {
-  kind: 'domain' | 'github';
-  label: string;
-  href: string;
-};
+type DiscoverVerificationLink = PeerVerificationLink;
 
 const CHAT_SESSIONS_DIR = path.join(CHAT_DATA_DIR, 'sessions');
 const CHAT_AGENT_DIR = path.join(CHAT_DATA_DIR, 'pi-agent');
@@ -358,65 +355,6 @@ function asRecord(value: unknown): Record<string, unknown> | null {
     return null;
   }
   return value as Record<string, unknown>;
-}
-
-function buildHttpsUrl(hostname: string): string | null {
-  const normalized = hostname.trim().toLowerCase();
-  if (!/^[a-z0-9][a-z0-9.-]*[a-z0-9]$/i.test(normalized) || normalized.includes('..')) {
-    return null;
-  }
-  try {
-    const url = new URL(`https://${normalized}`);
-    if (url.hostname !== normalized) return null;
-    return url.toString();
-  } catch {
-    return null;
-  }
-}
-
-function isGithubName(value: string): boolean {
-  return /^[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?$/i.test(value);
-}
-
-function isGithubRepository(value: string): boolean {
-  return /^[a-z0-9._-]{1,100}$/i.test(value) && value !== '.' && value !== '..';
-}
-
-function buildVerificationLinks(rawResults: unknown): DiscoverVerificationLink[] {
-  const results = asRecord(rawResults);
-  if (!results) return [];
-  const out: DiscoverVerificationLink[] = [];
-  const seen = new Set<string>();
-
-  const add = (link: DiscoverVerificationLink) => {
-    const key = `${link.kind}\u0000${link.href}`;
-    if (seen.has(key)) return;
-    seen.add(key);
-    out.push(link);
-  };
-
-  const domains = Array.isArray(results.domains) ? results.domains : [];
-  for (const raw of domains) {
-    const rec = asRecord(raw);
-    if (rec?.verified !== true || typeof rec.domain !== 'string') continue;
-    const href = buildHttpsUrl(rec.domain);
-    if (!href) continue;
-    add({ kind: 'domain', label: rec.domain.trim().toLowerCase(), href });
-  }
-
-  const github = Array.isArray(results.github) ? results.github : [];
-  for (const raw of github) {
-    const rec = asRecord(raw);
-    if (rec?.verified !== true || typeof rec.username !== 'string') continue;
-    const username = rec.username.trim().toLowerCase();
-    if (!isGithubName(username)) continue;
-    const repository = typeof rec.repository === 'string' ? rec.repository.trim() : '';
-    const hasRepository = repository.length > 0 && isGithubRepository(repository);
-    const path = hasRepository ? `${username}/${repository}` : username;
-    add({ kind: 'github', label: `@${path}`, href: `https://github.com/${path}` });
-  }
-
-  return out;
 }
 
 function normalizeNonNegativeNumber(value: unknown): number | null {
@@ -2789,7 +2727,7 @@ export function registerPiChatHandlers({
                 ? rec.onChainSybilFlags.filter((f: unknown): f is string => typeof f === 'string')
                 : [],
               sellerContract: typeof rec.sellerContract === 'string' ? rec.sellerContract : undefined,
-              verificationLinks: buildVerificationLinks(rec.verificationResults),
+              verificationLinks: collectPeerVerificationLinks({ verificationResults: rec.verificationResults }),
               providerPricing: rec.providerPricing as Record<string, {
                 services?: Record<string, { cachedInputUsdPerMillion?: number }>
               }> | undefined,

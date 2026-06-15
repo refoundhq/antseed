@@ -60,6 +60,12 @@ export {
   type GithubVerificationOptions,
   type GithubVerificationResult,
 } from './discovery/github-verification.js';
+export {
+  collectPeerVerificationLinks,
+  isGithubName,
+  isGithubRepository,
+  type PeerVerificationLink,
+} from './discovery/verification-links.js';
 export { MetadataServer, type MetadataServerConfig } from './discovery/metadata-server.js';
 export { parsePublicAddress, MAX_PUBLIC_ADDRESS_LENGTH, type ParsedPublicAddress } from './discovery/public-address.js';
 export { MeteringStorage } from './metering/storage.js';
