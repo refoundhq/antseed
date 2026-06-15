@@ -1748,6 +1748,9 @@ export class AntseedNode extends EventEmitter {
       lastSeen: result.metadata.resolvedAtMs ?? Date.now(),
       metadata: result.metadata,
       providers,
+      ...(result.metadata.capabilities && result.metadata.capabilities.length > 0
+        ? { capabilities: [...result.metadata.capabilities] }
+        : {}),
       publicAddress: this._resolvePublicAddress(result),
       ...(hasProviderPricing ? { providerPricing: providerPricingEntries } : {}),
       ...(hasProviderServiceCategories ? { providerServiceCategories: providerServiceCategoryEntries } : {}),
