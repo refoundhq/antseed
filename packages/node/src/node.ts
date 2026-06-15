@@ -88,6 +88,7 @@ import {
 import {
   buildSybilContext,
   computeOnChainScore,
+  computeOnChainScoreWithRisk,
   computeOnChainSybilRisk,
   computeOnChainTrust,
   type SybilContext,
@@ -726,7 +727,12 @@ export class AntseedNode extends EventEmitter {
         checkedAtMs,
         results,
       });
-      return { ...peer, verificationResults: results };
+      const verifiedPeer: PeerInfo = { ...peer, verificationResults: results };
+      const risk = typeof verifiedPeer.onChainSybilRisk === 'number'
+        ? verifiedPeer.onChainSybilRisk
+        : 0;
+      verifiedPeer.onChainReputationScore = computeOnChainScoreWithRisk(verifiedPeer, risk) ?? verifiedPeer.onChainReputationScore;
+      return verifiedPeer;
     } catch (err) {
       debugWarn(`[Node] External verification failed for ${peer.peerId.slice(0, 12)}...: ${err instanceof Error ? err.message : err}`);
       return null;
