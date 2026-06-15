@@ -1236,19 +1236,16 @@ html[data-theme='light'] main[class*='blog'] {
   background: rgba(31,216,122,0.055);
   color: var(--as-text-2);
 }
-.blog-wrapper .markdown code {
+/* .blog-wrapper .markdown code {
   font-family: var(--as-font-data);
   color: #8fffc4;
   background: rgba(31,216,122,0.08);
   border: 1px solid rgba(31,216,122,0.18);
   border-radius: 6px;
-}
+} */
 .blog-wrapper .theme-code-block,
 .blog-wrapper div[class*='codeBlockContainer'] {
-  border: 1px solid rgba(151,255,199,0.11);
-  border-radius: 18px;
   overflow: hidden;
-  box-shadow: 0 18px 54px rgba(0,0,0,0.22);
 }
 .blog-wrapper a[class*='tag'],
 .blog-wrapper .tag,
@@ -1377,11 +1374,11 @@ html[data-theme='light'] .blog-wrapper footer a b,
 html[data-theme='light'] .blog-wrapper a[class*='readMore'] {
   color: var(--as-green) !important;
 }
-html[data-theme='light'] .blog-wrapper .markdown code {
+/* html[data-theme='light'] .blog-wrapper .markdown code {
   color: #0b5c38;
   background: rgba(19,146,86,0.08);
   border-color: rgba(19,146,86,0.18);
-}
+} */
 html[data-theme='light'] .blog-wrapper .markdown blockquote {
   background: rgba(19,146,86,0.055);
   border-left-color: var(--as-green);
