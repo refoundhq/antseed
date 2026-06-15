@@ -270,6 +270,7 @@ type DiscoverRowEntry = {
   peerEvmAddress: string;
   sellerEvmAddress: string;
   sellerContract: string | null;
+  verificationLinks: DiscoverVerificationLink[];
   peerDisplayName: string | null;
   peerLabel: string;
   inputUsdPerMillion: number | null;
@@ -296,6 +297,12 @@ type DiscoverRowEntry = {
   networkInputTokens: string | null;
   networkOutputTokens: string | null;
   selectionValue: string;
+};
+
+type DiscoverVerificationLink = {
+  kind: 'domain' | 'github';
+  label: string;
+  href: string;
 };
 
 const CHAT_SESSIONS_DIR = path.join(CHAT_DATA_DIR, 'sessions');
@@ -351,6 +358,65 @@ function asRecord(value: unknown): Record<string, unknown> | null {
     return null;
   }
   return value as Record<string, unknown>;
+}
+
+function buildHttpsUrl(hostname: string): string | null {
+  const normalized = hostname.trim().toLowerCase();
+  if (!/^[a-z0-9][a-z0-9.-]*[a-z0-9]$/i.test(normalized) || normalized.includes('..')) {
+    return null;
+  }
+  try {
+    const url = new URL(`https://${normalized}`);
+    if (url.hostname !== normalized) return null;
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
+function isGithubName(value: string): boolean {
+  return /^[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?$/i.test(value);
+}
+
+function isGithubRepository(value: string): boolean {
+  return /^[a-z0-9._-]{1,100}$/i.test(value) && value !== '.' && value !== '..';
+}
+
+function buildVerificationLinks(rawResults: unknown): DiscoverVerificationLink[] {
+  const results = asRecord(rawResults);
+  if (!results) return [];
+  const out: DiscoverVerificationLink[] = [];
+  const seen = new Set<string>();
+
+  const add = (link: DiscoverVerificationLink) => {
+    const key = `${link.kind}\u0000${link.href}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push(link);
+  };
+
+  const domains = Array.isArray(results.domains) ? results.domains : [];
+  for (const raw of domains) {
+    const rec = asRecord(raw);
+    if (rec?.verified !== true || typeof rec.domain !== 'string') continue;
+    const href = buildHttpsUrl(rec.domain);
+    if (!href) continue;
+    add({ kind: 'domain', label: rec.domain.trim().toLowerCase(), href });
+  }
+
+  const github = Array.isArray(results.github) ? results.github : [];
+  for (const raw of github) {
+    const rec = asRecord(raw);
+    if (rec?.verified !== true || typeof rec.username !== 'string') continue;
+    const username = rec.username.trim().toLowerCase();
+    if (!isGithubName(username)) continue;
+    const repository = typeof rec.repository === 'string' ? rec.repository.trim() : '';
+    const hasRepository = repository.length > 0 && isGithubRepository(repository);
+    const path = hasRepository ? `${username}/${repository}` : username;
+    add({ kind: 'github', label: `@${path}`, href: `https://github.com/${path}` });
+  }
+
+  return out;
 }
 
 function normalizeNonNegativeNumber(value: unknown): number | null {
@@ -615,6 +681,7 @@ type BuyerStateDiscoveredPeer = {
   onChainSybilRisk: number | null;
   onChainSybilFlags: string[];
   sellerContract?: string;
+  verificationLinks: DiscoverVerificationLink[];
   providerPricing?: Record<string, { services?: Record<string, { cachedInputUsdPerMillion?: number }> }>;
 };
 
@@ -679,6 +746,7 @@ async function buildDiscoverRows(
       peerEvmAddress,
       sellerEvmAddress,
       sellerContract: /^[0-9a-f]{40}$/.test(sellerHex) ? `0x${sellerHex}` : null,
+      verificationLinks: peerBlob?.verificationLinks ?? [],
       peerDisplayName: entry.peerLabel?.split(' (')[0] ?? null,
       peerLabel: entry.peerLabel ?? peerId.slice(0, 12) + '...',
       inputUsdPerMillion: entry.inputUsdPerMillion ?? null,
@@ -2721,6 +2789,7 @@ export function registerPiChatHandlers({
                 ? rec.onChainSybilFlags.filter((f: unknown): f is string => typeof f === 'string')
                 : [],
               sellerContract: typeof rec.sellerContract === 'string' ? rec.sellerContract : undefined,
+              verificationLinks: buildVerificationLinks(rec.verificationResults),
               providerPricing: rec.providerPricing as Record<string, {
                 services?: Record<string, { cachedInputUsdPerMillion?: number }>
               }> | undefined,

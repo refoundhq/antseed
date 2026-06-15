@@ -15,7 +15,7 @@ function mkRow(overrides: Partial<DiscoverRow> = {}): DiscoverRow {
     rowKey: 'p:s',
     serviceId: 's', serviceLabel: 'Service', categories: [],
     provider: 'openai', protocol: 'openai-chat-completions',
-    peerId: 'p', peerEvmAddress: '0xp', peerDisplayName: 'Peer', peerLabel: 'Peer',
+    peerId: 'p', peerEvmAddress: '0xp', sellerContract: null, verificationLinks: [], peerDisplayName: 'Peer', peerLabel: 'Peer',
     inputUsdPerMillion: 1, outputUsdPerMillion: 2, cachedInputUsdPerMillion: null,
     lifetimeSessions: 0, lifetimeRequests: 0, lifetimeInputTokens: 0, lifetimeOutputTokens: 0,
     lifetimeFirstSessionAt: null, lifetimeLastSessionAt: null,
