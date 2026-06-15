@@ -327,6 +327,12 @@ export function parsePersistedPeers(
     if (peer.capabilities && peer.capabilities.length > 0) {
       peer.metadata = { ...(peer.metadata ?? {}), capabilities: [...peer.capabilities] } as PeerMetadata
     }
+    if (entry.verifications && typeof entry.verifications === 'object') {
+      peer.metadata = { ...(peer.metadata ?? {}), verifications: entry.verifications as PeerMetadata['verifications'] } as PeerMetadata
+    }
+    if (entry.verificationResults && typeof entry.verificationResults === 'object') {
+      peer.verificationResults = entry.verificationResults as PeerInfo['verificationResults']
+    }
     peers.push(peer)
   }
   return peers
@@ -565,10 +571,19 @@ export class BuyerProxy {
     // and losing it on each refresh would defeat the carry-forward tracking.
     const merged: PeerInfo[] = incoming.map((peer) => {
       const prev = prevById.get(peer.peerId)
-      if (prev?.lastReachedAt && (!peer.lastReachedAt || prev.lastReachedAt > peer.lastReachedAt)) {
-        return { ...peer, lastReachedAt: prev.lastReachedAt }
+      if (!prev) return peer
+      const metadata = peer.metadata || prev.metadata
+        ? { ...(prev.metadata ?? {}), ...(peer.metadata ?? {}) } as PeerMetadata
+        : undefined
+      const mergedPeer: PeerInfo = {
+        ...prev,
+        ...peer,
+        ...(metadata ? { metadata } : {}),
       }
-      return peer
+      if (prev.lastReachedAt && (!peer.lastReachedAt || prev.lastReachedAt > peer.lastReachedAt)) {
+        mergedPeer.lastReachedAt = prev.lastReachedAt
+      }
+      return mergedPeer
     })
 
     // Carry forward previously known peers that are missing from this scan.
@@ -637,6 +652,11 @@ export class BuyerProxy {
         // Persisted so cold-started buyers can still resolve the facade address
         // for channelId derivation. See parsePersistedPeers for the round-trip.
         sellerContract: p.metadata?.sellerContract ?? null,
+        // External ownership claims and buyer-computed proof results. Claim
+        // verification runs asynchronously after discovery, so this may be
+        // null on first sighting and filled by a later peers:discovered update.
+        verifications: p.metadata?.verifications ?? null,
+        verificationResults: p.verificationResults ?? null,
         lastSeen: p.lastSeen,
         lastReachedAt: p.lastReachedAt ?? null,
       }

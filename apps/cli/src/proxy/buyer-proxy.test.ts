@@ -621,6 +621,45 @@ test('parsePersistedPeers restores sellerContract into peer.metadata', () => {
   assert.equal(peer!.metadata?.sellerContract, facade)
 })
 
+test('parsePersistedPeers restores external verification claims and results', () => {
+  const verificationResults = {
+    verified: true,
+    checkedAtMs: NOW - 500,
+    domains: [
+      {
+        domain: 'example.com',
+        peerId: validPeerId,
+        verified: true,
+        method: 'dns-txt',
+        checkedAtMs: NOW - 500,
+        attempts: [{ method: 'dns-txt', verified: true }],
+      },
+    ],
+    github: [],
+  }
+  const [peer] = parsePersistedPeers(
+    {
+      discoveredPeers: [
+        {
+          peerId: validPeerId,
+          providers: ['openai'],
+          lastSeen: NOW - 1_000,
+          verifications: {
+            domains: [{ domain: 'example.com', methods: ['dns-txt'] }],
+          },
+          verificationResults,
+        },
+      ],
+    },
+    NOW,
+  )
+  assert.ok(peer)
+  assert.deepEqual(peer!.metadata?.verifications, {
+    domains: [{ domain: 'example.com', methods: ['dns-txt'] }],
+  })
+  assert.deepEqual(peer!.verificationResults, verificationResults)
+})
+
 test('parsePersistedPeers leaves metadata undefined when sellerContract is absent', () => {
   const [peer] = parsePersistedPeers(
     {

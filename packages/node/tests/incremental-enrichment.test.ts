@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { AntseedNode, type PeerInfo } from '../src/node.js';
+import { GITHUB_VERIFICATION_PROOF_TYPE } from '../src/discovery/github-verification.js';
 
 function makePeer(peerId = 'a'.repeat(40)): PeerInfo {
   return {
@@ -44,5 +45,45 @@ describe('AntseedNode incremental discovery enrichment', () => {
     expect(peers[0]?.onChainTotalVolumeUsdcMicros).toBe(50_000_000);
     expect(peers[0]?.onChainStatsFetchedAt).toEqual(expect.any(Number));
     expect(peers[0]?.onChainReputationScore).toEqual(expect.any(Number));
+  });
+
+  it('emits external verification results without blocking initial discovery events', async () => {
+    const node = new AntseedNode({ role: 'buyer' });
+    const peer = makePeer();
+    peer.metadata = {
+      peerId: peer.peerId,
+      version: 10,
+      providers: [],
+      region: 'unknown',
+      timestamp: Date.now(),
+      signature: '00'.repeat(65),
+      verifications: {
+        github: [{ username: 'octocat' }],
+      },
+    };
+    const discovered = vi.fn();
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      type: GITHUB_VERIFICATION_PROOF_TYPE,
+      peerId: peer.peerId,
+      username: 'octocat',
+    }), { status: 200 }));
+
+    node.on('peers:discovered', discovered);
+    vi.stubGlobal('fetch', fetchMock);
+    try {
+      (node as any)._started = true;
+      (node as any)._queueExternalVerification([peer]);
+      expect(discovered).not.toHaveBeenCalled();
+
+      await (node as any)._externalVerificationChain;
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(discovered).toHaveBeenCalledTimes(1);
+      const [[peers]] = discovered.mock.calls as [[PeerInfo[]]];
+      expect(peers[0]?.verificationResults?.verified).toBe(true);
+      expect(peers[0]?.verificationResults?.github[0]?.username).toBe('octocat');
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

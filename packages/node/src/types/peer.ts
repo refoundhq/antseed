@@ -1,5 +1,7 @@
 import type { ServiceApiProtocol } from "./service-api.js";
 import type { PeerMetadata } from "../discovery/peer-metadata.js";
+import type { DomainVerificationResult } from "../discovery/domain-verification.js";
+import type { GithubVerificationResult } from "../discovery/github-verification.js";
 
 /**
  * A PeerId is the EVM address hex (40 lowercase chars = 20 bytes, no 0x prefix).
@@ -41,6 +43,17 @@ export interface ProviderServiceCategoryMatrixEntry {
 
 export interface ProviderServiceApiProtocolMatrixEntry {
   services: Record<string, ServiceApiProtocol[]>;
+}
+
+export interface PeerVerificationResults {
+  /** True when every announced external claim verified successfully. */
+  verified: boolean;
+  /** Buyer-local time when the latest verification pass completed. */
+  checkedAtMs: number;
+  /** Domain ownership verification results, one per announced domain claim. */
+  domains: DomainVerificationResult[];
+  /** GitHub account ownership verification results, one per announced GitHub claim. */
+  github: GithubVerificationResult[];
 }
 
 /** Information about a known peer. */
@@ -117,4 +130,6 @@ export interface PeerInfo {
   onChainStatsFetchedAt?: number;
   /** Full peer metadata, if available (set after metadata resolution). */
   metadata?: PeerMetadata;
+  /** Buyer-computed results for external ownership claims announced in metadata. */
+  verificationResults?: PeerVerificationResults;
 }
