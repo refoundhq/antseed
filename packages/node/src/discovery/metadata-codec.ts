@@ -10,6 +10,7 @@ const SERVICE_API_PROTOCOLS_METADATA_VERSION = 4;
 const PUBLIC_ADDRESS_METADATA_VERSION = 5;
 const SELLER_CONTRACT_METADATA_VERSION = 8;
 const DOMAIN_VERIFICATION_METADATA_VERSION = 9;
+const PEER_CAPABILITIES_METADATA_VERSION = 10;
 const DOMAIN_VERIFICATION_METHOD_IDS: Record<DomainVerificationMethod, number> = {
   "dns-txt": 0,
   "https-well-known": 1,
@@ -38,6 +39,10 @@ const DOMAIN_VERIFICATION_METHODS_BY_ID: DomainVerificationMethod[] = ["dns-txt"
  * domainVerificationEntry(v9+): [domainLen:1][domain:N][methodCount:1][methodIds...]
  * [githubVerificationCount:1][githubVerificationEntries...] (v9+ only)
  * githubVerificationEntry(v9+): [usernameLen:1][username:N][repoLen:1][repo:N] (repoLen 0 = profile repo)
+ * [offerings...]
+ * [onChainStatsFlag:1][onChainStats:10]
+ * [capabilityCount:1][capabilities...] (v10+ only)
+ * capability(v10+): [capabilityLen:1][capability:N]
  * [signature:65]
  */
 export function encodeMetadata(metadata: PeerMetadata): Uint8Array {
@@ -357,6 +362,22 @@ function encodeBody(metadata: PeerMetadata): Uint8Array {
     parts.push(new Uint8Array(repBuf));
   } else {
     parts.push(new Uint8Array([0])); // flag: absent
+  }
+
+  if (metadata.version >= PEER_CAPABILITIES_METADATA_VERSION) {
+    const capabilities = Array.from(
+      new Set(
+        (metadata.capabilities ?? [])
+          .map((capability) => capability.trim().toLowerCase())
+          .filter((capability) => capability.length > 0),
+      ),
+    ).sort();
+    parts.push(new Uint8Array([capabilities.length]));
+    for (const capability of capabilities) {
+      const capabilityBytes = new TextEncoder().encode(capability);
+      parts.push(new Uint8Array([capabilityBytes.length]));
+      parts.push(capabilityBytes);
+    }
   }
 
   // Combine all parts
@@ -769,6 +790,25 @@ export function decodeMetadata(data: Uint8Array): PeerMetadata {
     }
   }
 
+  let capabilities: string[] | undefined;
+  if (version >= PEER_CAPABILITIES_METADATA_VERSION) {
+    checkBounds(offset, 1, data.length - 65);
+    const capabilityCount = data[offset]!;
+    offset += 1;
+    if (capabilityCount > 0) {
+      capabilities = [];
+      for (let i = 0; i < capabilityCount; i++) {
+        checkBounds(offset, 1, data.length - 65);
+        const capabilityLen = data[offset]!;
+        offset += 1;
+        checkBounds(offset, capabilityLen, data.length - 65);
+        const capability = new TextDecoder().decode(data.slice(offset, offset + capabilityLen));
+        offset += capabilityLen;
+        capabilities.push(capability);
+      }
+    }
+  }
+
   // signature: 65 bytes (secp256k1 r+s+v)
   checkBounds(offset, 65, data.length);
   const signatureBytes = data.slice(offset, offset + 65);
@@ -788,6 +828,7 @@ export function decodeMetadata(data: Uint8Array): PeerMetadata {
     ...(offerings && offerings.length > 0 ? { offerings } : {}),
     ...(onChainChannelCount !== undefined ? { onChainChannelCount } : {}),
     ...(onChainGhostCount !== undefined ? { onChainGhostCount } : {}),
+    ...(capabilities && capabilities.length > 0 ? { capabilities } : {}),
     ...(sellerContract ? { sellerContract } : {}),
     ...(Object.keys(verifications).length > 0 ? { verifications } : {}),
     region,

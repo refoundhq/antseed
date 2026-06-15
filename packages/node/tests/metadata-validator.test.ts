@@ -12,6 +12,7 @@ import {
   MAX_PUBLIC_ADDRESS_LENGTH,
   MAX_SERVICE_CATEGORY_LENGTH,
   MAX_SERVICE_API_PROTOCOLS_PER_SERVICE,
+  MAX_PEER_CAPABILITIES,
 } from '../src/discovery/metadata-validator.js';
 import { METADATA_VERSION, type PeerMetadata } from '../src/discovery/peer-metadata.js';
 
@@ -592,6 +593,26 @@ describe('validateMetadata', () => {
       },
     }));
     expect(errors.some(e => e.field === "verifications.github")).toBe(true);
+  });
+
+  it("accepts well-formed peer capabilities", () => {
+    const errors = validateMetadata(validMetadata({ capabilities: ["verification.response-auth.v1"] }));
+    expect(errors.filter(e => e.field.startsWith("capabilities"))).toHaveLength(0);
+  });
+
+  it("rejects duplicate or malformed peer capabilities", () => {
+    const errors = validateMetadata(validMetadata({
+      capabilities: ["verification.response-auth.v1", "Verification.Response-Auth.V1", "bad capability"],
+    }));
+    expect(errors.some(e => e.field === "capabilities[1]")).toBe(true);
+    expect(errors.some(e => e.field === "capabilities[2]")).toBe(true);
+  });
+
+  it("rejects too many peer capabilities", () => {
+    const errors = validateMetadata(validMetadata({
+      capabilities: Array.from({ length: MAX_PEER_CAPABILITIES + 1 }, (_, i) => `capability.${i}`),
+    }));
+    expect(errors.some(e => e.field === "capabilities")).toBe(true);
   });
 });
 

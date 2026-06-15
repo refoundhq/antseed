@@ -3,8 +3,8 @@ import { METADATA_VERSION, WELL_KNOWN_SERVICE_API_PROTOCOLS } from "./peer-metad
 import { encodeMetadata } from "./metadata-codec.js";
 import { MAX_PUBLIC_ADDRESS_LENGTH, parsePublicAddress } from "./public-address.js";
 
-// v9 adds signed domain verification claims. Keep enough room for several
-// normal hostnames while still bounding DHT-served metadata fetch payloads.
+// v9 adds signed verification claims and v10 adds peer capabilities. Keep
+// enough room for several normal claims while bounding DHT-served metadata.
 export const MAX_METADATA_SIZE = 1400;
 export const MAX_PROVIDERS = 10;
 export const MAX_SERVICES_PER_PROVIDER = 20;
@@ -19,12 +19,15 @@ export const MAX_GITHUB_REPOSITORY_LENGTH = 100;
 export const MAX_SERVICE_CATEGORIES_PER_SERVICE = 8;
 export const MAX_SERVICE_CATEGORY_LENGTH = 32;
 export const MAX_SERVICE_API_PROTOCOLS_PER_SERVICE = 4;
+export const MAX_PEER_CAPABILITIES = 16;
+export const MAX_PEER_CAPABILITY_LENGTH = 64;
 const SERVICE_CATEGORY_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
 const DOMAIN_LABEL_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 const DOMAIN_VERIFICATION_METHODS = new Set<DomainVerificationMethod>(["dns-txt", "https-well-known"]);
 const GITHUB_USERNAME_PATTERN = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/;
 const GITHUB_REPOSITORY_PATTERN = /^[a-z0-9._-]+$/;
 const VERIFICATION_NAMESPACES = new Set(["domains", "github"]);
+const PEER_CAPABILITY_PATTERN = /^[a-z0-9][a-z0-9.-]*$/;
 const SERVICE_API_PROTOCOL_SET = new Set<string>(WELL_KNOWN_SERVICE_API_PROTOCOLS);
 
 function isValidDomainName(value: string): boolean {
@@ -256,6 +259,50 @@ export function validateMetadata(metadata: PeerMetadata): ValidationError[] {
           field: "verifications",
           message: "Must include at least one verification namespace when provided",
         });
+      }
+    }
+  }
+
+  if (metadata.capabilities !== undefined) {
+    if (!Array.isArray(metadata.capabilities)) {
+      errors.push({ field: "capabilities", message: "Capabilities must be a string array" });
+    } else {
+      if (metadata.capabilities.length > MAX_PEER_CAPABILITIES) {
+        errors.push({
+          field: "capabilities",
+          message: `Capability count ${metadata.capabilities.length} exceeds max ${MAX_PEER_CAPABILITIES}`,
+        });
+      }
+      const deduped = new Set<string>();
+      for (let i = 0; i < metadata.capabilities.length; i++) {
+        const capability = metadata.capabilities[i];
+        if (typeof capability !== "string" || capability.trim().length === 0) {
+          errors.push({
+            field: `capabilities[${i}]`,
+            message: "Capability must be a non-empty string",
+          });
+          continue;
+        }
+        const normalized = capability.trim().toLowerCase();
+        if (normalized.length > MAX_PEER_CAPABILITY_LENGTH) {
+          errors.push({
+            field: `capabilities[${i}]`,
+            message: `Capability length ${normalized.length} exceeds max ${MAX_PEER_CAPABILITY_LENGTH}`,
+          });
+        }
+        if (!PEER_CAPABILITY_PATTERN.test(normalized)) {
+          errors.push({
+            field: `capabilities[${i}]`,
+            message: "Capability must use lowercase letters, digits, hyphen, or dot",
+          });
+        }
+        if (deduped.has(normalized)) {
+          errors.push({
+            field: `capabilities[${i}]`,
+            message: "Capability values must be unique",
+          });
+        }
+        deduped.add(normalized);
       }
     }
   }

@@ -62,6 +62,8 @@ export interface PeerInfo {
   lastReachedAt?: number;
   /** LLM providers this peer is offering (empty if buyer-only). */
   providers: string[];
+  /** Protocol capabilities announced by the peer. */
+  capabilities?: string[];
   /** Seller-reported reputation score (0-100). */
   reputationScore?: number;
   /** Provider/service-aware pricing map announced by seller. */

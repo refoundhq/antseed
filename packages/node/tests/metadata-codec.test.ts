@@ -251,6 +251,21 @@ describe('encodeMetadata / decodeMetadata', () => {
     });
   });
 
+  it("round-trips v10 metadata with peer capabilities", () => {
+    const meta: PeerMetadata = {
+      peerId: "aa".repeat(20),
+      version: METADATA_VERSION,
+      region: "us-east-1",
+      timestamp: 1_700_000_000_000,
+      providers: [],
+      capabilities: ["verification.response-auth.v1"],
+      signature: "dd".repeat(65),
+    };
+    const bytes = encodeMetadata(meta);
+    const decoded = decodeMetadata(bytes);
+    expect(decoded.capabilities).toEqual(["verification.response-auth.v1"]);
+  });
+
   // v2/v3/v4/v5 roundtrip tests removed — pre-v6 format is rejected by the decoder.
 });
 

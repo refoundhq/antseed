@@ -554,6 +554,7 @@ test('parsePersistedPeers preserves provider metadata so routing filters still w
         displayName: 'Alice',
         publicAddress: '1.2.3.4:1234',
         providers: ['claude-oauth'],
+        capabilities: ['verification.response-auth.v1'],
         services: ['claude-opus-4-6'],
         providerPricing: null,
         providerServiceCategories: null,
@@ -577,6 +578,8 @@ test('parsePersistedPeers preserves provider metadata so routing filters still w
   assert.equal(peer!.displayName, 'Alice')
   assert.equal(peer!.publicAddress, '1.2.3.4:1234')
   assert.deepEqual(peer!.providers, ['claude-oauth'])
+  assert.deepEqual(peer!.capabilities, ['verification.response-auth.v1'])
+  assert.deepEqual(peer!.metadata?.capabilities, ['verification.response-auth.v1'])
   assert.equal(peer!.defaultInputUsdPerMillion, 3)
   assert.equal(peer!.defaultOutputUsdPerMillion, 15)
   assert.equal(peer!.maxConcurrency, 4)

@@ -250,6 +250,10 @@ export function parsePersistedPeers(
       lastSeen,
       providers,
     }
+    if (Array.isArray(entry.capabilities)) {
+      const capabilities = entry.capabilities.filter((capability): capability is string => typeof capability === 'string')
+      if (capabilities.length > 0) peer.capabilities = capabilities
+    }
     if (lastReachedAt > 0) peer.lastReachedAt = lastReachedAt
     if (typeof entry.displayName === 'string') peer.displayName = entry.displayName
     if (typeof entry.publicAddress === 'string') peer.publicAddress = entry.publicAddress
@@ -318,7 +322,10 @@ export function parsePersistedPeers(
     // wallet, and `reserve()` reverts on-chain with InvalidSignature() because
     // the contract derives channelId from msg.sender (the facade).
     if (typeof entry.sellerContract === 'string' && entry.sellerContract.length > 0) {
-      peer.metadata = { sellerContract: entry.sellerContract } as PeerMetadata
+      peer.metadata = { ...(peer.metadata ?? {}), sellerContract: entry.sellerContract } as PeerMetadata
+    }
+    if (peer.capabilities && peer.capabilities.length > 0) {
+      peer.metadata = { ...(peer.metadata ?? {}), capabilities: [...peer.capabilities] } as PeerMetadata
     }
     peers.push(peer)
   }
@@ -601,6 +608,7 @@ export class BuyerProxy {
         displayName: p.displayName ?? null,
         publicAddress: p.publicAddress ?? null,
         providers: p.providers,
+        capabilities: p.capabilities ?? p.metadata?.capabilities ?? [],
         services,
         providerPricing: p.providerPricing ?? null,
         providerServiceCategories: p.providerServiceCategories ?? null,
