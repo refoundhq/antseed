@@ -18,6 +18,13 @@ the advertised price and receives degraded output. Settlement volume,
 ghost-channel rate, and ERC-8004 feedback all score the cheating Seller exactly
 as well as an honest one, because delivery still happened.
 
+This is not hypothetical. "Real Money, Fake Models" audits shadow APIs claiming
+to serve official frontier models and finds utility, safety, and identity
+divergence between claimed and served behavior
+(https://arxiv.org/abs/2603.01919). AntSeed's model-verification layer is the
+protocol response to that failure mode: make served bytes attributable first,
+then run black-box identity checks over attributable evidence.
+
 **Model verification** is the set of mechanisms that let a Buyer gain confidence
 that the model it paid for is the model it received, and — where the evidence is
 strong enough — escalate a confirmed substitution to on-chain slashing. The v1
@@ -133,6 +140,12 @@ a detail to tune later.
 A secondary adversary is a malicious **Buyer** that fabricates or cherry-picks
 evidence to slash an honest Seller. Any mechanism that can trigger an on-chain
 penalty MUST be robust against this.
+
+External motivation:
+
+- "Real Money, Fake Models" documents deceptive model claims in shadow APIs and
+  motivates treating model identity as an auditable market claim, not a label to
+  trust blindly: https://arxiv.org/abs/2603.01919.
 
 ---
 
@@ -433,6 +446,31 @@ type more than model identity.
 Runtime fingerprints are triage signals. They can justify increasing KBF or
 shadow-sampling budget, but they MUST NOT drive slashing directly.
 
+### F9 — Passive Proxy-Reader Provenance
+
+The Buyer analyzes ordinary signed responses after the fact with a provenance
+classifier or "reader" model trained to infer which model family or serving stack
+likely produced the text. READER-style methods fit here: they extract
+representations from generated text and decode authorship/provenance without
+requiring active challenge prompts.
+
+This family is important because it can run over normal user traffic already
+covered by `ResponseAuth`. It does not make audit traffic distinguishable to the
+Seller, and it can prioritize which Sellers should receive active KBF,
+behavioral, or perturbation audits.
+
+Limitations:
+
+- It is usually weaker than a targeted active audit for exact model identity.
+- It may fingerprint the full Seller stack, including wrappers and system
+  prompts, not only the base model.
+- It needs calibrated references and should report confidence, coverage, and
+  abstentions rather than forcing a verdict.
+
+Reference: "READER: Robust Evidence-based Authorship Decoding via Extracted
+Representations" (`arXiv:2606.10794`,
+https://arxiv.org/abs/2606.10794).
+
 ---
 
 ## Package Boundaries
@@ -490,8 +528,8 @@ packages/fingerprints/
 ```
 
 Future verifier families (behavioral classifiers, perturbation tests, rare-token
-tests, runtime fingerprints) MUST plug into the same package-level interfaces
-instead of creating one-off package APIs.
+tests, runtime fingerprints, passive proxy-reader provenance) MUST plug into the
+same package-level interfaces instead of creating one-off package APIs.
 
 ### `@antseed/fingerprint-swarm`
 
@@ -1122,8 +1160,8 @@ boundaries:
 
 6. Additional fingerprint families:
    - add behavioral-classifier, perturbation, rare-token, instruction-hierarchy,
-     output-distribution, and runtime verifier modules behind the day-one
-     `FingerprintVerifier` interface;
+     output-distribution, runtime, and passive proxy-reader verifier modules
+     behind the day-one `FingerprintVerifier` interface;
    - keep each verifier module transport-agnostic;
    - reuse the same reference store, sample store, and audit-result schema.
 
@@ -1169,7 +1207,7 @@ commit-reveal, reproducible verifier code, and independent adjudication.
 | M4 Passive fingerprinting | free | gross outliers | No (triage) |
 | M5 TEE attestation | premium | proves served endpoint/weights | Authoritative |
 | F1 KBF | low to medium | knowledge-boundary mismatch | Local routing; slashing only after dispute |
-| F2-F8 Fingerprint suite | variable | behavioral/runtime/model-family mismatch | Local routing and triage unless independently confirmed |
+| F2-F9 Fingerprint suite | variable | behavioral/runtime/provenance/model-family mismatch | Local routing and triage unless independently confirmed |
 
 The implemented base is **M3 ResponseAuth + buyer-side verification storage +
 random verified evidence samples**. The recommended next implementation is
@@ -1179,5 +1217,5 @@ verifier, publish and mirror signed public fingerprint packs, store trusted
 references by content hash, run Buyer-side audits through the normal request
 path, and persist auditable manifests that point to signed request/response
 samples. M2 remains the stronger long-term distributional check for real
-traffic; F2-F8 expand the suite through the same package and public fingerprint
+traffic; F2-F9 expand the suite through the same package and public fingerprint
 swarm. On-chain slashing comes last.
