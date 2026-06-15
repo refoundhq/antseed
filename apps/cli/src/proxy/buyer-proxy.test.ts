@@ -24,6 +24,7 @@ function makePeer(seed: string, providers: string[]): PeerInfo {
 }
 
 function makeProxyRequest(options: {
+  method?: string
   path?: string
   headers?: Record<string, string>
   body?: Record<string, unknown>
@@ -35,7 +36,7 @@ function makeProxyRequest(options: {
     headers: Record<string, string>
     complete: boolean
   }
-  req.method = 'POST'
+  req.method = options.method ?? 'POST'
   req.url = options.path ?? '/v1/chat/completions'
   req.headers = {
     'content-type': 'application/json',
@@ -375,6 +376,95 @@ test('pinned proxy request enforces buyer routing policy', async () => {
   assert.equal(res.statusCode, 502)
   assert.match(res.body, /outside your buyer routing policy/)
   assert.match(res.body, /pricing\/reputation limits/)
+})
+
+test('local buyer payment failures only update diagnostic failure state', async () => {
+  const peer = makePeer('a', ['openai'])
+  const routerResults: unknown[] = []
+  const router = {
+    allowsPeerForPolicy: () => true,
+    onResult: (_peer: PeerInfo, result: unknown) => {
+      routerResults.push(result)
+    },
+  }
+  const proxy = makeBuyerProxyWithPeers([peer], [peer], router)
+  ;(proxy as any)._cachedPeers = [peer]
+  ;(proxy as any)._node.sendRequest = async () => {
+    throw new Error('Insufficient buyer deposits for reserve top-up: available=0 required=1000')
+  }
+
+  const res = await invokeProxy(proxy, makeProxyRequest({
+    headers: {
+      'x-antseed-pin-peer': peer.peerId,
+    },
+  }))
+
+  assert.equal(res.statusCode, 502)
+  assert.match(res.body, /Insufficient buyer deposits/)
+  assert.equal(routerResults.length, 0)
+  assert.equal((proxy as any)._peerFailures.get(peer.peerId)?.count, 1)
+  assert.equal((proxy as any)._peerFailures.get(peer.peerId)?.lastReason, 'request-failed')
+  assert.equal((proxy as any)._cachedPeers[0]?.peerId, peer.peerId)
+})
+
+test('transport failures only update diagnostic failure state', async () => {
+  const peer = makePeer('a', ['openai'])
+  const routerResults: Array<{ success: boolean }> = []
+  const router = {
+    allowsPeerForPolicy: () => true,
+    onResult: (_peer: PeerInfo, result: { success: boolean }) => {
+      routerResults.push(result)
+    },
+  }
+  const proxy = makeBuyerProxyWithPeers([peer], [peer], router)
+  ;(proxy as any)._cachedPeers = [peer]
+  ;(proxy as any)._node.sendRequest = async () => {
+    throw new Error('Request abc123 timed out')
+  }
+
+  const res = await invokeProxy(proxy, makeProxyRequest({
+    headers: {
+      'x-antseed-pin-peer': peer.peerId,
+    },
+  }))
+
+  assert.equal(res.statusCode, 502)
+  assert.match(res.body, /Request abc123 timed out/)
+  assert.equal(routerResults.length, 0)
+  assert.equal((proxy as any)._peerFailures.get(peer.peerId)?.count, 1)
+  assert.equal((proxy as any)._peerFailures.get(peer.peerId)?.lastReason, 'request-failed')
+  assert.equal((proxy as any)._cachedPeers[0]?.peerId, peer.peerId)
+})
+
+test('/v1/models retryable response reports router success', async () => {
+  const peer = makePeer('a', ['openai'])
+  const routerResults: Array<{ success: boolean }> = []
+  const router = {
+    allowsPeerForPolicy: () => true,
+    onResult: (_peer: PeerInfo, result: { success: boolean }) => {
+      routerResults.push(result)
+    },
+  }
+  const proxy = makeBuyerProxyWithPeers([peer], [peer], router)
+  ;(proxy as any)._node.sendRequest = async (_peer: PeerInfo, request: { requestId: string }) => ({
+    requestId: request.requestId,
+    statusCode: 500,
+    headers: { 'content-type': 'text/plain' },
+    body: Buffer.from('model probe failed'),
+  })
+
+  const res = await invokeProxy(proxy, makeProxyRequest({
+    method: 'GET',
+    path: '/v1/models',
+    headers: {
+      'x-antseed-pin-peer': peer.peerId,
+    },
+  }))
+
+  assert.equal(res.statusCode, 500)
+  assert.match(res.body, /model probe failed/)
+  assert.equal(routerResults.length, 1)
+  assert.equal(routerResults[0]?.success, true)
 })
 
 test('model peer prefix pins the request peer and strips the routed model', async () => {

@@ -36,8 +36,6 @@ import {
   summarizeErrorResponse,
   requestWantsStreaming,
   rewritePeerPinnedServiceInBody,
-  isConnectionChurnError,
-  isConnectionHealthy,
 } from './request-utils.js'
 import {
   getExplicitProviderOverride,
@@ -81,6 +79,15 @@ export interface BuyerProxyConfig {
 }
 
 const RETRYABLE_STATUS_CODES = new Set([408, 429, 500, 502, 503, 504])
+
+function isControlPlaneServicesPath(path: string): boolean {
+  return path.toLowerCase().startsWith('/v1/models')
+}
+
+function isRouterSuccess(statusCode: number, path: string, retryableStatusCodes: Set<number>): boolean {
+  return isControlPlaneServicesPath(path) || !retryableStatusCodes.has(statusCode)
+}
+
 /**
  * Max age for carrying forward peers not seen in the latest DHT scan.
  * Intentionally longer than `peer-lookup.ts` `maxAnnouncementAgeMs` (30 min) so
@@ -89,16 +96,14 @@ const RETRYABLE_STATUS_CODES = new Set([408, 429, 500, 502, 503, 504])
  * liveness (`lastReachedAt`) even if the DHT record is older.
  */
 const CARRY_FORWARD_TTL_MS = 2 * 60 * 60_000
-
-/**
- * A single failed request is not enough to evict a peer: timeouts, transient
- * upstream slowness, or one flaky stream shouldn't wipe a peer (and its
- * service metadata) from cache — that just breaks every follow-up request
- * pinned to the same peer/service. We only drop a peer once it has failed
- * repeatedly within a short window.
- */
-const PEER_FAILURE_THRESHOLD = 10
 const PEER_FAILURE_WINDOW_MS = 5 * 60_000
+
+type PeerFailureEntry = {
+  count: number
+  firstFailureAt: number
+  lastFailureAt: number
+  lastReason: string
+}
 
 type TransformResult = { request: SerializedHttpRequest; streamRequested: boolean; requestedModel: string | null }
 type AdaptResponseMeta = { streamRequested: boolean; fallbackModel: string | null }
@@ -365,14 +370,7 @@ export class BuyerProxy {
   private _peerRefreshPromise: Promise<PeerInfo[]> | null = null
   private _lastStaleCacheLogAtMs = 0
   private _bgRefreshHandle: ReturnType<typeof setInterval> | null = null
-
-  /**
-   * Per-peer rolling failure counters. Entries are created on the first
-   * failure and cleared on the next successful request, or when eviction
-   * actually fires. A stale window (older than PEER_FAILURE_WINDOW_MS) resets
-   * the counter so a peer that recovers isn't penalised forever.
-   */
-  private _peerFailures: Map<string, { count: number; firstFailureAt: number; lastFailureAt: number }> = new Map()
+  private _peerFailures: Map<string, PeerFailureEntry> = new Map()
 
   constructor(config: BuyerProxyConfig) {
     this._node = config.node
@@ -671,63 +669,36 @@ export class BuyerProxy {
     })
   }
 
-  private _evictPeer(peerId: string): void {
-    const before = this._cachedPeers.length
-    this._cachedPeers = this._cachedPeers.filter((p) => p.peerId !== peerId)
-    this._peerFailures.delete(peerId)
-    if (this._cachedPeers.length < before) {
-      this._cacheLastUpdatedAtMs = Date.now()
-      this._cacheMutationEpoch += 1
-      this._persistPeersToState()
-      log(`Evicted failing peer ${peerId.slice(0, 12)}... from cache (${this._cachedPeers.length} remaining)`)
-    }
-  }
-
   /**
-   * Record a failure against a peer and evict only once it has accumulated
-   * enough failures inside the rolling window. A single timeout or stream
-   * drop is no longer enough to wipe the peer (and its service metadata)
-   * from cache — this kept breaking pinned chats whose peer went briefly
-   * slow but was otherwise healthy.
-   *
-   * Returns true when the threshold was reached and the peer was evicted.
+   * Keep buyer-local failure diagnostics without changing reachability.
+   * The router and discovery cache remain untouched; this is only state the
+   * buyer can later use for logs or UI indication.
    */
-  private _recordPeerFailure(peerId: string, reason: string): boolean {
+  private _recordPeerFailure(peerId: string, reason: string): void {
     const now = Date.now()
     const existing = this._peerFailures.get(peerId)
-    let entry: { count: number; firstFailureAt: number; lastFailureAt: number }
-    if (!existing || now - existing.lastFailureAt > PEER_FAILURE_WINDOW_MS) {
-      // First failure, or the previous window lapsed — start fresh.
-      entry = { count: 1, firstFailureAt: now, lastFailureAt: now }
-    } else {
-      entry = {
-        count: existing.count + 1,
-        firstFailureAt: existing.firstFailureAt,
-        lastFailureAt: now,
-      }
-    }
+    const shouldStartFresh = !existing || now - existing.lastFailureAt > PEER_FAILURE_WINDOW_MS
+    const entry: PeerFailureEntry = shouldStartFresh
+      ? { count: 1, firstFailureAt: now, lastFailureAt: now, lastReason: reason }
+      : {
+          count: existing.count + 1,
+          firstFailureAt: existing.firstFailureAt,
+          lastFailureAt: now,
+          lastReason: reason,
+        }
+
     this._peerFailures.set(peerId, entry)
-
-    if (entry.count >= PEER_FAILURE_THRESHOLD) {
-      log(
-        `Peer ${peerId.slice(0, 12)}... reached failure threshold `
-        + `(${entry.count}/${PEER_FAILURE_THRESHOLD} within ${PEER_FAILURE_WINDOW_MS}ms, reason=${reason}); evicting.`,
-      )
-      this._evictPeer(peerId)
-      return true
-    }
-
     log(
-      `Peer ${peerId.slice(0, 12)}... failure ${entry.count}/${PEER_FAILURE_THRESHOLD} within window (reason=${reason}); keeping in cache.`,
+      `Peer ${peerId.slice(0, 12)}... failure ${entry.count} within diagnostic window `
+      + `(reason=${reason}); retaining cached discovery metadata.`,
     )
-    return false
   }
 
   /**
    * Stamp `lastReachedAt` on a peer after a successful request so the
    * carry-forward heuristic can trust local transport liveness even when the
    * DHT record grows stale. Persisted so the signal survives restarts. Also
-   * clears any accumulated failure counter so the peer starts fresh.
+   * clears buyer-local diagnostic failures because the peer recovered.
    */
   private _rememberSuccessfulPeer(peerId: string): void {
     this._peerFailures.delete(peerId)
@@ -1464,7 +1435,7 @@ export class BuyerProxy {
         )
         if (router) {
           router.onResult(selectedPeer, {
-            success: !retryableStatusCodes.has(responseForClient.statusCode),
+            success: isRouterSuccess(responseForClient.statusCode, requestForPeer.path, retryableStatusCodes),
             latencyMs,
             tokens: telemetry.usage.totalTokens,
           })
@@ -1540,7 +1511,7 @@ export class BuyerProxy {
         // Report result to router for learning
         if (router) {
           router.onResult(selectedPeer, {
-            success: !retryableStatusCodes.has(response.statusCode),
+            success: isRouterSuccess(response.statusCode, requestForPeer.path, retryableStatusCodes),
             latencyMs,
             tokens: telemetry.usage.totalTokens,
           })
@@ -1563,7 +1534,6 @@ export class BuyerProxy {
       const latencyMs = Date.now() - startTime
       const message = err instanceof Error ? err.message : String(err)
       const abortedLocally = requestSignal.aborted
-      const connectionChurnError = isConnectionChurnError(message)
       log(`Request failed after ${latencyMs}ms: ${message}`)
 
       if (abortedLocally) {
@@ -1596,37 +1566,7 @@ export class BuyerProxy {
         return { done: true }
       }
 
-      if (router) {
-        router.onResult(selectedPeer, {
-          success: false,
-          latencyMs,
-          tokens: 0,
-        })
-      }
-
-      // Avoid poisoning routing cache from control-plane service enumeration failures.
-      // Some peers can time out on /v1/models (service probe) while still serving inference paths.
-      const normalizedPath = requestForPeer.path.toLowerCase()
-      const isControlPlaneServicesRequest = normalizedPath.startsWith('/v1/models')
-      if (isControlPlaneServicesRequest) {
-        log(`Skipping peer failure accounting for control-plane failure on ${requestForPeer.path}`)
-      } else if (connectionChurnError) {
-        const currentState = this._node.getPeerConnectionState(selectedPeer.peerId)
-        if (isConnectionHealthy(currentState)) {
-          log(
-            `Skipping peer failure accounting after connection churn: peer ${selectedPeer.peerId.slice(0, 12)}... `
-            + `has replacement connection state=${currentState}`,
-          )
-        } else {
-          // Route churn-without-replacement through the softened counter so
-          // a single transport hiccup doesn't wipe the peer.
-          this._recordPeerFailure(selectedPeer.peerId, 'connection-churn')
-        }
-      } else {
-        // Soft-evict: only wipe the peer after repeated failures within the
-        // rolling window. A single timeout / 5xx is not enough.
-        this._recordPeerFailure(selectedPeer.peerId, 'request-failed')
-      }
+      this._recordPeerFailure(selectedPeer.peerId, 'request-failed')
 
       if (res.headersSent) {
         // Headers already sent (streaming), can't retry
