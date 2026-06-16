@@ -378,6 +378,80 @@ contract AntseedEmissionsGateTest is Test {
         assertEq(token.balanceOf(staker), 900 ether + expectedStakerClaim);
     }
 
+    function test_sellerPoolMaxLockKeepsPowerAtMaxUntilDisabled() public {
+        _deployGate(4);
+
+        sellerPools = new AntseedSellerPools(address(realRegistry), 0, 0, 0);
+        uint256 agentId = _agentId(seller);
+
+        vm.startPrank(staker);
+        token.approve(address(sellerPools), 100 ether);
+        uint256 positionId = sellerPools.stake(agentId, 100 ether, 4);
+        vm.stopPrank();
+
+        _warpGateEpoch(5);
+        assertEq(sellerPools.positionWeightAtEpoch(positionId, 5), 400 ether);
+
+        vm.prank(staker);
+        sellerPools.enableMaxLock(positionId);
+
+        assertEq(sellerPools.positionWeightAtEpoch(positionId, 5), 400 ether);
+        assertEq(sellerPools.positionMaxLockPowerAtEpoch(positionId, 6), 5_200 ether);
+        assertEq(sellerPools.positionWeightAtEpoch(positionId, 6), 5_200 ether);
+        assertEq(sellerPools.positionWeightAtEpoch(positionId, 20), 5_200 ether);
+        assertEq(sellerPools.poolWeightAtEpoch(agentId, 6), 5_200 ether);
+        assertEq(sellerPools.poolActiveStakeAtEpoch(agentId, 6), 100 ether);
+        assertEq(sellerPools.totalPowerWeightAtEpoch(6), 5_200 ether);
+
+        _warpGateEpoch(7);
+        vm.prank(staker);
+        sellerPools.disableMaxLock(positionId);
+
+        assertEq(sellerPools.positionWeightAtEpoch(positionId, 7), 5_200 ether);
+        assertEq(sellerPools.positionMaxLockPowerAtEpoch(positionId, 8), 0);
+        assertEq(sellerPools.positionWeightAtEpoch(positionId, 8), 5_200 ether);
+        assertEq(sellerPools.positionWeightAtEpoch(positionId, 9), 5_100 ether);
+        assertEq(sellerPools.poolWeightAtEpoch(agentId, 9), 5_100 ether);
+    }
+
+    function test_sellerUsageRewardsUseMaxLockPowerForEpochShare() public {
+        bytes32 programId = keccak256("recognized-seller-usage-v1");
+        _deployGate(4);
+
+        sellerPools = new AntseedSellerPools(address(realRegistry), 0, 0, 0);
+        usageAccounting.setSellerPools(address(sellerPools));
+        sellerUsageRewards =
+            new AntseedSellerUsageRewards(address(programs), address(sellerPools), address(usageAccounting), programId);
+        programs.setRewardProgram(programId, address(sellerUsageRewards), address(0), 7_000, 4, 0, true);
+
+        uint256 agentId = _agentId(seller);
+        sellerAgentLookup.setAgent(seller, agentId);
+
+        vm.startPrank(staker);
+        token.approve(address(sellerPools), 200 ether);
+        uint256 maxLockedPositionId = sellerPools.stake(agentId, 100 ether, 4);
+        uint256 normalPositionId = sellerPools.stake(agentId, 100 ether, 4);
+        vm.stopPrank();
+
+        _warpGateEpoch(5);
+        vm.prank(staker);
+        sellerPools.enableMaxLock(maxLockedPositionId);
+
+        _warpGateEpoch(6);
+        usageAccounting.accrueSellerPoints(seller, 100);
+        usageAccounting.accrueBuyerPoints(buyer, 100);
+
+        _warpGateEpoch(7);
+        uint256 expectedBudget = _programBudget(7_000, 6);
+        uint256 maxLockPower = 5_200 ether;
+        uint256 normalPower = 300 ether;
+        (uint256 maxLockedGross,,) = sellerUsageRewards.pendingStakerReward(maxLockedPositionId, 6);
+        (uint256 normalGross,,) = sellerUsageRewards.pendingStakerReward(normalPositionId, 6);
+
+        assertEq(maxLockedGross, (expectedBudget * maxLockPower) / (maxLockPower + normalPower));
+        assertEq(normalGross, (expectedBudget * normalPower) / (maxLockPower + normalPower));
+    }
+
     function test_sellerUsageProgramDoesNotClaimWithoutWeightedPoints() public {
         bytes32 programId = keccak256("recognized-seller-usage-v1");
         _deployGate(5);

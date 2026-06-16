@@ -424,6 +424,38 @@ contract AntseedSellerPoolsTest is Test {
         assertEq(token.balanceOf(staker), 1_000 ether + (100 ether - expectedSlash));
     }
 
+    function test_maxLockedPositionMustDisableBeforeWithdrawAndThenSlashesFreshCountdown() public {
+        uint256 positionId = _stake(staker, agentId, 100 ether, 4);
+
+        vm.warp(block.timestamp + EPOCH_DURATION);
+        vm.prank(staker);
+        pools.enableMaxLock(positionId);
+
+        vm.warp(block.timestamp + EPOCH_DURATION);
+        vm.prank(staker);
+        vm.expectRevert(IAntseedSellerPools.PositionClosed.selector);
+        pools.withdrawStake(positionId);
+        assertEq(pools.earlyExitSlashBps(positionId), pools.maxSlashBps());
+
+        vm.prank(staker);
+        pools.disableMaxLock(positionId);
+
+        vm.warp(block.timestamp + EPOCH_DURATION);
+        uint256 expectedSlashBps = pools.earlyExitSlashBps(positionId);
+        assertEq(expectedSlashBps, (pools.maxSlashBps() * 51) / 52);
+
+        vm.prank(staker);
+        pools.withdrawStake(positionId);
+
+        uint256 expectedSlash = (100 ether * expectedSlashBps) / 10_000;
+        assertEq(pools.positionWeightAtEpoch(positionId, 3), 5_200 ether);
+        assertEq(pools.positionWeightAtEpoch(positionId, 4), 0);
+        assertEq(pools.poolWeightAtEpoch(agentId, 3), 5_200 ether);
+        assertEq(pools.poolWeightAtEpoch(agentId, 4), 0);
+        assertEq(token.balanceOf(pools.DEAD_ADDRESS()), expectedSlash);
+        assertEq(token.balanceOf(staker), 1_000 ether + (100 ether - expectedSlash));
+    }
+
     function test_batchWithdrawAggregatesTransfersAndSlashes() public {
         uint256 firstPositionId = _stake(staker, agentId, 100 ether, 4);
         uint256 secondPositionId = _stake(staker, otherAgentId, 50 ether, 3);

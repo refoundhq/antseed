@@ -41,6 +41,10 @@ interface IAntseedSellerPools {
         uint256 stakeStartEpoch,
         uint256 stakeEndEpoch
     );
+    event MaxLockEnabled(uint256 indexed positionId, address indexed staker, uint256 effectiveEpoch);
+    event MaxLockDisabled(
+        uint256 indexed positionId, address indexed staker, uint256 effectiveEpoch, uint256 stakeEndEpoch
+    );
     event PoolConfigSet(
         uint256 minStakeEpochs,
         uint256 maxStakeEpochs,
@@ -80,6 +84,8 @@ interface IAntseedSellerPools {
     function moveStakes(uint256[] calldata positionIds, uint256 toAgentId)
         external
         returns (uint256[] memory newPositionIds);
+    function enableMaxLock(uint256 positionId) external;
+    function disableMaxLock(uint256 positionId) external;
     function withdrawStake(uint256 positionId) external;
     function withdrawStakes(uint256[] calldata positionIds)
         external
@@ -109,6 +115,7 @@ interface IAntseedSellerPools {
     function poolWeightAtEpoch(uint256 agentId, uint256 epoch) external view returns (uint256 weight);
     function poolWeightAtEpoch(address seller, uint256 epoch) external view returns (uint256 weight);
     function positionWeightAtEpoch(uint256 positionId, uint256 epoch) external view returns (uint256 weight);
+    function positionMaxLockPowerAtEpoch(uint256 positionId, uint256 epoch) external view returns (uint256 power);
     function positionRewardCapAtEpoch(uint256 positionId, uint256 epoch) external view returns (uint256 cap);
     function apyCapBpsAtEpoch(uint256 epoch) external view returns (uint256 capBps);
     function bootstrapWeightAtEpoch(uint256 agentId, uint256 epoch) external view returns (uint256 weight);
