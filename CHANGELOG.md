@@ -4,6 +4,12 @@ All notable user-facing changes to AntSeed packages are documented here.
 
 This project uses selective package publishing. Each release entry lists the published packages affected by that release.
 
+## Unreleased
+
+### Changed
+
+- Reduced the default buyer response-auth evidence sample rate from 20% to 0.5% to limit local `verification_samples` growth during high-request sessions.
+
 ## 2026-06-15 — Buyer peer failure accounting and desktop stream responsiveness
 
 ### Published
