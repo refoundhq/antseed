@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, renameSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
-const APP_NAME = 'AntSeed Desktop';
+const APP_NAME = 'AntSeed AntStation';
 const APP_BUNDLE_ID = 'com.antseed.desktop-dev';
 
 function runPlistBuddy(plistPath, command) {

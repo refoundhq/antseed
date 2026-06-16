@@ -73,7 +73,7 @@ const __dirname = path.dirname(__filename);
 
 const isDev = Boolean(process.env['VITE_DEV_SERVER_URL']);
 const rendererUrl = process.env['VITE_DEV_SERVER_URL'] ?? `file://${path.join(__dirname, '../renderer/index.html')}`;
-const APP_NAME = 'AntStation Desktop';
+const APP_NAME = 'AntSeed AntStation';
 const DESKTOP_DEBUG_ENV = 'ANTSEED_DESKTOP_DEBUG';
 const DESKTOP_DEBUG_FLAGS = new Set(['--debug-runtime', '--desktop-debug']);
 const DEFAULT_BUYER_PROXY_PORT = 8377;

@@ -63,3 +63,9 @@ test('workspace dir is trimmed before injection', () => {
   const prompt = buildAntstationSystemPrompt(undefined, `  ${ws}  `);
   assert.ok(prompt.includes(`Current workspace: ${ws}`));
 });
+
+test('full access mode tells agent not to ask for command permission', () => {
+  const prompt = buildAntstationSystemPrompt(undefined, '/tmp/workspace', 'full');
+  assert.ok(prompt.includes('Full access mode is enabled'));
+  assert.ok(/do not ask.*permission.*commands/i.test(prompt));
+});

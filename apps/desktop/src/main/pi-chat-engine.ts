@@ -1980,8 +1980,12 @@ export function registerPiChatHandlers({
     const persistedPeer = extractPeerFromEntries(sessionManager);
     const peerOverrideId = normalizePeerId(peerOverride) ?? null;
     const preferredPeerId = peerOverrideId ?? preferredPeerByConversationId.get(conversationId) ?? persistedPeer?.peerId ?? null;
-    const permissionMode: ChatPermissionMode = requestedPermissionMode
-      ?? (preferredPeerId ? await getPeerPermissionMode(preferredPeerId) : 'manual');
+    const persistedPermissionMode: ChatPermissionMode = preferredPeerId
+      ? await getPeerPermissionMode(preferredPeerId)
+      : 'manual';
+    const permissionMode: ChatPermissionMode = persistedPermissionMode === 'full'
+      ? 'full'
+      : requestedPermissionMode ?? persistedPermissionMode;
     if (preferredPeerId) {
       preferredPeerByConversationId.set(conversationId, preferredPeerId);
       if (peerOverrideId && persistedPeer?.peerId !== peerOverrideId) {
@@ -2108,7 +2112,7 @@ export function registerPiChatHandlers({
       agentDir: CHAT_AGENT_DIR,
       settingsManager,
       extensionFactories: [toolApprovalExtension],
-      systemPrompt: buildAntstationSystemPrompt(userSystemPrompt, chatWorkspaceDir),
+      systemPrompt: buildAntstationSystemPrompt(userSystemPrompt, chatWorkspaceDir, permissionMode),
     });
     await resourceLoader.reload();
 
