@@ -12,6 +12,7 @@ export type DashboardNetworkPeer = {
   outputUsdPerMillion: number;
   capacityMsgPerHour: number;
   reputation: number;
+  onChainReputationScore: number | null;
   lastSeen: number;
   /**
    * Last successful transport-level contact with the peer. This can be fresher
@@ -65,7 +66,7 @@ function computePeerSignature(): string {
   // Fast hash: sorted peer IDs + their service lists.
   const parts: string[] = [];
   for (const [id, peer] of peerCache) {
-    parts.push(`${id}:${peer.services.join(',')}`);
+    parts.push(`${id}:${peer.services.join(',')}:${peer.onChainReputationScore ?? ''}`);
   }
   parts.sort();
   return parts.join('|');
@@ -130,6 +131,9 @@ export function parsePeerFromRaw(pr: Record<string, unknown>): DashboardNetworkP
     outputUsdPerMillion: Number(pr.defaultOutputUsdPerMillion) || 0,
     capacityMsgPerHour: (Number(pr.maxConcurrency) || 0) * 60,
     reputation: 100,
+    onChainReputationScore: typeof pr.onChainReputationScore === 'number' && Number.isFinite(pr.onChainReputationScore)
+      ? pr.onChainReputationScore
+      : null,
     lastSeen: Number(pr.lastSeen) || Date.now(),
     lastReachedAt: Number(pr.lastReachedAt) || null,
     source: 'dht',
@@ -171,6 +175,7 @@ export async function refreshPeerCache(): Promise<void> {
         peer.inputUsdPerMillion = peer.inputUsdPerMillion || existing.inputUsdPerMillion;
         peer.outputUsdPerMillion = peer.outputUsdPerMillion || existing.outputUsdPerMillion;
         peer.capacityMsgPerHour = peer.capacityMsgPerHour || existing.capacityMsgPerHour;
+        peer.onChainReputationScore = peer.onChainReputationScore ?? existing.onChainReputationScore;
         peer.lastSeen = Math.max(peer.lastSeen, existing.lastSeen);
         peer.lastReachedAt = Math.max(peer.lastReachedAt ?? 0, existing.lastReachedAt ?? 0) || null;
       }

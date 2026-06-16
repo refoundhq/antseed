@@ -97,6 +97,26 @@ See [Metrics](apps/website/docs/guides/metrics.md) for endpoint details, metric 
 
 ## Development
 
+### Optional Nix dev shell
+
+This repository includes a Nix flake for contributors who want a pinned local
+toolchain. The flake provides Node.js, pnpm, Python, native build tools, Git, and
+Linux keychain dependencies used by the workspace. It does not replace the
+normal pnpm workflow.
+
+```bash
+nix develop
+pnpm install
+pnpm run build
+```
+
+If flakes are not enabled globally, run the shell with the required experimental
+features for a single command:
+
+```bash
+nix --extra-experimental-features 'nix-command flakes' develop
+```
+
 ```bash
 pnpm install            # Install all dependencies
 pnpm run build          # Build in dependency order

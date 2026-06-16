@@ -300,7 +300,7 @@ function RunFirstBanner() {
                 Prefer the visual version? <code>antseed network browse</code> (no flags)
                 prints a table with prices, sessions, on-chain volume, and a{' '}
                 <code>✓</code> for vouched peers. Or open the same view in a browser:{' '}
-                <Link to="/network">live network page</Link>.
+                <a href="https://antseedstats.com/network" target="_blank" rel="noopener noreferrer">live network page</a>.
               </p>
             </div>
           </li>
@@ -585,6 +585,7 @@ function Section({eyebrow, title, children}: {eyebrow: string; title: string; ch
 
 export default function IntegrationPage({integration}: {integration: Integration}): JSX.Element {
   const i = integration;
+  const mutedLogo = i.slug === 'genlayer-studio' || i.slug === 'langchain-python';
 
   // Pick related integrations from the same category, excluding self.
   const related = integrations
@@ -609,7 +610,15 @@ export default function IntegrationPage({integration}: {integration: Integration
 
         <header className={styles.detailHeader}>
           <div className={styles.detailLogo}>
-            {i.logo ? <img src={`/logos/${i.logo}`} alt="" /> : <span>{i.glyph ?? i.name[0]}</span>}
+            {i.logo ? (
+              <img
+                src={`/logos/${i.logo}`}
+                alt=""
+                className={mutedLogo ? styles.mutedLogoImg : undefined}
+              />
+            ) : (
+              <span>{i.glyph ?? i.name[0]}</span>
+            )}
           </div>
           <div className={styles.detailHeaderText}>
             <h1>{i.name}</h1>
@@ -665,7 +674,7 @@ export default function IntegrationPage({integration}: {integration: Integration
             <p className={styles.modelNote}>
               The exact list of models depends on which peer you pin. Run{' '}
               <code>antseed network browse</code> or open the{' '}
-              <Link to="/network">live network page</Link> to see what's available right now.
+              <a href="https://antseedstats.com/network" target="_blank" rel="noopener noreferrer">live network page</a> to see what's available right now.
             </p>
           </Section>
         )}

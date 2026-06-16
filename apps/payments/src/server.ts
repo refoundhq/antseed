@@ -39,7 +39,6 @@ export async function createServer(options: PaymentsServerOptions) {
   fastify.addHook('onRequest', async (request, reply) => {
     if (!request.url.startsWith('/api/')) return;
     if (request.method === 'GET' && request.url.startsWith('/api/config')) return;
-    if (request.method === 'GET' && request.url.startsWith('/api/transactions')) return;
     const auth = request.headers.authorization;
     if (auth !== `Bearer ${bearerToken}`) {
       return reply.status(401).send({ ok: false, error: 'Unauthorized' });

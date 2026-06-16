@@ -1,11 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildSybilContext,
+  computeVerificationScoreBonus,
   computeOnChainReputationScore,
   computeOnChainScore,
   computeOnChainSybilRisk,
   computeOnChainTrust,
   computeOnChainTrustBreakdown,
+  ON_CHAIN_VERIFICATION_DOMAIN_POINTS,
+  ON_CHAIN_VERIFICATION_GITHUB_POINTS,
+  ON_CHAIN_VERIFICATION_MAX_POINTS,
   ON_CHAIN_TRUST_NO_STAKE_FACTOR,
   ON_CHAIN_TRUST_RECENCY_DORMANT_FACTOR,
   scoreFromTrust,
@@ -26,6 +30,26 @@ function makePeer(stats: Partial<PeerInfo> & { peerId?: string }): PeerInfo {
     providers: ['openai'],
     ...rest,
   } as PeerInfo;
+}
+
+function verifiedDomain(domain: string, verified = true) {
+  return {
+    domain,
+    peerId: 'a'.repeat(40),
+    verified,
+    checkedAtMs: NOW_MS,
+    attempts: [],
+  };
+}
+
+function verifiedGithub(username: string, verified = true) {
+  return {
+    username,
+    repository: username,
+    peerId: 'a'.repeat(40),
+    verified,
+    checkedAtMs: NOW_MS,
+  };
 }
 
 describe('computeOnChainTrust', () => {
@@ -50,12 +74,14 @@ describe('computeOnChainTrust', () => {
     expect(trust).toBe(0);
   });
 
-  it('scales linearly with channels × volume (modifiers held at 1.0)', () => {
+  it('uses settled volume as raw trust instead of channels × volume', () => {
+    const stakedAt = NOW_SEC - 60 * 86_400;
     const small = computeOnChainTrust(
       makePeer({
         onChainChannelCount: 10,
         onChainTotalVolumeUsdcMicros: 20_000_000, // $20, avg $2
         onChainLastSettledAtSec: NOW_SEC,
+        onChainStakedAtSec: stakedAt,
         onChainStakeUsdcMicros: 10_000_000,
       }),
       NOW_MS,
@@ -65,13 +91,41 @@ describe('computeOnChainTrust', () => {
         onChainChannelCount: 100,
         onChainTotalVolumeUsdcMicros: 200_000_000, // $200, avg $2
         onChainLastSettledAtSec: NOW_SEC,
+        onChainStakedAtSec: stakedAt,
         onChainStakeUsdcMicros: 10_000_000,
       }),
       NOW_MS,
     );
-    expect(small).toBeCloseTo(10 * 20, 6);
-    expect(big).toBeCloseTo(100 * 200, 6);
-    expect(big! / small!).toBeCloseTo(100, 6); // 10x channels × 10x volume
+    expect(small).toBeCloseTo(20, 6);
+    expect(big).toBeCloseTo(200, 6);
+    expect(big! / small!).toBeCloseTo(10, 6); // 10x volume only
+  });
+
+  it('caps newly-staked volume credit and matures it over time', () => {
+    const young = computeOnChainTrustBreakdown(
+      makePeer({
+        onChainChannelCount: 1000,
+        onChainTotalVolumeUsdcMicros: 10_000_000_000, // $10k
+        onChainLastSettledAtSec: NOW_SEC,
+        onChainStakedAtSec: NOW_SEC - 1 * 86_400,
+        onChainStakeUsdcMicros: 10_000_000,
+      }),
+      NOW_MS,
+    )!;
+    const mature = computeOnChainTrustBreakdown(
+      makePeer({
+        onChainChannelCount: 1000,
+        onChainTotalVolumeUsdcMicros: 10_000_000_000,
+        onChainLastSettledAtSec: NOW_SEC,
+        onChainStakedAtSec: NOW_SEC - 90 * 86_400,
+        onChainStakeUsdcMicros: 10_000_000,
+      }),
+      NOW_MS,
+    )!;
+
+    expect(young.creditedVolumeUsdc).toBeCloseTo(150, 6); // $25 + 1d × $125
+    expect(mature.creditedVolumeUsdc).toBeCloseTo(10_000, 6);
+    expect(young.trust).toBeLessThan(mature.trust);
   });
 
   it('caps ticketBonus at TICKET_MAX (one fat channel cannot pump the score)', () => {
@@ -87,7 +141,8 @@ describe('computeOnChainTrust', () => {
     );
     expect(b).not.toBeNull();
     expect(b!.ticketBonus).toBe(1.5); // ON_CHAIN_TRUST_TICKET_MAX
-    expect(b!.trust).toBeCloseTo(1 * 100 * 1.5 * 1 * 1, 6);
+    expect(b!.trust).toBeCloseTo(25, 6); // no stakedAt → initial volume credit only
+    expect(b!.ticketGate).toBe(0.75); // one very large channel is penalized in score
   });
 
   it('floors ticketBonus at TICKET_MIN (microcent peers retain a meaningful score)', () => {
@@ -118,7 +173,7 @@ describe('computeOnChainTrust', () => {
     expect(dormant.recencyGate).toBe(ON_CHAIN_TRUST_RECENCY_DORMANT_FACTOR);
     expect(stale.recencyGate).toBe(0);
     expect(never.recencyGate).toBe(0);
-    expect(stale.trust).toBe(0);
+    expect(computeOnChainScore(makePeer({ ...base, onChainLastSettledAtSec: NOW_SEC - 90 * 86_400 }), undefined, NOW_MS)).toBe(0);
   });
 
   it('applies a presence-only stake gate (any stake \u2265 $1 = full credit)', () => {
@@ -135,7 +190,9 @@ describe('computeOnChainTrust', () => {
     expect(large.stakeGate).toBe(1); // amount doesn't matter
     expect(small.trust).toBeCloseTo(large.trust, 6);
     expect(noStake.stakeGate).toBe(ON_CHAIN_TRUST_NO_STAKE_FACTOR);
-    expect(noStake.trust).toBeCloseTo(large.trust * ON_CHAIN_TRUST_NO_STAKE_FACTOR, 6);
+    expect(noStake.trust).toBeCloseTo(large.trust, 6);
+    expect(computeOnChainScore(makePeer({ ...base, onChainStakeUsdcMicros: 0 }), undefined, NOW_MS)!)
+      .toBeCloseTo(computeOnChainScore(makePeer({ ...base, onChainStakeUsdcMicros: 100_000_000 }), undefined, NOW_MS)! * ON_CHAIN_TRUST_NO_STAKE_FACTOR, 6);
   });
 });
 
@@ -146,17 +203,16 @@ describe('scoreFromTrust', () => {
     expect(scoreFromTrust(Number.NaN)).toBe(0);
   });
 
-  it('hits roughly 86 at trust 1M and saturates at 100 around trust 10M', () => {
-    expect(scoreFromTrust(1_000_000)).toBeCloseTo((100 / 7) * Math.log10(1_000_001), 4);
-    expect(scoreFromTrust(1_000_000)).toBeGreaterThan(85);
-    expect(scoreFromTrust(1_000_000)).toBeLessThan(87);
-    expect(scoreFromTrust(10_000_000)).toBe(100);
-    expect(scoreFromTrust(1_000_000_000)).toBe(100);
+  it('hits roughly 75 at $1k trust and saturates at 100 around $10k', () => {
+    expect(scoreFromTrust(1_000)).toBeGreaterThan(74);
+    expect(scoreFromTrust(1_000)).toBeLessThan(76);
+    expect(scoreFromTrust(10_000)).toBe(100);
+    expect(scoreFromTrust(1_000_000)).toBe(100);
   });
 
   it('is monotonically increasing', () => {
     let prev = scoreFromTrust(1);
-    for (const t of [10, 100, 1_000, 10_000, 100_000, 1_000_000]) {
+    for (const t of [10, 100, 1_000, 10_000]) {
       const next = scoreFromTrust(t);
       expect(next).toBeGreaterThan(prev);
       prev = next;
@@ -301,6 +357,17 @@ describe('computeOnChainScore — composed display value', () => {
     expect(computeOnChainScore(makePeer({}))).toBeNull();
   });
 
+  it('returns null when only external verification is available', () => {
+    expect(computeOnChainScore(makePeer({
+      verificationResults: {
+        verified: true,
+        checkedAtMs: NOW_MS,
+        domains: [verifiedDomain('example.com')],
+        github: [verifiedGithub('octocat')],
+      },
+    }), undefined, NOW_MS)).toBeNull();
+  });
+
   it('returns sybil-attenuated score when a context is provided', () => {
     const peer = makePeer({
       onChainChannelCount: 50,
@@ -319,6 +386,91 @@ describe('computeOnChainScore — composed display value', () => {
     expect(ctxScore!).toBeLessThan(noCtxScore!);
     // narrow_custom alone weights 0.25 → expect ~25% attenuation.
     expect(ctxScore! / noCtxScore!).toBeCloseTo(0.75, 1);
+  });
+
+  it('adds a modest capped bonus for verified domain and GitHub claims', () => {
+    const base = makePeer({
+      onChainChannelCount: 100,
+      onChainTotalVolumeUsdcMicros: 1_000_000_000,
+      onChainLastSettledAtSec: NOW_SEC,
+      onChainStakedAtSec: NOW_SEC - 90 * 86_400,
+      onChainStakeUsdcMicros: 10_000_000,
+    });
+    const withDomain = makePeer({
+      ...base,
+      verificationResults: {
+        verified: true,
+        checkedAtMs: NOW_MS,
+        domains: [verifiedDomain('example.com')],
+        github: [],
+      },
+    });
+    const withGithub = makePeer({
+      ...base,
+      verificationResults: {
+        verified: true,
+        checkedAtMs: NOW_MS,
+        domains: [],
+        github: [verifiedGithub('octocat')],
+      },
+    });
+    const withBoth = makePeer({
+      ...base,
+      verificationResults: {
+        verified: true,
+        checkedAtMs: NOW_MS,
+        domains: [verifiedDomain('example.com')],
+        github: [verifiedGithub('octocat')],
+      },
+    });
+
+    const baseScore = computeOnChainScore(base, undefined, NOW_MS)!;
+    expect(computeVerificationScoreBonus(withDomain)).toBe(ON_CHAIN_VERIFICATION_DOMAIN_POINTS);
+    expect(computeVerificationScoreBonus(withGithub)).toBe(ON_CHAIN_VERIFICATION_GITHUB_POINTS);
+    expect(computeVerificationScoreBonus(withBoth)).toBe(ON_CHAIN_VERIFICATION_MAX_POINTS);
+    expect(computeOnChainScore(withDomain, undefined, NOW_MS)).toBeCloseTo(baseScore + 5, 6);
+    expect(computeOnChainScore(withGithub, undefined, NOW_MS)).toBeCloseTo(baseScore + 3, 6);
+    expect(computeOnChainScore(withBoth, undefined, NOW_MS)).toBeCloseTo(baseScore + 8, 6);
+  });
+
+  it('ignores failed verification claims and clamps final score to 100', () => {
+    const base = makePeer({
+      onChainChannelCount: 1000,
+      onChainTotalVolumeUsdcMicros: 10_000_000_000,
+      onChainLastSettledAtSec: NOW_SEC,
+      onChainStakedAtSec: NOW_SEC - 90 * 86_400,
+      onChainStakeUsdcMicros: 10_000_000,
+    });
+    const failed = makePeer({
+      ...base,
+      verificationResults: {
+        verified: false,
+        checkedAtMs: NOW_MS,
+        domains: [verifiedDomain('example.com', false)],
+        github: [verifiedGithub('octocat', false)],
+      },
+    });
+    const manyVerified = makePeer({
+      ...base,
+      verificationResults: {
+        verified: true,
+        checkedAtMs: NOW_MS,
+        domains: [
+          verifiedDomain('example.com'),
+          verifiedDomain('example.org'),
+        ],
+        github: [
+          verifiedGithub('octocat'),
+          verifiedGithub('antseed'),
+        ],
+      },
+    });
+
+    expect(computeVerificationScoreBonus(failed)).toBe(0);
+    expect(computeOnChainScore(failed, undefined, NOW_MS))
+      .toBe(computeOnChainScore(base, undefined, NOW_MS));
+    expect(computeVerificationScoreBonus(manyVerified)).toBe(ON_CHAIN_VERIFICATION_MAX_POINTS);
+    expect(computeOnChainScore(manyVerified, undefined, NOW_MS)).toBe(100);
   });
 });
 

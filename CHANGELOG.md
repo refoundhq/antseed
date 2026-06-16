@@ -4,6 +4,41 @@ All notable user-facing changes to AntSeed packages are documented here.
 
 This project uses selective package publishing. Each release entry lists the published packages affected by that release.
 
+## 2026-06-15 — Buyer peer failure accounting and desktop stream responsiveness
+
+### Published
+
+- `@antseed/cli@0.1.130`
+
+### Desktop
+
+- `@antseed/desktop`
+
+### Fixed
+
+- Fixed buyer proxy failure accounting so transient request failures, local buyer payment errors, and `/v1/models` service probes do not make pinned peers unreachable by deleting cached discovery metadata.
+- Fixed Desktop chat sessions becoming sluggish or appearing stuck during long streamed responses by batching streaming UI updates per animation frame while preserving in-progress chat switching behavior.
+
+## 2026-06-15 — Seller verification links and response-auth sampling
+
+### Published
+
+- `@antseed/node@0.2.93`
+- `@antseed/cli@0.1.129`
+
+### Desktop
+
+- `@antseed/desktop@0.1.105`
+
+### Added
+
+- Added seller external verification claims in signed peer metadata. Sellers can now advertise domain ownership claims and GitHub account/repository claims.
+- Added buyer-side external claim verification for seller metadata. Buyers verify domain claims through `_antseed.<domain>` DNS TXT records or `https://<domain>/.well-known/antseed.json`, and verify GitHub claims through a public `antseed.json` proof file on `raw.githubusercontent.com`.
+- Added verified seller links to `antseed network browse`, including domain and GitHub indicators for claims that the buyer has independently verified.
+- Added verified domain and GitHub badges to Desktop Discover seller cards, with the verified links included in discover search/filter data.
+- Added shared verification-link formatting in `@antseed/node` so CLI and Desktop render the same verified external claims safely.
+- Added buyer response-auth evidence sampling configuration via `buyer.verification.sampleRate` and `buyer.verification.maxSampleBytes`, allowing deployments to tune how often verified request/response samples are retained and how large a sample may be.
+
 ## 2026-05-18 — Seller setup, payment recovery, and peer refresh
 
 ### Published

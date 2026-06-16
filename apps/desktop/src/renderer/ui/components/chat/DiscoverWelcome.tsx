@@ -1,10 +1,10 @@
 import { useState, useMemo, useCallback, useEffect } from 'react';
 import type { CSSProperties, MouseEvent } from 'react';
 import { HugeiconsIcon } from '@hugeicons/react';
-import { Copy01Icon, Tick02Icon, ContractsIcon } from '@hugeicons/core-free-icons';
+import { Copy01Icon, Tick02Icon, ContractsIcon, GithubIcon, Globe02Icon } from '@hugeicons/core-free-icons';
 import Skeleton from 'react-loading-skeleton';
 import 'react-loading-skeleton/dist/skeleton.css';
-import type { ChatServiceOptionEntry, DiscoverRow } from '../../../core/state';
+import type { ChatServiceOptionEntry, DiscoverRow, DiscoverVerificationLink } from '../../../core/state';
 import { useUiSnapshot } from '../../hooks/useUiSnapshot';
 import { useDiscoverFilters } from '../../hooks/useDiscoverFilters';
 import {
@@ -15,7 +15,13 @@ import {
   formatCategoryLabel,
 } from './discover-filter-util';
 import { DiscoverFilters } from './DiscoverFilters';
-import { getPeerGradient, getPeerDisplayName, formatPerMillionPrice, getTagTint } from '../../../core/peer-utils';
+import {
+  getPeerGradient,
+  getPeerDisplayName,
+  formatPerMillionPrice,
+  getTagTint,
+  formatReputationScore,
+} from '../../../core/peer-utils';
 import { getKnownProxy, type KnownProxy } from '../../../core/known-proxies';
 import { InfoTooltip } from '../InfoTooltip';
 import styles from './DiscoverWelcome.module.scss';
@@ -61,6 +67,7 @@ type CardItem = {
    * derived address or the proxy is not in our known registry.
    */
   knownProxy: KnownProxy | null;
+  verificationLinks: DiscoverVerificationLink[];
   inputUsdPerMillion: number | null;
   outputUsdPerMillion: number | null;
   cachedInputUsdPerMillion: number | null;
@@ -147,6 +154,7 @@ function buildCards(options: ChatServiceOptionEntry[]): CardItem[] {
       // list therefore never light up the badge, which is fine: as soon as
       // the daemon delivers DiscoverRows the proxy gets surfaced.
       knownProxy: null,
+      verificationLinks: [],
       inputUsdPerMillion: opt.inputUsdPerMillion,
       outputUsdPerMillion: opt.outputUsdPerMillion,
       cachedInputUsdPerMillion: opt.cachedInputUsdPerMillion ?? null,
@@ -206,6 +214,7 @@ function buildCardsFromRows(rows: DiscoverRow[]): CardItem[] {
       gradient: getPeerGradient(row.peerId || peerLabel || row.provider || row.serviceId),
       description: generateDescription(row.serviceId, row.categories, peerLabel || row.provider),
       knownProxy: getKnownProxy(row.sellerContract),
+      verificationLinks: row.verificationLinks,
       inputUsdPerMillion: row.inputUsdPerMillion,
       outputUsdPerMillion: row.outputUsdPerMillion,
       cachedInputUsdPerMillion: row.cachedInputUsdPerMillion,
@@ -244,11 +253,6 @@ function isLowReputation(score: number | null): boolean {
   return typeof score === 'number' && Number.isFinite(score) && score < LOW_REPUTATION_SCORE_THRESHOLD;
 }
 
-function formatReputationScore(score: number | null): string {
-  if (score == null || !Number.isFinite(score)) return '—';
-  return (score / 10).toFixed(1);
-}
-
 function formatReputationTooltip(item: CardItem): { avgChannelUsdc: string } {
   const avg = item.channelCount > 0 ? item.volumeUsdc / item.channelCount : 0;
   return {
@@ -265,6 +269,7 @@ function matchesSearch(item: CardItem, query: string): boolean {
   if (item.name.toLowerCase().includes(q)) return true;
   if (item.displayName.toLowerCase().includes(q)) return true;
   if (item.peerLabel.toLowerCase().includes(q)) return true;
+  if (item.verificationLinks.some((link) => link.label.toLowerCase().includes(q))) return true;
   if (item.tags.some((t) => t.toLowerCase().includes(q))) return true;
   return false;
 }
@@ -300,6 +305,84 @@ function ProviderAvatar({ name, gradient }: { name: string; gradient: string }) 
   return (
     <span className={styles.providerAvatar} style={{ background: gradient }}>
       {letter}
+    </span>
+  );
+}
+
+function verificationTitle(link: DiscoverVerificationLink): string {
+  return link.kind === 'domain'
+    ? `Verified domain: ${link.label}`
+    : `Verified GitHub: ${link.label}`;
+}
+
+function VerificationLinkBadge({ link }: { link: DiscoverVerificationLink }) {
+  const title = verificationTitle(link);
+  return (
+    <InfoTooltip
+      align="left"
+      content={(
+        <>
+          <strong>{title}</strong>
+          <span>{link.href}</span>
+        </>
+      )}
+    >
+      <a
+        className={`${styles.verificationBadge} ${link.kind === 'domain' ? styles.verificationBadgeDomain : styles.verificationBadgeGithub}`}
+        href={link.href}
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label={title}
+        title={title}
+        onClick={(e) => e.stopPropagation()}
+        onKeyDown={(e) => e.stopPropagation()}
+      >
+        <HugeiconsIcon icon={link.kind === 'domain' ? Globe02Icon : GithubIcon} size={11} strokeWidth={1.8} />
+      </a>
+    </InfoTooltip>
+  );
+}
+
+function VerificationBadges({ links }: { links: DiscoverVerificationLink[] }) {
+  if (links.length === 0) return null;
+  return (
+    <span className={styles.verificationBadges} aria-label="Verified external claims">
+      {links.map((link) => (
+        <VerificationLinkBadge key={`${link.kind}:${link.href}`} link={link} />
+      ))}
+    </span>
+  );
+}
+
+function CardBadges({ item }: { item: CardItem }) {
+  if (!item.knownProxy && item.verificationLinks.length === 0) return null;
+  return (
+    <span className={styles.cardBadges}>
+      {item.knownProxy && (
+        <InfoTooltip
+          align="left"
+          content={(
+            <>
+              <strong>{item.knownProxy.label}</strong>
+              <span>{item.knownProxy.description}</span>
+            </>
+          )}
+        >
+          <span
+            className={styles.proxyBadge}
+            tabIndex={0}
+            role="button"
+            /* The label + description live in the popover; the surface only shows
+               the icon, but screen readers still get the full sentence. */
+            aria-label={`${item.knownProxy.label} — ${item.knownProxy.description}`}
+            onClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => e.stopPropagation()}
+          >
+            <HugeiconsIcon icon={ContractsIcon} size={11} strokeWidth={1.8} />
+          </span>
+        </InfoTooltip>
+      )}
+      <VerificationBadges links={item.verificationLinks} />
     </span>
   );
 }
@@ -737,36 +820,11 @@ function Card({
       <div className={styles.cardFooter}>
         <div className={styles.cardFooterTop}>
           <div className={styles.cardProvider}>
-            <span className={styles.cardProviderBy}>By</span>
             <ProviderAvatar name={providerName} gradient={item.gradient} />
             <span className={styles.cardProviderName}>{providerName}</span>
-            {item.knownProxy && (
-              <InfoTooltip
-                align="left"
-                content={(
-                  <>
-                    <strong>{item.knownProxy.label}</strong>
-                    <span>{item.knownProxy.description}</span>
-                  </>
-                )}
-              >
-                <span
-                  className={styles.proxyBadge}
-                  tabIndex={0}
-                  role="button"
-                  /* The label + description live in the popover; the surface only shows
-                     the icon, but screen readers still get the full sentence. */
-                  aria-label={`${item.knownProxy.label} — ${item.knownProxy.description}`}
-                  onClick={(e) => e.stopPropagation()}
-                  onKeyDown={(e) => e.stopPropagation()}
-                >
-                  <HugeiconsIcon icon={ContractsIcon} size={11} strokeWidth={1.8} />
-                </span>
-              </InfoTooltip>
-            )}
+            <CardBadges item={item} />
           </div>
           <div className={styles.cardFooterMetrics}>
-            <span>{formatCompact(item.channelCount)} session{item.channelCount === 1 ? '' : 's'}</span>
             <InfoTooltip
               align="right"
               content={(
@@ -801,15 +859,17 @@ function Card({
             <span>Low reputation: limited on-chain history</span>
           ) : (
             <>
-              {item.providerCount > 1 && (
-                <span>{item.providerCount} providers</span>
-              )}
-              {item.providerCount > 1 && <span className={styles.statsDot} />}
-              <span>{formatVolumeUsdc(item.volumeUsdc)} USDC volume</span>
-              <span className={styles.statsDot} />
-              <span>{formatCompact(item.lifetimeRequests)} request{item.lifetimeRequests === 1 ? '' : 's'}</span>
-              <span className={styles.statsDot} />
-              <span>{formatCompact(item.lifetimeTokens)} token{item.lifetimeTokens === 1 ? '' : 's'}</span>
+              <span className={styles.cardStatsValues}>
+                {item.providerCount > 1 && (
+                  <span>{item.providerCount} providers</span>
+                )}
+                {item.providerCount > 1 && <span className={styles.statsDot} />}
+                <span>{formatCompact(item.channelCount)} session{item.channelCount === 1 ? '' : 's'}</span>
+                <span className={styles.statsDot} />
+                <span>{formatVolumeUsdc(item.volumeUsdc)} USDC volume</span>
+                <span className={styles.statsDot} />
+                <span>{formatCompact(item.lifetimeTokens)} token{item.lifetimeTokens === 1 ? '' : 's'}</span>
+              </span>
             </>
           )}
         </div>

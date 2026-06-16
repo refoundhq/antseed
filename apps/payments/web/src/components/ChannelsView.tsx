@@ -7,6 +7,8 @@ import { CHANNELS_ABI } from '../channels-abi';
 import { getErrorMessage, usePaymentNetwork } from '../payment-network';
 import { useChannels } from '../hooks/useChannels';
 import { useAuthorizedWallet } from '../context/AuthorizedWalletContext';
+import { formatTimestampDate, formatUsd, parseUsd, truncateAddress } from '../utils/format';
+import { Button } from './Button';
 import './ChannelsView.scss';
 
 interface ChannelsViewProps {
@@ -15,10 +17,7 @@ interface ChannelsViewProps {
 
 const GRACE_PERIOD = 900; // 15 minutes in seconds
 const PAGE_SIZE = 10;
-
-function truncateAddress(addr: string): string {
-  return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
-}
+type ActivityFilter = 'all' | 'settlements' | 'closes';
 
 type RowStatus =
   | 'active'
@@ -47,6 +46,19 @@ const STATUS_META: Record<RowStatus, { label: string; modifier: string }> = {
   closed:       { label: 'Closed',       modifier: 'status-pill--muted' },
 };
 
+function matchesFilter(session: ChannelData, filter: ActivityFilter): boolean {
+  if (filter === 'all') return true;
+  const status = getRowStatus(session);
+  if (filter === 'settlements') return status === 'settled';
+  return status === 'closing' || status === 'withdrawable' || status === 'closed' || status === 'timedout';
+}
+
+function getEmptyMessage(filter: ActivityFilter): string {
+  if (filter === 'settlements') return 'No settlements match this filter.';
+  if (filter === 'closes') return 'No channel closes match this filter.';
+  return 'No activity yet. Complete a request to see settlements here.';
+}
+
 function formatTimeRemaining(closeRequestedAt: number): string {
   const now = Math.floor(Date.now() / 1000);
   const remaining = closeRequestedAt + GRACE_PERIOD - now;
@@ -56,16 +68,8 @@ function formatTimeRemaining(closeRequestedAt: number): string {
   return `${mins}:${secs.toString().padStart(2, '0')}`;
 }
 
-// Accepts either seconds (on-chain style) or milliseconds (Date.now()) — the
-// channel store mixes units because `deadline` is a block timestamp (seconds)
-// while `reservedAt` is wall-clock ms. Values ≥ 1e12 are treated as ms.
-function toMs(ts: number): number {
-  return ts > 1e12 ? ts : ts * 1000;
-}
-
 function formatDate(ts: number): string {
-  if (!ts) return '—';
-  return new Date(toMs(ts)).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  return formatTimestampDate(ts, { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
 const parsedAbi = parseAbi(CHANNELS_ABI);
@@ -157,11 +161,11 @@ function ChannelRow({
         {closeConfirmed || withdrawConfirmed ? (
           <button className="btn-link" onClick={onRefresh}>Refresh</button>
         ) : status === 'active' ? (
-          <button className="btn-outline" onClick={handleRequestClose}>Close</button>
+          <Button size="sm" variant="outline" onClick={handleRequestClose}>Close</Button>
         ) : status === 'closing' ? (
-          <button className="btn-outline" disabled>Waiting…</button>
+          <Button size="sm" variant="outline" disabled>Waiting…</Button>
         ) : status === 'withdrawable' ? (
-          <button className="btn-primary" onClick={handleWithdraw}>Withdraw</button>
+          <Button size="sm" onClick={handleWithdraw}>Withdraw</Button>
         ) : (
           <span className="channels-table-dash">—</span>
         )}
@@ -174,6 +178,7 @@ function ChannelRow({
 export function ChannelsView({ config }: ChannelsViewProps) {
   const { channels, history, loading, refetch } = useChannels(config);
   const [page, setPage] = useState(0);
+  const [filter, setFilter] = useState<ActivityFilter>('all');
 
   const fetchData = useCallback(async () => {
     await refetch();
@@ -181,11 +186,11 @@ export function ChannelsView({ config }: ChannelsViewProps) {
 
   // Active first, then history — keeps actionable rows on page one.
   const allChannels = useMemo(() => [...channels, ...history], [channels, history]);
-
   const totals = useMemo(() => {
-    const reserved = channels.reduce((a, c) => a + (parseFloat(c.deposit) || 0), 0);
-    const used = channels.reduce((a, c) => a + (parseFloat(c.settled) || 0), 0);
-    const totalSpent = allChannels.reduce((a, c) => a + (parseFloat(c.settled) || 0), 0);
+    const reserved = channels.reduce((total, channel) => total + parseUsd(channel.deposit), 0);
+    const used = channels.reduce((total, channel) => total + parseUsd(channel.settled), 0);
+    const totalSpent = allChannels.reduce((total, channel) => total + parseUsd(channel.settled), 0);
+
     return {
       active: channels.length,
       reserved,
@@ -194,125 +199,149 @@ export function ChannelsView({ config }: ChannelsViewProps) {
       totalSpent,
     };
   }, [channels, allChannels]);
+  const filteredChannels = useMemo(
+    () => allChannels.filter((session) => matchesFilter(session, filter)),
+    [allChannels, filter],
+  );
 
-  const pageCount = Math.max(1, Math.ceil(allChannels.length / PAGE_SIZE));
+  const handleFilterChange = useCallback((nextFilter: ActivityFilter) => {
+    setFilter(nextFilter);
+    setPage(0);
+  }, []);
+
+  const pageCount = Math.max(1, Math.ceil(filteredChannels.length / PAGE_SIZE));
   useEffect(() => {
     if (page > pageCount - 1) setPage(pageCount - 1);
   }, [page, pageCount]);
 
   const pageRows = useMemo(
-    () => allChannels.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE),
-    [allChannels, page],
+    () => filteredChannels.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE),
+    [filteredChannels, page],
   );
+  const activitySummary = allChannels.length === filteredChannels.length
+    ? `${allChannels.length} entries`
+    : `${filteredChannels.length} of ${allChannels.length} entries`;
 
   return (
-    <div className="channels-view dashboard-view">
-      <section className="dashboard-section">
-        <div className="channels-section-head-row">
-          <header className="dashboard-section-head">
-            <div className="dashboard-section-eyebrow">Your channels</div>
-            <h2 className="dashboard-section-title">Payment channels</h2>
-            <p className="dashboard-section-sub">
+    <div className="activity-view">
+      <section className="portal-content-section" aria-labelledby="activity-summary-title">
+        <div className="portal-content-head portal-content-head--row">
+          <div>
+            <div className="portal-kicker">Your channels</div>
+            <h2 className="portal-content-title" id="activity-summary-title">Payment channels</h2>
+            <p>
               Payment channels between you and sellers. Reserve funds once, then settle
               per-request against the escrow.
             </p>
-          </header>
-          <button className="btn-outline channels-refresh-btn" onClick={fetchData}>
+          </div>
+          <button type="button" className="portal-secondary-btn" onClick={fetchData}>
             Refresh
           </button>
         </div>
 
-        <div className="dashboard-chart-card">
-          <div className="dashboard-kpi-row">
-            <div className="dashboard-kpi">
-              <div className="dashboard-kpi-label">Active</div>
-              <div className="dashboard-kpi-value">{totals.active} / {totals.total}</div>
-            </div>
-            <div className="dashboard-kpi">
-              <div className="dashboard-kpi-label">Reserved</div>
-              <div className="dashboard-kpi-value">${totals.reserved.toFixed(2)}</div>
-            </div>
-            <div className="dashboard-kpi">
-              <div className="dashboard-kpi-label">Used</div>
-              <div className="dashboard-kpi-value">${totals.used.toFixed(2)}</div>
-            </div>
-            <div className="dashboard-kpi">
-              <div className="dashboard-kpi-label">Total Spent</div>
-              <div className="dashboard-kpi-value">${totals.totalSpent.toFixed(2)}</div>
-            </div>
+        <div className="portal-metrics-grid">
+          <div className="portal-metric">
+            <div className="portal-kicker">Active</div>
+            <strong>{totals.active} / {totals.total}</strong>
+            <p>Open now / all-time</p>
           </div>
-
-          {/* <div className="channels-table-caption">
-            {allChannels.length} channel{allChannels.length === 1 ? '' : 's'}
-            {channels.length > 0 && ` · ${channels.length} active`}
-          </div> */}
-
-          {loading && allChannels.length === 0 ? (
-            <div className="channels-view-empty">Loading channels…</div>
-          ) : allChannels.length === 0 ? (
-            <div className="channels-view-empty">No channels yet</div>
-          ) : (
-            <>
-              <div className="channels-table-wrap">
-                <table className="channels-table">
-                  <thead>
-                    <tr>
-                      <th>Seller</th>
-                      <th>Channel</th>
-                      <th>Status</th>
-                      <th className="channels-table-num">Reserved</th>
-                      <th className="channels-table-num">Used</th>
-                      <th>Opened</th>
-                      <th></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {pageRows.map((session) => (
-                      config ? (
-                        <ChannelRow
-                          key={session.channelId}
-                          session={session}
-                          config={config}
-                          onRefresh={fetchData}
-                        />
-                      ) : null
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-
-              {pageCount > 1 && (
-                <div className="channels-pagination">
-                  <button
-                    type="button"
-                    className="channels-pagination-btn"
-                    disabled={page === 0}
-                    onClick={() => setPage((p) => Math.max(0, p - 1))}
-                    aria-label="Previous page"
-                  >
-                    <span aria-hidden="true">←</span>
-                    <span>Prev</span>
-                  </button>
-                  <span className="channels-pagination-info">
-                    Page <strong>{page + 1}</strong> of {pageCount}
-                  </span>
-                  <button
-                    type="button"
-                    className="channels-pagination-btn"
-                    disabled={page >= pageCount - 1}
-                    onClick={() => setPage((p) => Math.min(pageCount - 1, p + 1))}
-                    aria-label="Next page"
-                  >
-                    <span>Next</span>
-                    <span aria-hidden="true">→</span>
-                  </button>
-                </div>
-              )}
-            </>
-          )}
+          <div className="portal-metric">
+            <div className="portal-kicker">Reserved</div>
+            <strong>${formatUsd(totals.reserved)}</strong>
+            <p>Currently locked</p>
+          </div>
+          <div className="portal-metric">
+            <div className="portal-kicker">Used</div>
+            <strong>${formatUsd(totals.used)}</strong>
+            <p>On active channels</p>
+          </div>
+          <div className="portal-metric">
+            <div className="portal-kicker">Total spent</div>
+            <strong>${formatUsd(totals.totalSpent)}</strong>
+            <p>Settled all-time</p>
+          </div>
         </div>
+      </section>
+
+      <section className="portal-content-section" aria-labelledby="activity-log-title">
+        <div className="portal-content-head portal-content-head--row">
+          <div>
+            <h2 className="portal-content-title" id="activity-log-title">Activity log</h2>
+            <p>Settlements and channel closes across your payment channels.</p>
+          </div>
+          <div className="activity-filter-group" role="group" aria-label="Activity filter">
+            <button type="button" className={filter === 'all' ? 'is-active' : ''} onClick={() => handleFilterChange('all')}>All</button>
+            <button type="button" className={filter === 'settlements' ? 'is-active' : ''} onClick={() => handleFilterChange('settlements')}>Settlements</button>
+            <button type="button" className={filter === 'closes' ? 'is-active' : ''} onClick={() => handleFilterChange('closes')}>Channel closes</button>
+          </div>
+        </div>
+
+        <div className="activity-window">{activitySummary}</div>
+
+        {loading && allChannels.length === 0 ? (
+          <div className="activity-empty">Loading activity…</div>
+        ) : filteredChannels.length === 0 ? (
+          <div className="activity-empty">{getEmptyMessage(filter)}</div>
+        ) : (
+          <div className="activity-table-card">
+            <div className="channels-table-wrap">
+              <table className="channels-table">
+                <thead>
+                  <tr>
+                    <th>Seller</th>
+                    <th>Channel</th>
+                    <th>Status</th>
+                    <th className="channels-table-num">Reserved</th>
+                    <th className="channels-table-num">Used</th>
+                    <th>Opened</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {pageRows.map((session) => (
+                    config ? (
+                      <ChannelRow
+                        key={session.channelId}
+                        session={session}
+                        config={config}
+                        onRefresh={fetchData}
+                      />
+                    ) : null
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {pageCount > 1 && (
+              <div className="channels-pagination">
+                <button
+                  type="button"
+                  className="channels-pagination-btn"
+                  disabled={page === 0}
+                  onClick={() => setPage((p) => Math.max(0, p - 1))}
+                  aria-label="Previous page"
+                >
+                  <span aria-hidden="true">←</span>
+                  <span>Prev</span>
+                </button>
+                <span className="channels-pagination-info">
+                  Page <strong>{page + 1}</strong> of {pageCount}
+                </span>
+                <button
+                  type="button"
+                  className="channels-pagination-btn"
+                  disabled={page >= pageCount - 1}
+                  onClick={() => setPage((p) => Math.min(pageCount - 1, p + 1))}
+                  aria-label="Next page"
+                >
+                  <span>Next</span>
+                  <span aria-hidden="true">→</span>
+                </button>
+              </div>
+            )}
+          </div>
+        )}
       </section>
     </div>
   );
 }
-

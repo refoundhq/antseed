@@ -30,7 +30,7 @@ export interface BuyerConfig {
   maxPoolSize: number;
   /** Health check interval in ms. Default: 30_000 */
   healthCheckIntervalMs: number;
-  /** Timeout for requests forwarded to peers in ms. Default: 120_000 */
+  /** Timeout for requests forwarded to peers in ms. Default: 300_000 */
   requestTimeoutMs: number;
   /** Whether to automatically set env vars for CLI tools. Default: true */
   autoSetEnvVars: boolean;

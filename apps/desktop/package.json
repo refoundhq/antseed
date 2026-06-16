@@ -1,7 +1,7 @@
 {
   "name": "@antseed/desktop",
-  "productName": "AntSeed Desktop",
-  "version": "0.1.95",
+  "productName": "AntSeed AntStation",
+  "version": "0.1.107",
   "private": true,
   "description": "Desktop app for AntSeed",
   "author": "AntSeed <hello@antseed.com>",
@@ -40,6 +40,7 @@
     "@antseed/api-adapter": "workspace:*",
     "@antseed/node": "workspace:*",
     "@antseed/payments": "workspace:*",
+    "@antseed/ui": "workspace:*",
     "@fastify/cors": "^10.0.0",
     "@fastify/static": "^9.0.0",
     "@fastify/websocket": "^11.2.0",

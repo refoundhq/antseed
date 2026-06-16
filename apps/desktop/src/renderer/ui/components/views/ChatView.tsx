@@ -13,6 +13,8 @@ import {
   GitBranchIcon,
   Mic01Icon,
   Search01Icon,
+  SecurityWarningIcon,
+  Shield01Icon,
   Tick02Icon
 } from '@hugeicons/core-free-icons';
 import { useUiSnapshot } from '../../hooks/useUiSnapshot';
@@ -21,6 +23,7 @@ import { ChatBubble } from '../chat/ChatBubble';
 import { hasSearchPhraseMatch, isToolResultOnlyMessage } from '../chat/chat-utils.js';
 import { WalkingAnt } from '../chat/WalkingAnt';
 import { SessionApprovalCard } from '../chat/SessionApprovalCard';
+import { ToolApprovalCard } from '../chat/ToolApprovalCard';
 import { LowBalanceWarning } from '../chat/LowBalanceWarning';
 import { ServiceDropdown } from '../chat/ServiceDropdown';
 import { SwitchServiceDialog } from '../chat/SwitchServiceDialog';
@@ -30,7 +33,7 @@ import { AttachmentViewer, type ViewerAttachment } from '../chat/AttachmentViewe
 import { BrowserPreview } from '../BrowserPreview';
 import type { ChatMessage } from '../chat/chat-shared';
 import { buildDisplayMessages } from '../chat/chat-shared';
-import type { ChatWorkspaceGitStatus, RawChatAttachment } from '../../../types/bridge';
+import type { ChatPermissionMode, ChatWorkspaceGitStatus, RawChatAttachment } from '../../../types/bridge';
 import { AntStationStackedLogo } from '../AntStationLogo';
 import { cancelVoiceRecording, startVoiceRecording, stopVoiceRecording } from '../../lib/voice-recorder';
 
@@ -49,6 +52,22 @@ const MAX_ATTACHMENTS = 5;
 const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 const MAX_TOTAL_ATTACHMENT_BYTES = 50 * 1024 * 1024;
 const NEAR_BOTTOM_PX = 40;
+const PERMISSION_MODES: Array<{
+  value: ChatPermissionMode;
+  label: string;
+  tone: 'safe' | 'risk';
+}> = [
+  {
+    value: 'manual',
+    label: 'Ask first',
+    tone: 'safe',
+  },
+  {
+    value: 'full',
+    label: 'Full access',
+    tone: 'risk',
+  },
+];
 
 function isNearScrollBottom(el: HTMLElement): boolean {
   return el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM_PX;
@@ -218,6 +237,7 @@ export function ChatView({ active, onSelectView }: ChatViewProps) {
   };
   const [pendingQueue, setPendingQueue] = useState<PendingDraft[]>([]);
   const [previewAttachment, setPreviewAttachment] = useState<ViewerAttachment | null>(null);
+  const [permissionMenuOpen, setPermissionMenuOpen] = useState(false);
   const [isNearBottom, setIsNearBottom] = useState(true);
   const [hasNewActivityWhileScrolledUp, setHasNewActivityWhileScrolledUp] = useState(false);
   const [tooltipDismissed, setTooltipDismissed] = useState<boolean>(() => {
@@ -243,6 +263,7 @@ export function ChatView({ active, onSelectView }: ChatViewProps) {
   const wasActiveRef = useRef<boolean>(active);
   const isUserScrolledUp = useRef(false);
   const isDragging = useRef(false);
+  const permissionMenuRef = useRef<HTMLDivElement>(null);
   const visibleMessages = useMemo(() => {
     const msgs = Array.isArray(snap.chatMessages) ? (snap.chatMessages as ChatMessage[]) : [];
     return buildDisplayMessages(msgs).filter((msg) => !isToolResultOnlyMessage(msg));
@@ -492,6 +513,24 @@ export function ChatView({ active, onSelectView }: ChatViewProps) {
     setPreviewTargetUrl(url);
     setPreviewOpen(true);
   }, []);
+
+  useEffect(() => {
+    if (!permissionMenuOpen) return;
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (target instanceof Node && permissionMenuRef.current?.contains(target)) return;
+      setPermissionMenuOpen(false);
+    };
+    const handleKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key === 'Escape') setPermissionMenuOpen(false);
+    };
+    document.addEventListener('pointerdown', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [permissionMenuOpen]);
 
   // Services filtered to the currently-routed peer — lets the user switch
   // between services offered by the same peer without going back to Discover.
@@ -926,15 +965,28 @@ export function ChatView({ active, onSelectView }: ChatViewProps) {
     scrollChatToBottom('smooth');
   }, [scrollChatToBottom]);
 
+  const activeToolApprovalRequests = useMemo(() => {
+    const activeConversationId = snap.chatActiveConversation;
+    if (!activeConversationId) return [];
+    return snap.chatToolApprovalRequests.filter((request) => request.conversationId === activeConversationId);
+  }, [snap.chatActiveConversation, snap.chatToolApprovalRequests]);
+  const activeToolApprovalRequest = activeToolApprovalRequests[0] ?? null;
   const showWelcome =
     snap.chatConversationsLoaded &&
     !snap.chatActiveConversation &&
     visibleMessages.length === 0 &&
     !snap.chatStreamingMessage;
   const showScrollToLatest = !showWelcome && !isNearBottom;
+  const selectedPermissionMode = PERMISSION_MODES.find((mode) => mode.value === snap.chatPermissionMode) ?? PERMISSION_MODES[1];
   const activeConversationIsSending = snap.chatActiveConversation
     ? snap.chatSendingConversationIds.includes(snap.chatActiveConversation)
     : snap.chatSending;
+  const permissionModeLocked = activeConversationIsSending || activeToolApprovalRequests.length > 0;
+
+  useEffect(() => {
+    if (permissionModeLocked) setPermissionMenuOpen(false);
+  }, [permissionModeLocked]);
+
   const showThinkingIndicator = snap.chatSending && (
     !snap.chatSendingConversationId ||
     snap.chatSendingConversationId === snap.chatActiveConversation ||
@@ -943,23 +995,6 @@ export function ChatView({ active, onSelectView }: ChatViewProps) {
 
   const workspacePath = snap.chatWorkspacePath || snap.chatWorkspaceDefaultPath;
   const workspaceLabel = getPathEnding(workspacePath);
-  const gitStatus = snap.chatWorkspaceGitStatus;
-  const gitStatusSummary = getGitStatusSummary(gitStatus);
-  const gitStatusBranch = gitStatus.available
-    ? (gitStatus.branch || (gitStatus.isDetached ? 'detached' : 'no-branch'))
-    : 'No git repo';
-  const gitStatusRepoLabel = gitStatus.rootPath
-    ? getPathTail(gitStatus.rootPath)
-    : getPathTail(workspacePath);
-  const gitStatusDetailLabel = gitStatus.available
-    ? `${gitStatusBranch} · ${gitStatusSummary}`
-    : gitStatusSummary;
-  const gitStatusToneClass = !gitStatus.available
-    ? styles.gitStatusPillMissing
-    : getGitChangeCount(gitStatus) > 0 || gitStatus.behind > 0
-      ? styles.gitStatusPillDirty
-      : styles.gitStatusPillClean;
-  const gitStatusTitle = getGitStatusTitle(gitStatus);
 
   // Compute widths for split view
   const chatStyle = previewOpen
@@ -1279,6 +1314,13 @@ export function ChatView({ active, onSelectView }: ChatViewProps) {
               availableUsdc={snap.creditsAvailableUsdc}
               onAddCredits={() => actions.openPaymentsPortal?.('deposit')}
             />
+            <ToolApprovalCard
+              request={activeToolApprovalRequest}
+              pendingCount={activeToolApprovalRequests.length}
+              onAllowOnce={() => activeToolApprovalRequest && actions.decideToolApproval('allow_once', activeToolApprovalRequest.id)}
+              onAlwaysAllow={() => activeToolApprovalRequest && actions.decideToolApproval('always_allow_peer', activeToolApprovalRequest.id)}
+              onDeny={() => activeToolApprovalRequest && actions.decideToolApproval('deny', activeToolApprovalRequest.id)}
+            />
 
             {attachedFiles.length > 0 && (
               <div className={styles.chatAttachmentTray}>
@@ -1393,16 +1435,57 @@ export function ChatView({ active, onSelectView }: ChatViewProps) {
               </div>
             </div>
             <div className={styles.chatInputMeta}>
-              <button
-                type="button"
-                className={`${styles.gitStatusPill} ${gitStatusToneClass}`}
-                onClick={() => void actions.refreshWorkspaceGitStatus()}
-                title={gitStatusTitle}
-              >
-                <HugeiconsIcon icon={GitBranchIcon} size={14} strokeWidth={1.5} />
-                <span className={styles.gitStatusBranch}>{gitStatusRepoLabel}</span>
-                <span className={styles.gitStatusSummary}>{gitStatusDetailLabel}</span>
-              </button>
+              <div className={styles.permissionModePicker} ref={permissionMenuRef}>
+                <button
+                  type="button"
+                  className={`${styles.permissionModeButton} ${selectedPermissionMode.tone === 'risk' ? styles.permissionModeButtonRisk : styles.permissionModeButtonSafe}`}
+                  onClick={() => {
+                    if (permissionModeLocked) return;
+                    setPermissionMenuOpen((open) => !open);
+                  }}
+                  disabled={permissionModeLocked}
+                  title={permissionModeLocked ? 'Agent access can be changed after the current response finishes.' : undefined}
+                  aria-haspopup="menu"
+                  aria-expanded={permissionMenuOpen}
+                >
+                  <HugeiconsIcon
+                    icon={snap.chatPermissionMode === 'full' ? SecurityWarningIcon : Shield01Icon}
+                    size={14}
+                    strokeWidth={1.7}
+                  />
+                  <span>{selectedPermissionMode.label}</span>
+                  <span className={styles.permissionModeChevron} aria-hidden="true" />
+                </button>
+                {permissionMenuOpen && !permissionModeLocked ? (
+                  <div className={styles.permissionModeMenu} role="menu">
+                    {PERMISSION_MODES.map((mode) => {
+                      const selected = mode.value === snap.chatPermissionMode;
+                      return (
+                        <button
+                          key={mode.value}
+                          type="button"
+                          className={`${styles.permissionModeOption} ${selected ? styles.permissionModeOptionSelected : ''}`}
+                          role="menuitemradio"
+                          aria-checked={selected}
+                          onClick={() => {
+                            actions.setChatPermissionMode(mode.value);
+                            setPermissionMenuOpen(false);
+                          }}
+                        >
+                          <HugeiconsIcon
+                            icon={mode.value === 'full' ? SecurityWarningIcon : Shield01Icon}
+                            size={14}
+                            strokeWidth={1.7}
+                            className={mode.value === 'full' ? styles.permissionModeOptionIconRisk : styles.permissionModeOptionIconSafe}
+                          />
+                          <span className={styles.permissionModeOptionLabel}>{mode.label}</span>
+                          {selected ? <span className={styles.permissionModeOptionCheck}>✓</span> : null}
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : null}
+              </div>
               <button
                 type="button"
                 className={styles.workspaceButton}

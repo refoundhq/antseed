@@ -7,9 +7,12 @@ import {
   MAX_SERVICE_NAME_LENGTH,
   MAX_REGION_LENGTH,
   MAX_DISPLAY_NAME_LENGTH,
+  MAX_DOMAIN_VERIFICATION_CLAIMS,
+  MAX_GITHUB_VERIFICATION_CLAIMS,
   MAX_PUBLIC_ADDRESS_LENGTH,
   MAX_SERVICE_CATEGORY_LENGTH,
   MAX_SERVICE_API_PROTOCOLS_PER_SERVICE,
+  MAX_PEER_CAPABILITIES,
 } from '../src/discovery/metadata-validator.js';
 import { METADATA_VERSION, type PeerMetadata } from '../src/discovery/peer-metadata.js';
 
@@ -513,11 +516,109 @@ describe('validateMetadata', () => {
     const errors = validateMetadata(validMetadata({ sellerContract: "bb".repeat(20) }));
     expect(errors.filter(e => e.field === "sellerContract")).toHaveLength(0);
   });
+
+  it("accepts valid domain verification claims", () => {
+    const errors = validateMetadata(validMetadata({
+      verifications: {
+        domains: [
+          { domain: "example.com", methods: ["dns-txt", "https-well-known"] },
+        ],
+      },
+    }));
+    expect(errors.filter(e => e.field.startsWith("verifications"))).toHaveLength(0);
+  });
+
+  it("rejects malformed domain verification claims", () => {
+    const errors = validateMetadata(validMetadata({
+      verifications: {
+        domains: [
+          { domain: "https://example.com", methods: ["dns-txt"] },
+          { domain: "example.com", methods: ["dns-txt", "dns-txt"] },
+          { domain: "bad-method.example.com", methods: ["bogus" as any] },
+        ],
+      },
+    }));
+    expect(errors.some(e => e.field === "verifications.domains[0].domain")).toBe(true);
+    expect(errors.some(e => e.field === "verifications.domains[1].methods[1]")).toBe(true);
+    expect(errors.some(e => e.field === "verifications.domains[2].methods[0]")).toBe(true);
+  });
+
+  it("rejects too many domain verification claims", () => {
+    const errors = validateMetadata(validMetadata({
+      verifications: {
+        domains: Array.from({ length: MAX_DOMAIN_VERIFICATION_CLAIMS + 1 }, (_, i) => ({
+          domain: `example-${i}.com`,
+        })),
+      },
+    }));
+    expect(errors.some(e => e.field === "verifications.domains")).toBe(true);
+  });
+
+  it("accepts valid github verification claims", () => {
+    const errors = validateMetadata(validMetadata({
+      verifications: {
+        github: [
+          { username: "octocat" },
+          { username: "octocat", repository: "antseed-proofs" },
+        ],
+      },
+    }));
+    expect(errors.filter(e => e.field.startsWith("verifications"))).toHaveLength(0);
+  });
+
+  it("rejects malformed github verification claims", () => {
+    const errors = validateMetadata(validMetadata({
+      verifications: {
+        github: [
+          { username: "-bad-" },
+          { username: "double--hyphen" },
+          { username: "octocat", repository: "bad repo!" },
+          { username: "octocat" },
+          { username: "octocat" },
+        ],
+      },
+    }));
+    expect(errors.some(e => e.field === "verifications.github[0].username")).toBe(true);
+    expect(errors.some(e => e.field === "verifications.github[1].username")).toBe(true);
+    expect(errors.some(e => e.field === "verifications.github[2].repository")).toBe(true);
+    expect(errors.some(e => e.field === "verifications.github[4]")).toBe(true);
+  });
+
+  it("rejects too many github verification claims", () => {
+    const errors = validateMetadata(validMetadata({
+      verifications: {
+        github: Array.from({ length: MAX_GITHUB_VERIFICATION_CLAIMS + 1 }, (_, i) => ({
+          username: `user-${i}`,
+        })),
+      },
+    }));
+    expect(errors.some(e => e.field === "verifications.github")).toBe(true);
+  });
+
+  it("accepts well-formed peer capabilities", () => {
+    const errors = validateMetadata(validMetadata({ capabilities: ["verification.response-auth.v1"] }));
+    expect(errors.filter(e => e.field.startsWith("capabilities"))).toHaveLength(0);
+  });
+
+  it("rejects duplicate or malformed peer capabilities", () => {
+    const errors = validateMetadata(validMetadata({
+      capabilities: ["verification.response-auth.v1", "Verification.Response-Auth.V1", "bad capability"],
+    }));
+    expect(errors.some(e => e.field === "capabilities[1]")).toBe(true);
+    expect(errors.some(e => e.field === "capabilities[2]")).toBe(true);
+  });
+
+  it("rejects too many peer capabilities", () => {
+    const errors = validateMetadata(validMetadata({
+      capabilities: Array.from({ length: MAX_PEER_CAPABILITIES + 1 }, (_, i) => `capability.${i}`),
+    }));
+    expect(errors.some(e => e.field === "capabilities")).toBe(true);
+  });
 });
 
 describe('constants', () => {
   it('should export reasonable constant values', () => {
-    expect(MAX_METADATA_SIZE).toBe(1024);
+    expect(MAX_METADATA_SIZE).toBe(1400);
     expect(MAX_PROVIDERS).toBe(10);
     expect(MAX_SERVICES_PER_PROVIDER).toBe(20);
     expect(MAX_SERVICE_NAME_LENGTH).toBe(64);

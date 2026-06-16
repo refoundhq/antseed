@@ -18,6 +18,12 @@ their own message. Auto-committing every tweak produces a noisy history of
 one-line commits that has to be squashed later. Do not chain `edit → build
 → commit → push` as a reflex — even if prior turns in the same session did.
 
+## Changelog policy for PRs
+
+When opening a PR, update `CHANGELOG.md` for any user-facing package, CLI,
+desktop, protocol, configuration, or documentation behavior change. If a PR has
+no user-facing change, say that explicitly in the PR description.
+
 ## Project Overview
 AntSeed is a peer-to-peer AI services network. Providers offer differentiated
 AI services and buyers route requests to the best available peer. This monorepo

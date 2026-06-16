@@ -39,6 +39,16 @@ export async function getConfig(): Promise<PaymentConfig> {
   return fetchJson('/api/config');
 }
 
+export interface RpcHealthResponse {
+  ok: boolean;
+  blockNumber: number;
+  latencyMs: number;
+}
+
+export async function getRpcHealth(): Promise<RpcHealthResponse> {
+  return fetchJson('/api/rpc-health');
+}
+
 /** Raw channel row from the buyer proxy's local ChannelStore — no on-chain enrichment. */
 export interface RawChannel {
   channelId: string;

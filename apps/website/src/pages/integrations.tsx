@@ -73,12 +73,18 @@ function CategoryIcon({category}: {category: IntegrationCategory}) {
 }
 
 function IntegrationCard({i}: {i: Integration}) {
+  const mutedLogo = i.slug === 'genlayer-studio' || i.slug === 'langchain-python';
+
   return (
     <Link to={`/integrations/${i.slug}`} className={styles.card}>
       <div className={styles.cardHead}>
         <div className={styles.logoWrap}>
           {i.logo ? (
-            <img src={`/logos/${i.logo}`} alt="" className={styles.logoImg} />
+            <img
+              src={`/logos/${i.logo}`}
+              alt=""
+              className={`${styles.logoImg}${mutedLogo ? ' ' + styles.mutedLogoImg : ''}`}
+            />
           ) : (
             <span className={styles.logoGlyph}>{i.glyph ?? i.name[0]}</span>
           )}

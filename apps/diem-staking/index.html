@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -22,10 +22,24 @@
     <!-- Same favicon as antseed.com (the AntSeed ant) so users see one brand. -->
     <link rel="icon" type="image/svg+xml" href="/logo.svg" />
 
-    <!-- Fonts — identical to the website stylesheet block. -->
+    <meta name="color-scheme" content="dark light" />
+    <script>
+      (() => {
+        try {
+          const theme = localStorage.getItem('diem-theme-mode') === 'light' ? 'light' : 'dark';
+          document.documentElement.setAttribute('data-theme', theme);
+          document.documentElement.style.colorScheme = theme;
+        } catch {
+          document.documentElement.setAttribute('data-theme', 'dark');
+          document.documentElement.style.colorScheme = 'dark';
+        }
+      })();
+    </script>
+
+    <!-- Fonts — AntSeed Sci-Fi Soft brand pair. -->
     <link
       rel="stylesheet"
-      href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Space+Grotesk:wght@300;400;500;600;700;800&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Oxanium:wght@300;400;500;600;700;800&family=Share+Tech+Mono&display=swap"
     />
 
     <!-- Keywords + social — identical to the website's metadata array. -->

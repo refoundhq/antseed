@@ -12,6 +12,11 @@ import type { PaymentMux } from "./p2p/payment-mux.js";
 import { ConnectionState } from "./types/connection.js";
 import type { BuyerPaymentNegotiator } from "./payments/buyer-payment-negotiator.js";
 import { debugLog, debugWarn } from "./utils/debug.js";
+import type { VerificationMux } from "./verification/verification-mux.js";
+import type { VerificationStorage } from "./verification/storage.js";
+import type { VerificationSampler } from "./verification/samples.js";
+import { verifyResponseAuth } from "./verification/response-auth.js";
+import { tryParseJsonObject } from "./utils/json-codec.js";
 
 export interface RequestStreamResponseMetadata {
   streaming: boolean;
@@ -33,12 +38,20 @@ export interface BuyerRequestHandlerConfig {
   requestTimeoutMs?: number;
   maxStreamBufferBytes?: number;
   maxStreamDurationMs?: number;
+  responseAuthTimeoutMs?: number;
 }
 
+const DEFAULT_REQUEST_TIMEOUT_MS = 5 * 60_000;
+const DEFAULT_RESPONSE_AUTH_GRACE_MS = 30_000;
+
 export interface BuyerRequestHandlerDeps {
+  localPeerId: PeerId;
   negotiator: BuyerPaymentNegotiator | null;
+  verificationStorage: VerificationStorage | null;
+  verificationSampler: VerificationSampler | null;
   getConnection: (peer: PeerInfo) => Promise<PeerConnection>;
   getMux: (peerId: PeerId, conn: PeerConnection) => ProxyMux;
+  getVerificationMux: (peerId: PeerId, conn: PeerConnection) => VerificationMux;
   registerPaymentMux: (peerId: PeerId, mux: PaymentMux) => void;
 }
 
@@ -74,6 +87,7 @@ export class BuyerRequestHandler {
     const conn = await this._deps.getConnection(peer);
     debugLog(`[BuyerRequest] Connection to ${peer.peerId.slice(0, 12)}... state=${conn.state}`);
     const mux = this._deps.getMux(peer.peerId, conn);
+    const verificationMux = this._deps.getVerificationMux(peer.peerId, conn);
     const negotiator = this._deps.negotiator;
     if (negotiator) {
       this._deps.registerPaymentMux(peer.peerId, negotiator.getOrCreatePaymentMux(peer.peerId, conn));
@@ -100,7 +114,7 @@ export class BuyerRequestHandler {
     let startTime = Date.now();
 
     const executeRequest = (): Promise<SerializedHttpResponse> => new Promise<SerializedHttpResponse>((resolve, reject) => {
-      const timeoutMs = this._config.requestTimeoutMs ?? 30_000;
+      const timeoutMs = this._config.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
       const maxStreamBufferBytes = Math.max(1, this._config.maxStreamBufferBytes ?? 16 * 1024 * 1024);
       const maxStreamDurationMs = Math.max(1, this._config.maxStreamDurationMs ?? 5 * 60_000);
       const streamInitialResponseTimeoutMs = callbacks ? Math.max(timeoutMs, 90_000) : timeoutMs;
@@ -277,25 +291,79 @@ export class BuyerRequestHandler {
       if (result.action === 'return') return result.response;
       startTime = Date.now();
       const retriedResponse = await executeRequest();
-      negotiator.estimateCostFromResponse(peer, retriedResponse, requestedService);
+      negotiator.estimateCostFromResponse(peer, retriedResponse, requestedService, req.requestId);
+      this._recordResponseAuth(peer, req, retriedResponse, requestedService, verificationMux);
       return retriedResponse;
     }
 
     if (negotiator) {
-      negotiator.estimateCostFromResponse(peer, response, requestedService);
+      negotiator.estimateCostFromResponse(peer, response, requestedService, req.requestId);
     }
 
+    this._recordResponseAuth(peer, req, response, requestedService, verificationMux);
     return response;
+  }
+
+  private _recordResponseAuth(
+    peer: PeerInfo,
+    request: SerializedHttpRequest,
+    response: SerializedHttpResponse,
+    requestedService: string | undefined,
+    verificationMux: VerificationMux,
+  ): void {
+    const storage = this._deps.verificationStorage;
+    const advertisedService = requestedService ?? 'unknown';
+    const expectedChannelId = this._deps.negotiator?.bpm?.getActiveSession(peer.peerId)?.sessionId ?? null;
+    const responseAuthPromise = verificationMux.waitForResponseAuth(
+      request.requestId,
+      this._config.responseAuthTimeoutMs ?? DEFAULT_RESPONSE_AUTH_GRACE_MS,
+    );
+
+    void responseAuthPromise
+      .then((payload) => {
+        const verification = verifyResponseAuth(payload, {
+          request,
+          response,
+          buyerPeerId: this._deps.localPeerId,
+          sellerPeerId: peer.peerId,
+          advertisedService,
+          channelId: expectedChannelId,
+        });
+
+        if (!verification.valid) {
+          debugWarn(
+            `[BuyerRequest] Invalid ResponseAuth for ${request.requestId.slice(0, 8)} from ${peer.peerId.slice(0, 12)}...: ${verification.reason ?? 'unknown'}`,
+          );
+        }
+
+        storage?.insertResponseAuth({
+          ...payload,
+          receivedAt: Date.now(),
+          verified: verification.valid,
+          verificationError: verification.reason ?? null,
+        });
+
+        void this._deps.verificationSampler?.maybeStoreResponseAuthSample({
+          request,
+          response,
+          responseAuth: payload,
+          verified: verification.valid,
+          verificationError: verification.reason ?? null,
+        }).catch((err) => {
+          debugWarn(`[BuyerRequest] Failed to store ResponseAuth sample for ${request.requestId.slice(0, 8)}: ${err instanceof Error ? err.message : err}`);
+        });
+      })
+      .catch((err) => {
+        debugWarn(`[BuyerRequest] Missing ResponseAuth for ${request.requestId.slice(0, 8)} from ${peer.peerId.slice(0, 12)}...: ${err instanceof Error ? err.message : err}`);
+      });
   }
 }
 
 /** Extract the service/model name from a JSON request body, or undefined if not found. */
 function extractServiceFromBody(body: Uint8Array): string | undefined {
-  try {
-    const parsed = JSON.parse(new TextDecoder().decode(body)) as Record<string, unknown>;
-    const service = parsed.service ?? parsed.model;
-    if (typeof service === 'string' && service.length > 0) return service;
-  } catch { /* not JSON or no model field */ }
+  const parsed = tryParseJsonObject(body);
+  const service = parsed?.service ?? parsed?.model;
+  if (typeof service === 'string' && service.length > 0) return service;
   return undefined;
 }
 

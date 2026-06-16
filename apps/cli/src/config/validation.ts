@@ -1,4 +1,7 @@
 import type {
+  DomainVerificationConfig,
+  DomainVerificationMethod,
+  GithubVerificationConfig,
   HierarchicalPricingConfig,
   AntseedConfig,
   SellerProviderConfig,
@@ -7,6 +10,16 @@ import type {
 
 const SERVICE_CATEGORY_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
 const MAX_PUBLIC_ADDRESS_LENGTH = 255;
+const MAX_DOMAIN_VERIFICATION_CLAIMS = 5;
+const MAX_DOMAIN_LENGTH = 253;
+const DOMAIN_LABEL_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
+const DOMAIN_VERIFICATION_METHODS = new Set<DomainVerificationMethod>(['dns-txt', 'https-well-known']);
+const MAX_GITHUB_VERIFICATION_CLAIMS = 5;
+const MAX_GITHUB_USERNAME_LENGTH = 39;
+const MAX_GITHUB_REPOSITORY_LENGTH = 100;
+const GITHUB_USERNAME_PATTERN = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/;
+const GITHUB_REPOSITORY_PATTERN = /^[a-z0-9._-]+$/;
+const VERIFICATION_NAMESPACES = new Set(['domains', 'github']);
 const MIN_SELLER_UPLOAD_BODY_BYTES = 1024 * 1024;
 const MIN_BUYER_PEER_REFRESH_INTERVAL_MS = 1_000;
 export const MIN_BUYER_METADATA_FETCH_TIMEOUT_MS = 100;
@@ -126,6 +139,161 @@ function parsePublicAddress(value: string): { host: string; port: number } | nul
   return { host, port };
 }
 
+function isValidDomainName(value: string): boolean {
+  if (value.length === 0 || value.length > MAX_DOMAIN_LENGTH) return false;
+  if (value.includes('..') || value.endsWith('.')) return false;
+  const labels = value.split('.');
+  if (labels.length < 2) return false;
+  return labels.every((label) => DOMAIN_LABEL_PATTERN.test(label));
+}
+
+function validateDomainVerification(
+  path: string,
+  claims: DomainVerificationConfig[] | undefined,
+  errors: string[],
+): void {
+  if (claims === undefined) return;
+  if (!Array.isArray(claims)) {
+    errors.push(`${path} must be an array when provided`);
+    return;
+  }
+  if (claims.length === 0) {
+    errors.push(`${path} must be a non-empty array when provided`);
+    return;
+  }
+  if (claims.length > MAX_DOMAIN_VERIFICATION_CLAIMS) {
+    errors.push(`${path} must contain at most ${MAX_DOMAIN_VERIFICATION_CLAIMS} claims`);
+  }
+  const domains = new Set<string>();
+  for (let i = 0; i < claims.length; i += 1) {
+    const claim = claims[i];
+    const claimPath = `${path}[${i}]`;
+    const domain = typeof claim?.domain === 'string' ? claim.domain.trim().toLowerCase() : '';
+    if (!isValidDomainName(domain)) {
+      errors.push(`${claimPath}.domain must be a lower-case hostname with at least two labels`);
+    } else if (domains.has(domain)) {
+      errors.push(`${claimPath}.domain is duplicated`);
+    }
+    domains.add(domain);
+
+    if (claim?.methods !== undefined) {
+      if (!Array.isArray(claim.methods) || claim.methods.length === 0) {
+        errors.push(`${claimPath}.methods must be a non-empty array when provided`);
+      } else {
+        const methods = new Set<string>();
+        for (let j = 0; j < claim.methods.length; j += 1) {
+          const method = claim.methods[j];
+          if (typeof method !== 'string' || !DOMAIN_VERIFICATION_METHODS.has(method as DomainVerificationMethod)) {
+            errors.push(`${claimPath}.methods[${j}] must be "dns-txt" or "https-well-known"`);
+            continue;
+          }
+          if (methods.has(method)) {
+            errors.push(`${claimPath}.methods[${j}] is duplicated`);
+          }
+          methods.add(method);
+        }
+      }
+    }
+  }
+}
+
+function validateGithubVerification(
+  path: string,
+  claims: GithubVerificationConfig[] | undefined,
+  errors: string[],
+): void {
+  if (claims === undefined) return;
+  if (!Array.isArray(claims)) {
+    errors.push(`${path} must be an array when provided`);
+    return;
+  }
+  if (claims.length === 0) {
+    errors.push(`${path} must be a non-empty array when provided`);
+    return;
+  }
+  if (claims.length > MAX_GITHUB_VERIFICATION_CLAIMS) {
+    errors.push(`${path} must contain at most ${MAX_GITHUB_VERIFICATION_CLAIMS} claims`);
+  }
+  const seen = new Set<string>();
+  for (let i = 0; i < claims.length; i += 1) {
+    const claim = claims[i];
+    const claimPath = `${path}[${i}]`;
+    const username = typeof claim?.username === 'string' ? claim.username.trim().toLowerCase() : '';
+    if (
+      username.length === 0
+      || username.length > MAX_GITHUB_USERNAME_LENGTH
+      || username.includes('--')
+      || !GITHUB_USERNAME_PATTERN.test(username)
+    ) {
+      errors.push(`${claimPath}.username must be a valid GitHub username`);
+    }
+    const rawRepository = claim?.repository;
+    let repository = '';
+    if (rawRepository !== undefined) {
+      repository = typeof rawRepository === 'string' ? rawRepository.trim().toLowerCase() : '';
+      if (
+        repository.length === 0
+        || repository.length > MAX_GITHUB_REPOSITORY_LENGTH
+        || repository === '.'
+        || repository === '..'
+        || !GITHUB_REPOSITORY_PATTERN.test(repository)
+      ) {
+        errors.push(`${claimPath}.repository must be a valid GitHub repository name`);
+      }
+    }
+    const key = `${username}/${repository}`;
+    if (seen.has(key)) {
+      errors.push(`${claimPath} is duplicated`);
+    }
+    seen.add(key);
+  }
+}
+
+function validateVerifications(
+  path: string,
+  verifications: AntseedConfig['seller']['verifications'],
+  errors: string[],
+): void {
+  if (verifications === undefined) return;
+  if (!verifications || typeof verifications !== 'object' || Array.isArray(verifications)) {
+    errors.push(`${path} must be an object when provided`);
+    return;
+  }
+  validateDomainVerification(`${path}.domains`, verifications.domains, errors);
+  validateGithubVerification(`${path}.github`, verifications.github, errors);
+  const unknownKeys = Object.keys(verifications).filter((key) => !VERIFICATION_NAMESPACES.has(key));
+  for (const key of unknownKeys) {
+    errors.push(`${path}.${key} is not a supported verification namespace`);
+  }
+  if (verifications.domains === undefined && verifications.github === undefined && unknownKeys.length === 0) {
+    errors.push(`${path} must include at least one verification namespace when provided`);
+  }
+}
+
+function validateBuyerVerification(
+  path: string,
+  verification: AntseedConfig['buyer']['verification'],
+  errors: string[],
+): void {
+  if (verification === undefined) return;
+  if (!verification || typeof verification !== 'object' || Array.isArray(verification)) {
+    errors.push(`${path} must be an object when provided`);
+    return;
+  }
+  if (
+    verification.sampleRate !== undefined &&
+    (!Number.isFinite(verification.sampleRate) || verification.sampleRate < 0 || verification.sampleRate > 1)
+  ) {
+    errors.push(`${path}.sampleRate must be a number in range 0-1`);
+  }
+  if (
+    verification.maxSampleBytes !== undefined &&
+    (!Number.isInteger(verification.maxSampleBytes) || verification.maxSampleBytes < 1)
+  ) {
+    errors.push(`${path}.maxSampleBytes must be an integer >= 1`);
+  }
+}
+
 /**
  * Validate the full config and return all issues.
  */
@@ -150,6 +318,8 @@ export function validateConfig(config: AntseedConfig): string[] {
   if (!Number.isInteger(config.buyer.metadataFetchTimeoutMs) || config.buyer.metadataFetchTimeoutMs < MIN_BUYER_METADATA_FETCH_TIMEOUT_MS) {
     errors.push('buyer.metadataFetchTimeoutMs must be an integer >= 100');
   }
+
+  validateBuyerVerification('buyer.verification', config.buyer.verification, errors);
 
   if (!Number.isInteger(config.seller.maxConcurrentBuyers) || config.seller.maxConcurrentBuyers < 1) {
     errors.push('seller.maxConcurrentBuyers must be an integer >= 1');
@@ -190,6 +360,8 @@ export function validateConfig(config: AntseedConfig): string[] {
       errors.push('seller.publicAddress must be in the form "host:port" with a valid port');
     }
   }
+
+  validateVerifications('seller.verifications', config.seller.verifications, errors);
 
   return errors;
 }

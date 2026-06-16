@@ -73,7 +73,7 @@ const __dirname = path.dirname(__filename);
 
 const isDev = Boolean(process.env['VITE_DEV_SERVER_URL']);
 const rendererUrl = process.env['VITE_DEV_SERVER_URL'] ?? `file://${path.join(__dirname, '../renderer/index.html')}`;
-const APP_NAME = 'AntStation Desktop';
+const APP_NAME = 'AntSeed AntStation';
 const DESKTOP_DEBUG_ENV = 'ANTSEED_DESKTOP_DEBUG';
 const DESKTOP_DEBUG_FLAGS = new Set(['--debug-runtime', '--desktop-debug']);
 const DEFAULT_BUYER_PROXY_PORT = 8377;
@@ -344,11 +344,11 @@ ipcMain.handle('payments:open-portal', async (_event, tab?: string) => {
       params.set('tab', tab);
     }
     const qs = params.toString();
-    // In dev mode, open the Vite HMR dev server (which proxies /api to the Fastify port).
-    // Set ANTSEED_PAYMENTS_DEV_URL to override (default: http://localhost:5175).
-    // When dev mode is detected but the dev server is not reachable, we still fall back to the Fastify URL.
-    const devUrl = isDev ? (process.env['ANTSEED_PAYMENTS_DEV_URL'] || 'http://localhost:5175') : null;
-    const base = devUrl ?? `${LOCALHOST_URL}:${PAYMENTS_PORT}`;
+    // In dev mode, open the Vite HMR dev server (which proxies /api to the Fastify port) when configured.
+    // Set ANTSEED_PAYMENTS_DEV_URL to override (default: the Fastify URL).
+    // When dev mode is detected but no dev server URL is configured, we still fall back to the Fastify URL.
+    const devUrl = isDev ? process.env['ANTSEED_PAYMENTS_DEV_URL']?.trim() : undefined;
+    const base = devUrl || `${LOCALHOST_URL}:${PAYMENTS_PORT}`;
     const url = qs ? `${base}?${qs}` : base;
     const { default: open } = await import('open');
     await open(url);

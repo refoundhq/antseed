@@ -46,6 +46,17 @@ export interface StoredReceipt {
   createdAt: number;
 }
 
+export interface StoredChannelServiceTotal {
+  sessionId: string;
+  serviceId: string;
+  cumulativeAmount: string; // bigint as string
+  cumulativeInputTokens: string; // bigint as string
+  cumulativeCachedInputTokens: string; // bigint as string
+  cumulativeOutputTokens: string; // bigint as string
+  cumulativeRequestCount: string; // bigint as string
+  updatedAt: number;
+}
+
 export class ChannelStore {
   private _db: Database.Database;
 
@@ -57,6 +68,7 @@ export class ChannelStore {
     requestCount: number,
     receipt: Omit<StoredReceipt, 'id'>,
   ) => void;
+  private readonly _replaceServiceTotalsTxn: (sessionId: string, totals: StoredChannelServiceTotal[]) => void;
 
   private readonly _stmts: {
     upsert: Database.Statement;
@@ -77,6 +89,9 @@ export class ChannelStore {
     getActiveChannels: Database.Statement;
     getActiveChannelsByBuyer: Database.Statement;
     getTotalsByPeerAndBuyer: Database.Statement;
+    deleteServiceTotals: Database.Statement;
+    insertServiceTotal: Database.Statement;
+    getServiceTotals: Database.Statement;
   };
 
   constructor(dataDir: string) {
@@ -91,6 +106,21 @@ export class ChannelStore {
         this.insertReceipt(receipt);
       },
     );
+    this._replaceServiceTotalsTxn = this._db.transaction((sessionId: string, totals: StoredChannelServiceTotal[]) => {
+      this._stmts.deleteServiceTotals.run(sessionId);
+      for (const total of totals) {
+        this._stmts.insertServiceTotal.run({
+          sessionId: total.sessionId,
+          serviceId: total.serviceId,
+          cumulativeAmount: total.cumulativeAmount,
+          cumulativeInputTokens: total.cumulativeInputTokens,
+          cumulativeCachedInputTokens: total.cumulativeCachedInputTokens,
+          cumulativeOutputTokens: total.cumulativeOutputTokens,
+          cumulativeRequestCount: total.cumulativeRequestCount,
+          updatedAt: total.updatedAt,
+        });
+      }
+    });
   }
 
   private _prepareStatements() {
@@ -188,6 +218,23 @@ export class ChannelStore {
         FROM payment_channels
         WHERE peer_id = ? AND role = ? AND buyer_evm_addr = ?
       `),
+      deleteServiceTotals: this._db.prepare(
+        'DELETE FROM payment_channel_service_totals WHERE session_id = ?',
+      ),
+      insertServiceTotal: this._db.prepare(`
+        INSERT INTO payment_channel_service_totals (
+          session_id, service_id, cumulative_amount, cumulative_input_tokens,
+          cumulative_cached_input_tokens, cumulative_output_tokens,
+          cumulative_request_count, updated_at
+        ) VALUES (
+          @sessionId, @serviceId, @cumulativeAmount, @cumulativeInputTokens,
+          @cumulativeCachedInputTokens, @cumulativeOutputTokens,
+          @cumulativeRequestCount, @updatedAt
+        )
+      `),
+      getServiceTotals: this._db.prepare(
+        'SELECT * FROM payment_channel_service_totals WHERE session_id = ? ORDER BY service_id',
+      ),
     };
   }
 
@@ -406,6 +453,25 @@ export class ChannelStore {
     this._stmts.updateReceiptAck.run(buyerAckSig, sessionId, runningTotal, requestCount);
   }
 
+  // ── Service total CRUD ────────────────────────────────────────
+
+  replaceServiceTotals(sessionId: string, totals: Omit<StoredChannelServiceTotal, 'sessionId' | 'updatedAt'>[]): void {
+    const updatedAt = Date.now();
+    this._replaceServiceTotalsTxn(
+      sessionId,
+      totals.map((total) => ({
+        sessionId,
+        ...total,
+        updatedAt,
+      })),
+    );
+  }
+
+  getServiceTotals(sessionId: string): StoredChannelServiceTotal[] {
+    const rows = this._stmts.getServiceTotals.all(sessionId) as ServiceTotalRow[];
+    return rows.map(rowToServiceTotal);
+  }
+
   // ── Lifecycle ─────────────────────────────────────────────────
 
   close(): void {
@@ -450,6 +516,17 @@ interface ReceiptRow {
   created_at: number;
 }
 
+interface ServiceTotalRow {
+  session_id: string;
+  service_id: string;
+  cumulative_amount: string;
+  cumulative_input_tokens: string;
+  cumulative_cached_input_tokens: string;
+  cumulative_output_tokens: string;
+  cumulative_request_count: string;
+  updated_at: number;
+}
+
 function rowToChannel(row: ChannelRow): StoredChannel {
   return {
     sessionId: row.session_id,
@@ -486,5 +563,18 @@ function rowToReceipt(row: ReceiptRow): StoredReceipt {
     sellerSig: row.seller_sig,
     buyerAckSig: row.buyer_ack_sig,
     createdAt: row.created_at,
+  };
+}
+
+function rowToServiceTotal(row: ServiceTotalRow): StoredChannelServiceTotal {
+  return {
+    sessionId: row.session_id,
+    serviceId: row.service_id,
+    cumulativeAmount: row.cumulative_amount,
+    cumulativeInputTokens: row.cumulative_input_tokens,
+    cumulativeCachedInputTokens: row.cumulative_cached_input_tokens,
+    cumulativeOutputTokens: row.cumulative_output_tokens,
+    cumulativeRequestCount: row.cumulative_request_count,
+    updatedAt: row.updated_at,
   };
 }

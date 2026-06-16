@@ -62,6 +62,39 @@ export interface SellerProviderConfig {
   services: Record<string, SellerServiceConfig>;
 }
 
+export type DomainVerificationMethod = 'dns-txt' | 'https-well-known';
+
+export interface DomainVerificationConfig {
+  /** Domain name to prove, without scheme, path, or port. */
+  domain: string;
+  /** Accepted proof transports. Omit to let clients try every supported method. */
+  methods?: DomainVerificationMethod[];
+}
+
+export interface GithubVerificationConfig {
+  /** GitHub username to prove. */
+  username: string;
+  /**
+   * Public repository holding `antseed.json` at its root. Defaults to the
+   * profile repository `<username>/<username>` when omitted.
+   */
+  repository?: string;
+}
+
+export interface VerificationConfig {
+  /** Domain ownership claims. */
+  domains?: DomainVerificationConfig[];
+  /** GitHub account ownership claims. */
+  github?: GithubVerificationConfig[];
+}
+
+export interface BuyerVerificationConfig {
+  /** Random sample rate for storing full response-auth evidence, from 0 to 1. */
+  sampleRate?: number;
+  /** Maximum combined encoded request + response bytes per sample. */
+  maxSampleBytes?: number;
+}
+
 /**
  * Seller-specific configuration within the Antseed config.
  */
@@ -88,6 +121,8 @@ export interface SellerCLIConfig {
   agentDir?: string | Record<string, string>;
   /** Publicly reachable seller address override announced in metadata, e.g. "peer.example.com:6882". */
   publicAddress?: string;
+  /** Optional external ownership claims announced in signed peer metadata. */
+  verifications?: VerificationConfig;
   /** Maximum upload body size (bytes) accepted from buyers per request. Default: 64 MiB. */
   maxUploadBodyBytes?: number;
 }
@@ -106,6 +141,8 @@ export interface BuyerCLIConfig {
   peerRefreshIntervalMs: number;
   /** Timeout in ms for each HTTP metadata fetch during peer discovery */
   metadataFetchTimeoutMs: number;
+  /** Buyer-side response-auth evidence sampling settings. */
+  verification?: BuyerVerificationConfig;
 }
 
 /**
@@ -125,6 +162,8 @@ export interface PaymentsCLIConfig {
    * amount. Default: "2000" (~$0.002).
    */
   minSettleDelta?: string;
+  /** Optional seller-side slack for estimate-only reserve preflight checks. Unset disables estimate-only rejection. */
+  reserveEstimateOverdraftUsdc?: string;
   /**
    * Maximum USDC the buyer authorizes per single request in base units — the
    * per-request overdraft window beyond the buyer's independently-verified

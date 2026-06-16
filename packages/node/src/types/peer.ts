@@ -1,5 +1,7 @@
 import type { ServiceApiProtocol } from "./service-api.js";
 import type { PeerMetadata } from "../discovery/peer-metadata.js";
+import type { DomainVerificationResult } from "../discovery/domain-verification.js";
+import type { GithubVerificationResult } from "../discovery/github-verification.js";
 
 /**
  * A PeerId is the EVM address hex (40 lowercase chars = 20 bytes, no 0x prefix).
@@ -43,6 +45,17 @@ export interface ProviderServiceApiProtocolMatrixEntry {
   services: Record<string, ServiceApiProtocol[]>;
 }
 
+export interface PeerVerificationResults {
+  /** True when every announced external claim verified successfully. */
+  verified: boolean;
+  /** Buyer-local time when the latest verification pass completed. */
+  checkedAtMs: number;
+  /** Domain ownership verification results, one per announced domain claim. */
+  domains: DomainVerificationResult[];
+  /** GitHub account ownership verification results, one per announced GitHub claim. */
+  github: GithubVerificationResult[];
+}
+
 /** Information about a known peer. */
 export interface PeerInfo {
   /** Unique peer identifier (EVM address, 40 hex chars). */
@@ -62,6 +75,8 @@ export interface PeerInfo {
   lastReachedAt?: number;
   /** LLM providers this peer is offering (empty if buyer-only). */
   providers: string[];
+  /** Protocol capabilities announced by the peer. */
+  capabilities?: string[];
   /** Seller-reported reputation score (0-100). */
   reputationScore?: number;
   /** Provider/service-aware pricing map announced by seller. */
@@ -92,7 +107,7 @@ export interface PeerInfo {
   onChainStakeUsdcMicros?: number;
   /** Buyer-computed displayed on-chain score (0-100). */
   onChainReputationScore?: number;
-  /** Raw trust: channels × volume × ticket × recency × stake. */
+  /** Raw on-chain trust: credited settled USDC volume. */
   onChainTrustScore?: number;
   /** Sybil-risk heuristic in [0, 1]. */
   onChainSybilRisk?: number;
@@ -115,4 +130,6 @@ export interface PeerInfo {
   onChainStatsFetchedAt?: number;
   /** Full peer metadata, if available (set after metadata resolution). */
   metadata?: PeerMetadata;
+  /** Buyer-computed results for external ownership claims announced in metadata. */
+  verificationResults?: PeerVerificationResults;
 }

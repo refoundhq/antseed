@@ -5,7 +5,7 @@ import { join } from "node:path";
 import type { Identity, IdentityStore } from "./p2p/identity.js";
 import { loadOrCreateIdentity } from "./p2p/identity.js";
 import type { PeerId } from "./types/peer.js";
-import type { PeerInfo, TokenPricingUsdPerMillion } from "./types/peer.js";
+import type { PeerInfo, PeerVerificationResults, TokenPricingUsdPerMillion } from "./types/peer.js";
 import { peerIdToAddress } from "./types/peer.js";
 import type {
   SerializedHttpRequest,
@@ -35,6 +35,9 @@ import {
   type AnnouncerConfig,
   type SellerContractConfig,
 } from "./discovery/announcer.js";
+import type { PeerVerifications } from "./discovery/peer-metadata.js";
+import { verifyPeerMetadataDomains } from "./discovery/domain-verification.js";
+import { verifyPeerMetadataGithub } from "./discovery/github-verification.js";
 import {
   PeerLookup,
   DEFAULT_LOOKUP_CONFIG,
@@ -44,6 +47,9 @@ import {
 import { HttpMetadataResolver } from "./discovery/http-metadata-resolver.js";
 import { ProxyMux } from "./proxy/proxy-mux.js";
 import { PaymentMux } from "./p2p/payment-mux.js";
+import { VerificationMux } from "./verification/verification-mux.js";
+import { VerificationStorage } from "./verification/storage.js";
+import { VerificationSampler } from "./verification/samples.js";
 import { FrameDecoder, encodeFrame } from "./p2p/message-protocol.js";
 import { KeepaliveManager, buildPongPayload } from "./p2p/keepalive.js";
 import { MessageType } from "./types/protocol.js";
@@ -82,6 +88,7 @@ import {
 import {
   buildSybilContext,
   computeOnChainScore,
+  computeOnChainScoreWithRisk,
   computeOnChainSybilRisk,
   computeOnChainTrust,
   type SybilContext,
@@ -134,10 +141,21 @@ export interface NodePaymentsConfig {
   minBudgetPerRequest?: string;
   /** Minimum unsettled delta (base units) required before idle settle submits a tx. Default: "2000" (~$0.002). */
   minSettleDelta?: string;
+  /** Optional seller-side slack for estimate-only reserve preflight checks. Unset disables estimate-only rejection. */
+  reserveEstimateOverdraftUsdc?: string;
   /** Maximum USDC the buyer authorizes per single request (base units). Default: "500000" ($0.50). */
   maxPerRequestUsdc?: string;
   /** Maximum total USDC the buyer will reserve in a single SpendingAuth (base units). Default: "10000000" ($10.00). */
   maxReserveAmountUsdc?: string;
+}
+
+export interface NodeVerificationConfig {
+  /** Random sample rate for storing full buyer request/response evidence. Default: 0.01. */
+  sampleRate?: number;
+  /** Maximum combined encoded request + response bytes per sample. Default: 16 MiB. */
+  maxSampleBytes?: number;
+  /** Optional directory for verification samples. Default: <dataDir>/verification_samples. */
+  samplesDir?: string;
 }
 
 export interface NodeConfig {
@@ -145,11 +163,13 @@ export interface NodeConfig {
   displayName?: string;
   /** Publicly reachable seller address override ("host:port") announced in metadata. */
   publicAddress?: string;
+  /** External ownership claims announced in signed peer metadata. */
+  verifications?: PeerVerifications;
   dataDir?: string;           // Default: ~/.antseed
   dhtPort?: number;           // Default: 6881 for seller, 0 for buyer
   signalingPort?: number;     // Default: 6882 for seller
   bootstrapNodes?: Array<{ host: string; port: number }>;
-  requestTimeoutMs?: number;  // Default: 30000
+  requestTimeoutMs?: number;  // Default: 300000
   /** Timeout in ms for each HTTP metadata fetch during peer discovery. Default: 1500 */
   metadataFetchTimeoutMs?: number;
   /** Maximum buffered body size (bytes) while reconstructing streaming responses. Default: 16 MiB. */
@@ -167,6 +187,8 @@ export interface NodeConfig {
   dhtOperationTimeoutMs?: number;
   /** Optional seller-side payment runtime wiring. */
   payments?: NodePaymentsConfig;
+  /** Optional buyer-side verification storage and sampling settings. */
+  verification?: NodeVerificationConfig;
   /** Pluggable identity storage backend. When set, takes precedence over dataDir for identity loading. */
   identityStore?: IdentityStore;
   /** Optional explicit config.json path for runtime config reloads. */
@@ -207,6 +229,8 @@ const EMPTY_BUYER_USAGE: BuyerUsageTotals = {
   channels: [],
 };
 
+const EXTERNAL_VERIFICATION_RESULT_TTL_MS = 15 * 60_000;
+
 export class AntseedNode extends EventEmitter {
   private _config: NodeConfig;
   private _identity: Identity | null = null;
@@ -230,6 +254,7 @@ export class AntseedNode extends EventEmitter {
   private _sellerAddressResolver: SellerAddressResolver | null = null;
   private _identityClient: IdentityClient | null = null;
   private _paymentMuxes = new Map<PeerId, PaymentMux>();
+  private _verificationMuxes = new Map<PeerId, VerificationMux>();
   /** Seller-side request handler (provider matching, execution, load tracking). */
   private _sellerHandler: SellerRequestHandler | null = null;
   /** Buyer-side payment manager (initialized when buyer has payment config). */
@@ -242,6 +267,10 @@ export class AntseedNode extends EventEmitter {
   private _sellerPaymentManager: SellerPaymentManager | null = null;
   /** Shared channel store for payment persistence. */
   private _channelStore: ChannelStore | null = null;
+  /** Buyer-side response authentication storage. */
+  private _verificationStorage: VerificationStorage | null = null;
+  /** Buyer-side plaintext evidence sampler for verified response auths. */
+  private _verificationSampler: VerificationSampler | null = null;
   /** Periodic timeout checker interval. */
   private _timeoutCheckerInterval: ReturnType<typeof setInterval> | null = null;
   /** Block cursor for CloseRequested event polling. */
@@ -252,6 +281,14 @@ export class AntseedNode extends EventEmitter {
   private _backgroundPeerDiscoveryPromise: Promise<PeerInfo[]> | null = null;
   /** Serializes non-blocking on-chain enrichment for incrementally discovered peers. */
   private _partialPeerEnrichmentChain: Promise<void> = Promise.resolve();
+  /** Serializes non-blocking external claim verification for discovered peers. */
+  private _externalVerificationChain: Promise<void> = Promise.resolve();
+  private _externalVerificationCache = new Map<PeerId, {
+    claimsKey: string;
+    checkedAtMs: number;
+    results: PeerVerificationResults;
+  }>();
+  private _externalVerificationInFlight = new Set<string>();
 
   constructor(config: NodeConfig) {
     super();
@@ -401,6 +438,10 @@ export class AntseedNode extends EventEmitter {
     // Close all proxy muxes
     this._muxes.clear();
     this._paymentMuxes.clear();
+    for (const verificationMux of this._verificationMuxes.values()) {
+      verificationMux.close();
+    }
+    this._verificationMuxes.clear();
     this._decoders.clear();
 
     // Close all connections
@@ -432,6 +473,16 @@ export class AntseedNode extends EventEmitter {
       }
       this._metering = null;
     }
+
+    if (this._verificationStorage) {
+      try {
+        this._verificationStorage.close();
+      } catch {
+        // ignore close errors
+      }
+      this._verificationStorage = null;
+    }
+    this._verificationSampler = null;
 
     if (this._timeoutCheckerInterval) {
       clearInterval(this._timeoutCheckerInterval);
@@ -499,6 +550,8 @@ export class AntseedNode extends EventEmitter {
     }
 
     const filtered = service ? peers.filter((p) => peerOffersService(p, service)) : peers;
+    this._attachCachedExternalVerificationResults(filtered);
+    this._queueExternalVerification(filtered);
 
     // On-chain enrichment runs after the metadata filter so we don't waste
     // RPC calls on peers we'll discard.
@@ -537,7 +590,9 @@ export class AntseedNode extends EventEmitter {
           + `${context.subnet !== undefined ? ` ${context.subnet}/${SUBNET_COUNT - 1}` : ""}`
           + ` emitted ${peers.length} peer(s) from ${context.endpointCount} endpoint(s)`,
         );
+        this._attachCachedExternalVerificationResults(peers);
         this.emit("peers:discovered", peers);
+        this._queueExternalVerification(peers);
         this._queuePartialPeerEnrichment(peers);
       });
       debugLog(`[Node] Background DHT sweep returned ${results.length} result(s)`);
@@ -573,6 +628,125 @@ export class AntseedNode extends EventEmitter {
       this.emit("peers:discovered", enriched);
     }).catch((err) => {
       debugWarn(`[Node] Background DHT partial on-chain enrichment failed: ${err instanceof Error ? err.message : err}`);
+    });
+  }
+
+  private _attachCachedExternalVerificationResults(peers: PeerInfo[]): void {
+    const nowMs = Date.now();
+    for (const peer of peers) {
+      const claimsKey = this._externalVerificationClaimsKey(peer);
+      if (!claimsKey) continue;
+      const cached = this._externalVerificationCache.get(peer.peerId);
+      if (
+        cached
+        && cached.claimsKey === claimsKey
+        && nowMs - cached.checkedAtMs < EXTERNAL_VERIFICATION_RESULT_TTL_MS
+      ) {
+        peer.verificationResults = cached.results;
+      }
+    }
+  }
+
+  private _queueExternalVerification(peers: PeerInfo[]): void {
+    const queued: PeerInfo[] = [];
+    const nowMs = Date.now();
+    for (const peer of peers) {
+      const claimsKey = this._externalVerificationClaimsKey(peer);
+      if (!claimsKey) continue;
+      const cacheKey = `${peer.peerId}:${claimsKey}`;
+      if (this._externalVerificationInFlight.has(cacheKey)) continue;
+      const cached = this._externalVerificationCache.get(peer.peerId);
+      if (
+        cached
+        && cached.claimsKey === claimsKey
+        && nowMs - cached.checkedAtMs < EXTERNAL_VERIFICATION_RESULT_TTL_MS
+      ) {
+        continue;
+      }
+      this._externalVerificationInFlight.add(cacheKey);
+      queued.push({ ...peer });
+    }
+    if (queued.length === 0) return;
+
+    this._externalVerificationChain = this._externalVerificationChain.then(async () => {
+      if (!this._started) return;
+      const verifiedPeers = await this._verifyExternalClaimsForPeers(queued);
+      if (!this._started || verifiedPeers.length === 0) return;
+      debugLog(`[Node] External verification emitted ${verifiedPeers.length} peer update(s)`);
+      this.emit("peers:discovered", verifiedPeers);
+    }).catch((err) => {
+      debugWarn(`[Node] External verification failed: ${err instanceof Error ? err.message : err}`);
+    }).finally(() => {
+      for (const peer of queued) {
+        const claimsKey = this._externalVerificationClaimsKey(peer);
+        if (claimsKey) {
+          this._externalVerificationInFlight.delete(`${peer.peerId}:${claimsKey}`);
+        }
+      }
+    });
+  }
+
+  private async _verifyExternalClaimsForPeers(peers: PeerInfo[]): Promise<PeerInfo[]> {
+    const queue = peers.slice();
+    const verifiedPeers: PeerInfo[] = [];
+    const EXTERNAL_VERIFICATION_CONCURRENCY = 2;
+    const workers = Array.from({ length: Math.min(EXTERNAL_VERIFICATION_CONCURRENCY, queue.length) }, async () => {
+      for (;;) {
+        const peer = queue.shift();
+        if (!peer) return;
+        const verified = await this._verifyExternalClaimsForPeer(peer);
+        if (verified) {
+          verifiedPeers.push(verified);
+        }
+      }
+    });
+    await Promise.all(workers);
+    return verifiedPeers;
+  }
+
+  private async _verifyExternalClaimsForPeer(peer: PeerInfo): Promise<PeerInfo | null> {
+    const metadata = peer.metadata;
+    const claimsKey = this._externalVerificationClaimsKey(peer);
+    if (!metadata || !claimsKey) return null;
+
+    try {
+      const [domains, github] = await Promise.all([
+        verifyPeerMetadataDomains(metadata),
+        verifyPeerMetadataGithub(metadata),
+      ]);
+      const checkedAtMs = Date.now();
+      const allResults = [...domains, ...github];
+      const results: PeerVerificationResults = {
+        verified: allResults.length > 0 && allResults.every((result) => result.verified),
+        checkedAtMs,
+        domains,
+        github,
+      };
+      this._externalVerificationCache.set(peer.peerId, {
+        claimsKey,
+        checkedAtMs,
+        results,
+      });
+      const verifiedPeer: PeerInfo = { ...peer, verificationResults: results };
+      const risk = typeof verifiedPeer.onChainSybilRisk === 'number'
+        ? verifiedPeer.onChainSybilRisk
+        : 0;
+      verifiedPeer.onChainReputationScore = computeOnChainScoreWithRisk(verifiedPeer, risk) ?? verifiedPeer.onChainReputationScore;
+      return verifiedPeer;
+    } catch (err) {
+      debugWarn(`[Node] External verification failed for ${peer.peerId.slice(0, 12)}...: ${err instanceof Error ? err.message : err}`);
+      return null;
+    }
+  }
+
+  private _externalVerificationClaimsKey(peer: PeerInfo): string | null {
+    const verifications = peer.metadata?.verifications;
+    const domainCount = verifications?.domains?.length ?? 0;
+    const githubCount = verifications?.github?.length ?? 0;
+    if (domainCount + githubCount === 0) return null;
+    return JSON.stringify({
+      domains: verifications?.domains ?? [],
+      github: verifications?.github ?? [],
     });
   }
 
@@ -618,6 +792,8 @@ export class AntseedNode extends EventEmitter {
       r.metadata.timestamp > acc.metadata.timestamp ? r : acc,
     );
     const peer = this._lookupResultToPeerInfo(best);
+    this._attachCachedExternalVerificationResults([peer]);
+    this._queueExternalVerification([peer]);
     await this._enrichPeersWithOnChainStats([peer]);
     return peer;
   }
@@ -969,6 +1145,7 @@ export class AntseedNode extends EventEmitter {
       }
       const proxyMux = this._muxes.get(peerId);
       const paymentMux = this._paymentMuxes.get(peerId);
+      const verificationMux = this._verificationMuxes.get(peerId);
       for (const frame of frames) {
         // Keepalive: respond to Ping, dispatch Pong to manager
         if (frame.type === MessageType.Ping) {
@@ -989,6 +1166,11 @@ export class AntseedNode extends EventEmitter {
           paymentMux.handleFrame(frame).catch((err) => {
             const message = err instanceof Error ? err.message : String(err);
             debugWarn(`[Node] Failed to handle payment frame from ${peerId.slice(0, 12)}...: ${message}`);
+          });
+        } else if (verificationMux && VerificationMux.isVerificationMessage(frame.type)) {
+          verificationMux.handleFrame(frame).catch((err) => {
+            const message = err instanceof Error ? err.message : String(err);
+            debugWarn(`[Node] Failed to handle verification frame from ${peerId.slice(0, 12)}...: ${message}`);
           });
         } else if (proxyMux) {
           proxyMux.handleFrame(frame).catch((err) => {
@@ -1015,6 +1197,8 @@ export class AntseedNode extends EventEmitter {
         this._muxes.get(peerId)?.abortPendingUploads();
         this._muxes.delete(peerId);
         this._paymentMuxes.delete(peerId);
+        this._verificationMuxes.get(peerId)?.close();
+        this._verificationMuxes.delete(peerId);
         this._decoders.delete(peerId);
         // Clean up buyer-side payment state on disconnect
         this._buyerNegotiator?.onPeerDisconnect(peerId);
@@ -1158,6 +1342,7 @@ export class AntseedNode extends EventEmitter {
         })),
         ...(this._config.displayName ? { displayName: this._config.displayName } : {}),
         ...(this._config.publicAddress ? { publicAddress: this._config.publicAddress } : {}),
+        ...(this._config.verifications ? { verifications: this._config.verifications } : {}),
         region: "unknown",
         pricing: new Map(
           this._providers.map((p) => [
@@ -1188,12 +1373,16 @@ export class AntseedNode extends EventEmitter {
 
     // Create seller request handler
     this._sellerHandler = new SellerRequestHandler({
+      identity,
       providers: this._providers,
       sellerPaymentManager: this._sellerPaymentManager,
       sessionTracker: this._sessionTracker,
       channelsClient: this._channelsClient,
       announcer: this._announcer,
       maxUploadBodyBytes: this._config.maxUploadBodyBytes,
+      ...(this._config.payments?.reserveEstimateOverdraftUsdc != null
+        ? { reserveEstimateOverdraftUsdc: BigInt(this._config.payments.reserveEstimateOverdraftUsdc) }
+        : {}),
       emit: (event, ...args) => this.emit(event, ...args),
     });
 
@@ -1211,6 +1400,7 @@ export class AntseedNode extends EventEmitter {
     debugLog(`[Node] Starting buyer — DHT port=${dhtPort}`);
 
     const dataDir = this._config.dataDir ?? join(homedir(), ".antseed");
+    this._initializeVerificationStorage(dataDir);
     await this._initializePayments(dataDir);
 
     // Start DHT with ephemeral port
@@ -1294,9 +1484,13 @@ export class AntseedNode extends EventEmitter {
         maxStreamDurationMs: this._config.maxStreamDurationMs,
       },
       {
+        localPeerId: identity.peerId,
         negotiator: this._buyerNegotiator,
+        verificationStorage: this._verificationStorage,
+        verificationSampler: this._verificationSampler,
         getConnection: (peer) => this._getOrCreateConnection(peer),
         getMux: (peerId, conn) => this._getOrCreateMux(peerId, conn),
+        getVerificationMux: (peerId, conn) => this._getOrCreateVerificationMux(peerId, conn),
         registerPaymentMux: (peerId, pmux) => this._paymentMuxes.set(peerId, pmux),
       },
     );
@@ -1310,6 +1504,7 @@ export class AntseedNode extends EventEmitter {
 
     // Create PaymentMux alongside ProxyMux (seller-side)
     const paymentMux = new PaymentMux(conn);
+    const verificationMux = new VerificationMux(conn);
     if (this._sellerPaymentManager) {
       const spm = this._sellerPaymentManager;
       paymentMux.onSpendingAuth((payload) => {
@@ -1330,8 +1525,9 @@ export class AntseedNode extends EventEmitter {
       });
     }
     this._paymentMuxes.set(buyerPeerId, paymentMux);
+    this._verificationMuxes.set(buyerPeerId, verificationMux);
 
-    const { mux } = this._sellerHandler!.handleConnection(conn, buyerPeerId, paymentMux);
+    const { mux } = this._sellerHandler!.handleConnection(conn, buyerPeerId, paymentMux, verificationMux);
 
     this._muxes.set(buyerPeerId, mux);
     this._wireConnection(conn, buyerPeerId);
@@ -1480,6 +1676,23 @@ export class AntseedNode extends EventEmitter {
     });
   }
 
+  private _initializeVerificationStorage(dataDir: string): void {
+    if (this._verificationStorage) return;
+    try {
+      this._verificationStorage = new VerificationStorage(join(dataDir, "verification.db"));
+      this._verificationSampler = new VerificationSampler(
+        this._config.verification?.samplesDir ?? join(dataDir, "verification_samples"),
+        {
+          sampleRate: this._config.verification?.sampleRate,
+          maxSampleBytes: this._config.verification?.maxSampleBytes,
+        },
+      );
+      debugLog("[Node] Verification storage initialized");
+    } catch (err) {
+      debugWarn(`[Node] Verification storage unavailable: ${err instanceof Error ? err.message : err}`);
+    }
+  }
+
   private async _getOrCreateConnection(peer: PeerInfo): Promise<PeerConnection> {
     if (!this._connectionManager || !this._identity) {
       throw new Error("Node not started");
@@ -1576,6 +1789,17 @@ export class AntseedNode extends EventEmitter {
     return mux;
   }
 
+  private _getOrCreateVerificationMux(peerId: PeerId, conn: PeerConnection): VerificationMux {
+    const existing = this._verificationMuxes.get(peerId);
+    if (existing) {
+      return existing;
+    }
+
+    const mux = new VerificationMux(conn);
+    this._verificationMuxes.set(peerId, mux);
+    return mux;
+  }
+
   private _resolvePublicAddress(result: LookupResult): string {
     const metadataPublicAddress = result.metadata.publicAddress?.trim();
     if (metadataPublicAddress && parsePublicAddress(metadataPublicAddress) !== null) {
@@ -1662,6 +1886,9 @@ export class AntseedNode extends EventEmitter {
       lastSeen: result.metadata.resolvedAtMs ?? Date.now(),
       metadata: result.metadata,
       providers,
+      ...(result.metadata.capabilities && result.metadata.capabilities.length > 0
+        ? { capabilities: [...result.metadata.capabilities] }
+        : {}),
       publicAddress: this._resolvePublicAddress(result),
       ...(hasProviderPricing ? { providerPricing: providerPricingEntries } : {}),
       ...(hasProviderServiceCategories ? { providerServiceCategories: providerServiceCategoryEntries } : {}),

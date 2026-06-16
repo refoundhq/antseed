@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomBytes } from 'node:crypto';
-import { AbiCoder, Wallet } from 'ethers';
+import { AbiCoder, id, Wallet } from 'ethers';
 import { BuyerPaymentManager, type BuyerPaymentConfig } from '../src/payments/buyer-payment-manager.js';
 import { ChannelStore } from '../src/payments/channel-store.js';
 import type { PaymentMux } from '../src/p2p/payment-mux.js';
@@ -31,6 +31,32 @@ function decodeMetadataTokens(metadata: string): { inputTokens: bigint; outputTo
   const coder = AbiCoder.defaultAbiCoder();
   const [, inputTokens, outputTokens] = coder.decode(['uint256', 'uint256', 'uint256', 'uint256'], metadata);
   return { inputTokens, outputTokens };
+}
+
+function decodeMetadataServices(metadata: string): Array<{
+  serviceId: string;
+  cumulativeAmount: bigint;
+  cumulativeInputTokens: bigint;
+  cumulativeCachedInputTokens: bigint;
+  cumulativeOutputTokens: bigint;
+  cumulativeRequestCount: bigint;
+}> {
+  const coder = AbiCoder.defaultAbiCoder();
+  const [, , , , services] = coder.decode([
+    'uint256',
+    'uint256',
+    'uint256',
+    'uint256',
+    'tuple(bytes32 serviceId,uint256 cumulativeAmount,uint256 cumulativeInputTokens,uint256 cumulativeCachedInputTokens,uint256 cumulativeOutputTokens,uint256 cumulativeRequestCount)[]',
+  ], metadata);
+  return [...services].map((service) => ({
+    serviceId: service.serviceId as string,
+    cumulativeAmount: service.cumulativeAmount as bigint,
+    cumulativeInputTokens: service.cumulativeInputTokens as bigint,
+    cumulativeCachedInputTokens: service.cumulativeCachedInputTokens as bigint,
+    cumulativeOutputTokens: service.cumulativeOutputTokens as bigint,
+    cumulativeRequestCount: service.cumulativeRequestCount as bigint,
+  }));
 }
 
 function createMockPaymentMux(): PaymentMux & {
@@ -133,8 +159,8 @@ describe('BuyerPaymentManager', () => {
     expect(sent.metadata).toBeTypeOf('string');
     expect(sent.metadata).not.toBe('');
     expect((sent.metadata as string).startsWith('0x')).toBe(true);
-    // Should be ABI-encoded (version,inputTokens,outputTokens,requestCount) = 4 * 32 bytes + 0x prefix
-    expect((sent.metadata as string).length).toBe(2 + 4 * 64);
+    // Should preserve the first four ABI fields and append an empty dynamic services array.
+    expect((sent.metadata as string).length).toBe(2 + 6 * 64);
   });
 
   it('authorizeSpending rejects if minBudgetPerRequest exceeds maxPerRequestUsdc', async () => {
@@ -468,6 +494,133 @@ describe('BuyerPaymentManager', () => {
     expect(BigInt(payload.cumulativeAmount)).toBe(2340n);
   });
 
+  it('signPerRequestAuth appends cumulative per-service metadata', async () => {
+    const sellerPeerId = fakePeerId('seller-service-meta');
+    await manager.authorizeSpending(sellerPeerId, mux, 10_000n, TEST_PRICING);
+
+    await manager.signPerRequestAuth(
+      sellerPeerId,
+      {
+        inputBytes: SAMPLE_INPUT,
+        outputBytes: SAMPLE_OUTPUT,
+        sellerClaimedCost: 100n,
+        reportedInputTokens: 1000n,
+        reportedCachedInputTokens: 200n,
+        reportedOutputTokens: 50n,
+        service: 'gpt-5',
+      },
+    );
+
+    await manager.signPerRequestAuth(
+      sellerPeerId,
+      {
+        inputBytes: SAMPLE_INPUT,
+        outputBytes: SAMPLE_OUTPUT,
+        sellerClaimedCost: 150n,
+        reportedInputTokens: 500n,
+        reportedCachedInputTokens: 100n,
+        reportedOutputTokens: 25n,
+        service: 'gpt-5',
+      },
+    );
+
+    const { payload } = await manager.signPerRequestAuth(
+      sellerPeerId,
+      {
+        inputBytes: SAMPLE_INPUT,
+        outputBytes: SAMPLE_OUTPUT,
+        sellerClaimedCost: 250n,
+        reportedInputTokens: 2000n,
+        reportedCachedInputTokens: 300n,
+        reportedOutputTokens: 75n,
+        service: 'claude-opus',
+      },
+    );
+
+    // The legacy first-four-field decode still works with the appended services array.
+    const meta = decodeMetadataTokens(payload.metadata);
+    expect(meta.inputTokens).toBe(3500n);
+    expect(meta.outputTokens).toBe(150n);
+
+    const services = decodeMetadataServices(payload.metadata);
+    expect(services).toHaveLength(2);
+    expect(services).toContainEqual({
+      serviceId: id('gpt-5'),
+      cumulativeAmount: 250n,
+      cumulativeInputTokens: 1500n,
+      cumulativeCachedInputTokens: 300n,
+      cumulativeOutputTokens: 75n,
+      cumulativeRequestCount: 2n,
+    });
+    expect(services).toContainEqual({
+      serviceId: id('claude-opus'),
+      cumulativeAmount: 250n,
+      cumulativeInputTokens: 2000n,
+      cumulativeCachedInputTokens: 300n,
+      cumulativeOutputTokens: 75n,
+      cumulativeRequestCount: 1n,
+    });
+
+    const channel = store.getActiveChannelByPeer(sellerPeerId, 'buyer');
+    expect(channel).not.toBeNull();
+    const storedServices = store.getServiceTotals(channel!.sessionId);
+    expect(storedServices).toHaveLength(2);
+    expect(storedServices).toContainEqual(expect.objectContaining({
+      serviceId: id('gpt-5'),
+      cumulativeAmount: '250',
+      cumulativeInputTokens: '1500',
+      cumulativeCachedInputTokens: '300',
+      cumulativeOutputTokens: '75',
+      cumulativeRequestCount: '2',
+    }));
+  });
+
+  it('signPerRequestAuth hydrates cumulative service metadata after restart', async () => {
+    const sellerPeerId = fakePeerId('seller-service-restart');
+    await manager.authorizeSpending(sellerPeerId, mux, 10_000n, TEST_PRICING);
+
+    await manager.signPerRequestAuth(
+      sellerPeerId,
+      {
+        inputBytes: SAMPLE_INPUT,
+        outputBytes: SAMPLE_OUTPUT,
+        sellerClaimedCost: 100n,
+        reportedInputTokens: 1000n,
+        reportedCachedInputTokens: 200n,
+        reportedOutputTokens: 50n,
+        service: 'gpt-5',
+      },
+    );
+
+    store.close();
+    store = new ChannelStore(tempDir);
+    manager = new BuyerPaymentManager(identity, makeConfig(tempDir), store);
+    manager.setSigner(identity.wallet);
+
+    const { payload } = await manager.signPerRequestAuth(
+      sellerPeerId,
+      {
+        inputBytes: SAMPLE_INPUT,
+        outputBytes: SAMPLE_OUTPUT,
+        sellerClaimedCost: 150n,
+        reportedInputTokens: 500n,
+        reportedCachedInputTokens: 100n,
+        reportedOutputTokens: 25n,
+        service: 'gpt-5',
+      },
+    );
+
+    const [service] = decodeMetadataServices(payload.metadata);
+    expect(service).toEqual({
+      serviceId: id('gpt-5'),
+      cumulativeAmount: 250n,
+      cumulativeInputTokens: 1500n,
+      cumulativeCachedInputTokens: 300n,
+      cumulativeOutputTokens: 75n,
+      cumulativeRequestCount: 2n,
+    });
+  });
+
   it('signPerRequestAuth throws if no active session', async () => {
     await expect(
       manager.signPerRequestAuth('nonexistent-peer', { inputBytes: new Uint8Array(0), outputBytes: new Uint8Array(0) }),
@@ -492,6 +645,84 @@ describe('BuyerPaymentManager', () => {
     expect(mux.sentSpendingAuths.length).toBe(1);
     const sent = mux.sentSpendingAuths[0] as Record<string, unknown>;
     expect(sent.cumulativeAmount).toBe('50000');
+  });
+
+  it('handleNeedAuth does not attribute unsigned headroom to service amount without reported cost', async () => {
+    const sellerPeerId = fakePeerId('seller-needauth-headroom');
+    const channelId = await manager.authorizeSpending(sellerPeerId, mux, 10_000n, TEST_PRICING);
+    manager.trackRequestService('req-headroom', 'gpt-5');
+    mux.sentSpendingAuths.length = 0;
+
+    await manager.handleNeedAuth(sellerPeerId, {
+      channelId,
+      requestId: 'req-headroom',
+      requiredCumulativeAmount: '50000',
+      currentAcceptedCumulative: '0',
+      deposit: '1000000',
+      inputTokens: '1000',
+      cachedInputTokens: '200',
+      outputTokens: '100',
+    }, mux);
+
+    expect(mux.sentSpendingAuths.length).toBe(1);
+    const sent = mux.sentSpendingAuths[0] as Record<string, string>;
+    expect(sent.cumulativeAmount).toBe('50000');
+
+    const services = decodeMetadataServices(sent.metadata);
+    expect(services).toEqual([{
+      serviceId: id('gpt-5'),
+      cumulativeAmount: 0n,
+      cumulativeInputTokens: 1000n,
+      cumulativeCachedInputTokens: 200n,
+      cumulativeOutputTokens: 100n,
+      cumulativeRequestCount: 1n,
+    }]);
+  });
+
+  it('handleNeedAuth does not double-count service totals for a request already counted by signPerRequestAuth', async () => {
+    const sellerPeerId = fakePeerId('seller-service-dedup');
+    const channelId = await manager.authorizeSpending(sellerPeerId, mux, 10_000n, TEST_PRICING);
+    manager.trackRequestService('req-dedup', 'gpt-5');
+
+    await manager.signPerRequestAuth(
+      sellerPeerId,
+      {
+        inputBytes: SAMPLE_INPUT,
+        outputBytes: SAMPLE_OUTPUT,
+        sellerClaimedCost: 100n,
+        reportedInputTokens: 1000n,
+        reportedCachedInputTokens: 200n,
+        reportedOutputTokens: 50n,
+        service: 'gpt-5',
+        requestId: 'req-dedup',
+      },
+    );
+
+    // Seller demands more headroom for the same request — must not re-count it.
+    mux.sentSpendingAuths.length = 0;
+    await manager.handleNeedAuth(sellerPeerId, {
+      channelId,
+      requestId: 'req-dedup',
+      requiredCumulativeAmount: '50000',
+      currentAcceptedCumulative: '0',
+      deposit: '1000000',
+      lastRequestCost: '100',
+      inputTokens: '1000',
+      cachedInputTokens: '200',
+      outputTokens: '50',
+    }, mux);
+
+    expect(mux.sentSpendingAuths.length).toBe(1);
+    const sent = mux.sentSpendingAuths[0] as Record<string, string>;
+    const services = decodeMetadataServices(sent.metadata);
+    expect(services).toEqual([{
+      serviceId: id('gpt-5'),
+      cumulativeAmount: 100n,
+      cumulativeInputTokens: 1000n,
+      cumulativeCachedInputTokens: 200n,
+      cumulativeOutputTokens: 50n,
+      cumulativeRequestCount: 1n,
+    }]);
   });
 
   it('handleNeedAuth caps at reserve ceiling', async () => {

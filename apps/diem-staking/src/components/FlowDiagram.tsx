@@ -47,8 +47,8 @@ export function FlowDiagram() {
             <stop offset="100%" stopColor="#06090e" />
           </radialGradient>
           <linearGradient id="ants-coin-edge" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#6affba" />
-            <stop offset="100%" stopColor="#0f7d4d" />
+            <stop offset="0%" stopColor="#ffcf74" />
+            <stop offset="100%" stopColor="#c8792a" />
           </linearGradient>
           <filter id="coin-glow">
             <feGaussianBlur stdDeviation="1.5" result="blur" />
@@ -58,7 +58,7 @@ export function FlowDiagram() {
             </feMerge>
           </filter>
           <marker
-            id="arrow-green"
+            id="arrow-clay"
             viewBox="0 0 10 10"
             refX="8"
             refY="5"
@@ -66,7 +66,7 @@ export function FlowDiagram() {
             markerHeight="5"
             orient="auto"
           >
-            <path d="M 0 0 L 10 5 L 0 10 Z" fill="#1FD87A" />
+            <path d="M 0 0 L 10 5 L 0 10 Z" fill="#e8a33d" />
           </marker>
 
           {/* Reusable coin shapes — centred on (0,0) so animateMotion places the centre on the path */}
@@ -95,10 +95,10 @@ export function FlowDiagram() {
 
         {/* Forward arrows: Pool → Inference → User */}
         <g>
-          <line x1="260" y1="145" x2="418" y2="145" stroke="#1FD87A" strokeWidth="2.5" strokeDasharray="8 6" markerEnd="url(#arrow-green)">
+          <line x1="260" y1="145" x2="418" y2="145" stroke="#e8a33d" strokeWidth="2.5" strokeDasharray="8 6" markerEnd="url(#arrow-clay)">
             <animate attributeName="stroke-dashoffset" from="0" to="-28" dur="1s" repeatCount="indefinite" />
           </line>
-          <line x1="680" y1="145" x2="838" y2="145" stroke="#1FD87A" strokeWidth="2.5" strokeDasharray="8 6" markerEnd="url(#arrow-green)">
+          <line x1="680" y1="145" x2="838" y2="145" stroke="#e8a33d" strokeWidth="2.5" strokeDasharray="8 6" markerEnd="url(#arrow-clay)">
             <animate attributeName="stroke-dashoffset" from="0" to="-28" dur="1s" repeatCount="indefinite" />
           </line>
         </g>
@@ -112,24 +112,24 @@ export function FlowDiagram() {
           const values = [0, 0, 1, 1, 0, 0].join(';');
           return (
             <g key={`think-${i}`} opacity="0">
-              <rect x="840" y="40" width="220" height="34" rx="17" fill="#0a0e14" stroke="#1FD87A" strokeWidth="1.5" />
-              <circle cx="858" cy="57" r="3" fill="#1FD87A">
+              <rect x="840" y="40" width="220" height="34" rx="17" fill="var(--flow-node-dark)" stroke="var(--green)" strokeWidth="1.5" />
+              <circle cx="858" cy="57" r="3" fill="var(--green)">
                 <animate attributeName="opacity" values="0.3;1;0.3" dur="1.2s" repeatCount="indefinite" />
               </circle>
-              <circle cx="868" cy="57" r="3" fill="#1FD87A">
+              <circle cx="868" cy="57" r="3" fill="var(--green)">
                 <animate attributeName="opacity" values="0.3;1;0.3" dur="1.2s" repeatCount="indefinite" begin="0.2s" />
               </circle>
-              <circle cx="878" cy="57" r="3" fill="#1FD87A">
+              <circle cx="878" cy="57" r="3" fill="var(--green)">
                 <animate attributeName="opacity" values="0.3;1;0.3" dur="1.2s" repeatCount="indefinite" begin="0.4s" />
               </circle>
-              <text x="955" y="61" textAnchor="middle" fontFamily="'JetBrains Mono', monospace" fontSize="12" fontWeight={600} fill="#fff">
+              <text x="955" y="61" textAnchor="middle" fontFamily="'Share Tech Mono', monospace" fontSize="12" fontWeight={600} fill="var(--flow-inference-text)">
                 thinking · {name}
               </text>
               <animate attributeName="opacity" values={values} keyTimes={keyTimes} dur={`${modelCycleDur}s`} repeatCount="indefinite" />
             </g>
           );
         })}
-        <polygon points="944,74 956,74 950,82" fill="#0a0e14" stroke="#1FD87A" strokeWidth="1.5" />
+        <polygon points="944,74 956,74 950,82" fill="var(--flow-node-dark)" stroke="var(--green)" strokeWidth="1.5" />
 
         <path
           id="return-path"
@@ -144,32 +144,32 @@ export function FlowDiagram() {
 
         {/* Node 1: $DIEM Pool */}
         <g>
-          <rect x="40" y="90" width="220" height="110" rx="16" fill="rgba(31,216,122,0.08)" stroke="#1FD87A" strokeWidth="2" />
+          <rect x="40" y="90" width="220" height="110" rx="16" fill="rgba(232,163,61,0.11)" stroke="#e8a33d" strokeWidth="2" />
           <g transform="translate(72 142)"><use href="#diem-coin-svg" /></g>
-          <text x="105" y="135" fontFamily="'Space Grotesk', system-ui, sans-serif" fontSize="18" fontWeight={700} fill="#1a1a1a">$DIEM</text>
-          <text x="105" y="156" fontFamily="'Space Grotesk', system-ui, sans-serif" fontSize="15" fontWeight={600} fill="#1a1a1a">Capacity</text>
-          <text x="105" y="180" fontFamily="'JetBrains Mono', monospace" fontSize="10" fill="#6b7280" letterSpacing="0.6">participants lock</text>
-          <text x="55" y="108" fontFamily="'JetBrains Mono', monospace" fontSize="9" fontWeight={700} fill="#16a863" opacity="0.8" letterSpacing="1">01</text>
+          <text x="105" y="135" fontFamily="'Oxanium', system-ui, sans-serif" fontSize="18" fontWeight={700} fill="var(--flow-econ-text)">$DIEM</text>
+          <text x="105" y="156" fontFamily="'Oxanium', system-ui, sans-serif" fontSize="15" fontWeight={600} fill="var(--flow-econ-text)">Capacity</text>
+          <text x="105" y="180" fontFamily="'Share Tech Mono', monospace" fontSize="10" fill="var(--flow-econ-muted)" letterSpacing="0.6">participants lock</text>
+          <text x="55" y="108" fontFamily="'Share Tech Mono', monospace" fontSize="9" fontWeight={700} fill="#e8a33d" opacity="0.9" letterSpacing="1">01</text>
         </g>
 
         {/* Node 2: Providing Inference (clickable) */}
         <a href={ANTSEED_PRICING_URL} target="_blank" rel="noopener noreferrer">
           <g className="flow-node-inference-g">
-            <rect x="420" y="90" width="260" height="110" rx="16" fill="#0a0e14" stroke="#1FD87A" strokeWidth="2" />
-            <text x="550" y="128" textAnchor="middle" fontFamily="'Space Grotesk', system-ui, sans-serif" fontSize="17" fontWeight={700} fill="#fff">Providing Inference</text>
-            <text x="550" y="150" textAnchor="middle" fontFamily="'Space Grotesk', system-ui, sans-serif" fontSize="14" fontWeight={500} fill="rgba(255,255,255,0.7)">on AntSeed</text>
-            <text x="550" y="178" textAnchor="middle" fontFamily="'JetBrains Mono', monospace" fontSize="10" fontWeight={700} fill="#1FD87A" letterSpacing="1.4">◆ SEE PRICING →</text>
-            <text x="434" y="108" fontFamily="'JetBrains Mono', monospace" fontSize="9" fontWeight={700} fill="#1FD87A" opacity="0.9" letterSpacing="1">02</text>
+            <rect x="420" y="90" width="260" height="110" rx="16" fill="var(--flow-node-dark)" stroke="var(--green)" strokeWidth="2" />
+            <text x="550" y="128" textAnchor="middle" fontFamily="'Oxanium', system-ui, sans-serif" fontSize="17" fontWeight={700} fill="var(--flow-inference-text)">Providing Inference</text>
+            <text x="550" y="150" textAnchor="middle" fontFamily="'Oxanium', system-ui, sans-serif" fontSize="14" fontWeight={500} fill="var(--flow-inference-muted)">on AntSeed</text>
+            <text x="550" y="178" textAnchor="middle" fontFamily="'Share Tech Mono', monospace" fontSize="10" fontWeight={700} fill="var(--green)" letterSpacing="1.4">◆ SEE PRICING →</text>
+            <text x="434" y="108" fontFamily="'Share Tech Mono', monospace" fontSize="9" fontWeight={700} fill="var(--green)" opacity="0.9" letterSpacing="1">02</text>
           </g>
         </a>
 
         {/* Node 3: User Consumes */}
         <g>
-          <rect x="840" y="90" width="220" height="110" rx="16" fill="rgba(31,216,122,0.08)" stroke="#1FD87A" strokeWidth="2" />
-          <text x="950" y="132" textAnchor="middle" fontFamily="'Space Grotesk', system-ui, sans-serif" fontSize="18" fontWeight={700} fill="#1a1a1a">User Consumes</text>
-          <text x="950" y="156" textAnchor="middle" fontFamily="'Space Grotesk', system-ui, sans-serif" fontSize="13" fontWeight={500} fill="#1a1a1a">inference</text>
-          <text x="950" y="180" textAnchor="middle" fontFamily="'JetBrains Mono', monospace" fontSize="10" fill="#6b7280" letterSpacing="0.6">pays USDC per request</text>
-          <text x="855" y="108" fontFamily="'JetBrains Mono', monospace" fontSize="9" fontWeight={700} fill="#16a863" opacity="0.8" letterSpacing="1">03</text>
+          <rect x="840" y="90" width="220" height="110" rx="16" fill="rgba(232,163,61,0.1)" stroke="#e8a33d" strokeWidth="2" />
+          <text x="950" y="132" textAnchor="middle" fontFamily="'Oxanium', system-ui, sans-serif" fontSize="18" fontWeight={700} fill="var(--flow-econ-text)">User Consumes</text>
+          <text x="950" y="156" textAnchor="middle" fontFamily="'Oxanium', system-ui, sans-serif" fontSize="13" fontWeight={500} fill="var(--flow-econ-text)">inference</text>
+          <text x="950" y="180" textAnchor="middle" fontFamily="'Share Tech Mono', monospace" fontSize="10" fill="var(--flow-econ-muted)" letterSpacing="0.6">pays USDC per request</text>
+          <text x="855" y="108" fontFamily="'Share Tech Mono', monospace" fontSize="9" fontWeight={700} fill="#e8a33d" opacity="0.9" letterSpacing="1">03</text>
         </g>
 
         {usdcCoins.map((c, i) => (
@@ -183,17 +183,17 @@ export function FlowDiagram() {
           </g>
         ))}
 
-        <line x1="160" y1="290" x2="160" y2="210" stroke="#1FD87A" strokeWidth="1" strokeDasharray="3 5" opacity="0.35" />
+        <line x1="160" y1="290" x2="160" y2="210" stroke="var(--green)" strokeWidth="1" strokeDasharray="3 5" opacity="0.42" />
 
         {/* $ANTS emission box below the Pool */}
         <g>
-          <rect x="65" y="300" width="190" height="70" rx="14" fill="rgba(31,216,122,0.12)" stroke="#1FD87A" strokeWidth="1.5" strokeDasharray="5 3" />
+          <rect x="65" y="300" width="190" height="70" rx="14" fill="rgba(var(--green-rgb),0.12)" stroke="var(--green)" strokeWidth="1.5" strokeDasharray="5 3" />
           <g transform="translate(71 311)">
             <AntsTokenCoinInline />
           </g>
-          <text x="130" y="332" fontFamily="'Space Grotesk', system-ui, sans-serif" fontSize="14" fontWeight={700} fill="#1a1a1a">$ANTS</text>
-          <text x="130" y="349" fontFamily="'JetBrains Mono', monospace" fontSize="9" fill="#6b7280" letterSpacing="0.4">emissions ·</text>
-          <text x="130" y="362" fontFamily="'JetBrains Mono', monospace" fontSize="9" fill="#6b7280" letterSpacing="0.4">every epoch</text>
+          <text x="130" y="332" fontFamily="'Oxanium', system-ui, sans-serif" fontSize="14" fontWeight={700} fill="var(--flow-ants-text)">$ANTS</text>
+          <text x="130" y="349" fontFamily="'Share Tech Mono', monospace" fontSize="9" fill="var(--flow-ants-muted)" letterSpacing="0.4">emissions ·</text>
+          <text x="130" y="362" fontFamily="'Share Tech Mono', monospace" fontSize="9" fill="var(--flow-ants-muted)" letterSpacing="0.4">every epoch</text>
         </g>
 
         {/* Ants marching UP from the $ANTS box into the Pool */}

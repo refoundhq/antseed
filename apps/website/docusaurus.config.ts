@@ -33,10 +33,6 @@ const config: Config = {
   baseUrl: '/',
   onBrokenLinks: 'throw',
 
-  scripts: [{src: '/force-light.js', async: false}],
-
-
-
   markdown: {
     hooks: {
       onBrokenMarkdownLinks: 'warn',
@@ -50,7 +46,7 @@ const config: Config = {
 
   stylesheets: [
     {
-      href: 'https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Space+Grotesk:wght@300;400;500;600;700;800&display=swap',
+      href: 'https://fonts.googleapis.com/css2?family=Oxanium:wght@300;400;500;600;700;800&family=Share+Tech+Mono&display=swap',
       type: 'text/css',
     },
   ],
@@ -164,18 +160,25 @@ const config: Config = {
       {name: 'twitter:description', content: 'Permissionless peer-to-peer AI inference. Pay per request in USDC. Anonymous by design, with independent providers and no central account.'},
     ],
     colorMode: {
-      defaultMode: 'light',
-      disableSwitch: true,
+      defaultMode: 'dark',
+      disableSwitch: false,
       respectPrefersColorScheme: false,
     },
     navbar: {
       title: 'ANTSEED',
       logo: {
         alt: 'AntSeed',
-        src: 'logo.svg',
+        src: 'logo-light.svg',
+        srcDark: 'logo.svg',
       },
       items: [
-        {to: '/network', label: 'Pricing', position: 'right'},
+        {
+          href: 'https://antseedstats.com/network',
+          label: 'Pricing',
+          position: 'right',
+          target: '_blank',
+          rel: 'noopener noreferrer',
+        },
         {to: '/integrations', label: 'Integrations', position: 'right'},
         {to: '/providers', label: 'Providers', position: 'right'},
         {
@@ -185,9 +188,14 @@ const config: Config = {
           position: 'right',
           className: 'header-docs-link',
         },
-        {to: '/ants-token', label: '$ANTS', position: 'right'},
-        {href: 'https://diem.antseed.com', label: '$DIEM', position: 'right', className: 'header-diem-link'},
         {to: '/blog', label: 'Blog', position: 'right'},
+        {to: '/ants-token', label: '$ANTS', position: 'right', className: 'header-ants-link'},
+        {
+          href: process.env.NODE_ENV === 'development' ? 'http://localhost:5180/' : 'https://diem.antseed.com',
+          label: '$DIEM',
+          position: 'right',
+          className: 'header-diem-link',
+        },
         {
           href: 'https://github.com/antseed',
           'aria-label': 'GitHub',
@@ -206,6 +214,7 @@ const config: Config = {
           position: 'right',
           className: 'header-telegram-link',
         },
+
       ],
     },
     prism: {

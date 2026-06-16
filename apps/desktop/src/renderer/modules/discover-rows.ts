@@ -1,4 +1,5 @@
 import type { ChatServiceOptionEntry, DiscoverRow } from '../core/state';
+import type { DiscoverVerificationLink } from '../core/state';
 
 const CHAT_SERVICE_SELECTION_SEPARATOR = '\u0001';
 
@@ -8,6 +9,22 @@ function toNullableBigintString(v: unknown): string | null {
   if (typeof v === 'number' && Number.isFinite(v)) return Math.trunc(v).toString();
   if (typeof v === 'bigint') return v.toString();
   return null;
+}
+
+function normalizeVerificationLink(raw: unknown): DiscoverVerificationLink | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const r = raw as Record<string, unknown>;
+  const kind = r.kind === 'domain' || r.kind === 'github' ? r.kind : null;
+  const label = typeof r.label === 'string' ? r.label.trim() : '';
+  const href = typeof r.href === 'string' ? r.href.trim() : '';
+  if (!kind || !label || !href) return null;
+  try {
+    const url = new URL(href);
+    if (url.protocol !== 'https:') return null;
+    return { kind, label, href: url.toString() };
+  } catch {
+    return null;
+  }
 }
 
 export function normalizeDiscoverRow(raw: unknown): DiscoverRow | null {
@@ -26,6 +43,11 @@ export function normalizeDiscoverRow(raw: unknown): DiscoverRow | null {
     peerId,
     peerEvmAddress: String(r.peerEvmAddress ?? ''),
     sellerContract: typeof r.sellerContract === 'string' && r.sellerContract.length > 0 ? r.sellerContract : null,
+    verificationLinks: Array.isArray(r.verificationLinks)
+      ? r.verificationLinks
+        .map(normalizeVerificationLink)
+        .filter((link): link is DiscoverVerificationLink => link !== null)
+      : [],
     peerDisplayName: typeof r.peerDisplayName === 'string' ? r.peerDisplayName : null,
     peerLabel: String(r.peerLabel ?? ''),
     inputUsdPerMillion: typeof r.inputUsdPerMillion === 'number' ? r.inputUsdPerMillion : null,

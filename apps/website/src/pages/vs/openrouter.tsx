@@ -120,7 +120,7 @@ export default function VsOpenRouter(): JSX.Element {
           </p>
           <div className={styles.ctaRow}>
             <Link to="/docs/install" className={styles.ctaPrimary}>Install AntSeed</Link>
-            <Link to="/network" className={styles.ctaSecondary}>Live pricing →</Link>
+            <a href="https://antseedstats.com/network" target="_blank" rel="noopener noreferrer" className={styles.ctaSecondary}>Live pricing →</a>
           </div>
         </div>
 
@@ -161,7 +161,7 @@ export default function VsOpenRouter(): JSX.Element {
 
         <section className={styles.footerCta}>
           <h2>Get started in one command.</h2>
-          <pre className={styles.code}>curl -fsSL https://antseed.com/install.sh | sh</pre>
+          <pre className={styles.code}>npm install -g @antseed/cli</pre>
           <p className={styles.footerNote}>
             Open source. Runs locally. <Link to="/docs/install">Full install guide →</Link>
           </p>

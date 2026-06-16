@@ -16,6 +16,7 @@ import { SellerAuthorizationError } from '../discovery/seller-address-resolver.j
 import { parseResponseUsage } from '../utils/response-usage.js';
 import { computeCostUsdc, type ServicePricing } from './pricing.js';
 import { formatUsdc } from './usdc-utils.js';
+import { parseJsonObject, tryParseJsonObject } from '../utils/json-codec.js';
 
 export interface BuyerNegotiatorConfig {}
 
@@ -40,15 +41,11 @@ interface LastResponseCost {
   outputContent: Uint8Array;
   latencyMs: number;
   service?: string;
+  requestId?: string;
 }
 
 function parsePaymentRequiredBody(body: Uint8Array): Record<string, unknown> | null {
-  try {
-    const parsed = JSON.parse(new TextDecoder().decode(body)) as Record<string, unknown>;
-    return parsed && typeof parsed === 'object' ? parsed : null;
-  } catch {
-    return null;
-  }
+  return tryParseJsonObject(body);
 }
 
 function safeBigInt(value: string): bigint | null {
@@ -210,10 +207,11 @@ export class BuyerPaymentNegotiator {
     const reportedOutputTokens = lastCost?.outputTokens;
     const reportedCachedInputTokens = lastCost?.cachedInputTokens;
     const service = lastCost?.service;
+    const requestId = lastCost?.requestId;
     try {
       const { payload, topUpNeeded } = await this._bpm.signPerRequestAuth(
         peer.peerId,
-        { inputBytes, outputBytes, sellerClaimedCost, reportedInputTokens, reportedOutputTokens, reportedCachedInputTokens, service },
+        { inputBytes, outputBytes, sellerClaimedCost, reportedInputTokens, reportedOutputTokens, reportedCachedInputTokens, service, requestId },
       );
       pmux.sendSpendingAuth(payload);
       // Release held content to free memory — no longer needed after signing
@@ -442,7 +440,7 @@ export class BuyerPaymentNegotiator {
     }
   }
 
-  estimateCostFromResponse(peer: PeerInfo, response: SerializedHttpResponse, service?: string): void {
+  estimateCostFromResponse(peer: PeerInfo, response: SerializedHttpResponse, service?: string, requestId?: string): void {
     // Prefer session pricing (from PaymentRequired negotiation, includes service-specific rates)
     // over peer-level defaults which may be different from the actual service pricing.
     const sessionPricing = this._bpm.getSessionPricing(peer.peerId, service);
@@ -471,6 +469,7 @@ export class BuyerPaymentNegotiator {
       outputContent: response.body,
       latencyMs: 0,
       service,
+      requestId,
     });
 
     debugLog(
@@ -517,7 +516,7 @@ export class BuyerPaymentNegotiator {
     };
     try {
       const decoded = Buffer.from(headerValue, 'base64').toString('utf-8');
-      payload = JSON.parse(decoded);
+      payload = parseJsonObject(decoded) as typeof payload;
     } catch {
       throw new Error('Invalid x-antseed-spending-auth header: failed to decode');
     }

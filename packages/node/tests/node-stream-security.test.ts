@@ -15,6 +15,12 @@ interface StreamingHarness {
   emitChunk: (chunk: SerializedHttpResponseChunk) => void;
 }
 
+function createNoopVerificationMux(): { waitForResponseAuth: ReturnType<typeof vi.fn> } {
+  return {
+    waitForResponseAuth: vi.fn(() => Promise.reject(new Error('response auth unavailable in test'))),
+  };
+}
+
 function createHandler(config: BuyerRequestHandlerConfig): { handler: BuyerRequestHandler; harness: StreamingHarness } {
   let onResponse: ((response: SerializedHttpResponse, metadata: { streamingStart: boolean }) => void) | null = null;
   let onChunk: ((chunk: SerializedHttpResponseChunk) => void) | null = null;
@@ -39,9 +45,13 @@ function createHandler(config: BuyerRequestHandlerConfig): { handler: BuyerReque
   };
 
   const handler = new BuyerRequestHandler(config, {
+    localPeerId: 'a'.repeat(40),
     negotiator: null,
+    verificationStorage: null,
+    verificationSampler: null,
     getConnection: vi.fn(async () => ({ state: 'open' })) as any,
     getMux: vi.fn(() => mux) as any,
+    getVerificationMux: vi.fn(() => createNoopVerificationMux()) as any,
     registerPaymentMux: vi.fn(),
   });
 

@@ -6,7 +6,7 @@
 // antseed.com.
 
 import { ConnectButton } from '@rainbow-me/rainbowkit';
-import type { MouseEvent, ReactNode } from 'react';
+import { useEffect, useState, type MouseEvent, type ReactNode } from 'react';
 import { useAccount } from 'wagmi';
 
 import { fmtPct, fmtPrice } from '../lib/format';
@@ -17,6 +17,13 @@ const DIEM_TERMS_URL = 'https://diem.antseed.com/terms-of-service.html';
 const ZOKYO_URL = 'https://www.zokyo.io';
 const AUDIT_REPORT_URL = '/antseed-zokyo-audit-report-may-14-2026.pdf';
 const CONTRACT_URL_BASE = 'https://basescan.org/address';
+type ThemeMode = 'dark' | 'light';
+const THEME_STORAGE_KEY = 'diem-theme-mode';
+
+function readInitialTheme(): ThemeMode {
+  const current = document.documentElement.getAttribute('data-theme');
+  return current === 'light' ? 'light' : 'dark';
+}
 
 // OS glyph for the primary download button. Matches the mark used in
 // apps/website/src/lib/DesktopDownloadIcon.tsx so the two properties feel
@@ -62,6 +69,39 @@ export function AlphaStrip({ maxStakeDisplay }: { maxStakeDisplay: string | null
   );
 }
 
+function ThemeToggle() {
+  const [theme, setTheme] = useState<ThemeMode>(readInitialTheme);
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+    document.documentElement.style.colorScheme = theme;
+  }, [theme]);
+
+  const toggle = () => {
+    const next: ThemeMode = theme === 'dark' ? 'light' : 'dark';
+    setTheme(next);
+    document.documentElement.setAttribute('data-theme', next);
+    document.documentElement.style.colorScheme = next;
+    try {
+      localStorage.setItem(THEME_STORAGE_KEY, next);
+    } catch {
+      // Ignore storage failures; the in-page toggle still works.
+    }
+  };
+
+  return (
+    <button
+      className="theme-toggle"
+      type="button"
+      onClick={toggle}
+      aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+      title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+    >
+      <span aria-hidden="true">{theme === 'dark' ? '☾' : '☀'}</span>
+    </button>
+  );
+}
+
 export function Nav() {
   const { isConnected } = useAccount();
   const scrollTo = (id: string) => (e: MouseEvent) => {
@@ -86,6 +126,7 @@ export function Nav() {
       <div className="nav-links">
         <a href="#how" onClick={scrollTo('how')} className="link hide-sm">How it works</a>
         <a href="#faq" onClick={scrollTo('faq')} className="link hide-sm">FAQ</a>
+        <ThemeToggle />
         <div className={`nav-connect-wrap ${isConnected ? 'is-connected' : 'is-disconnected'}`}>
           <ConnectButton
             accountStatus={{ smallScreen: 'avatar', largeScreen: 'full' }}

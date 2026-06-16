@@ -20,7 +20,9 @@ import { IAntseedStats } from "../interfaces/IAntseedStats.sol";
  *
  *         The buyer signs a single EIP-712 SpendingAuth on every request:
  *         - cumulativeAmount: total USDC authorized so far
- *         - metadataHash: hash of (inputTokens, outputTokens, latencyMs, requestCount)
+ *         - metadataHash: hash of buyer metadata bytes. Current metadata starts
+ *           with (version, cumulativeInputTokens, cumulativeOutputTokens,
+ *           cumulativeRequestCount) and may append off-chain indexer fields.
  *
  *         Money flow:
  *           reserve:  Deposits locks buyer funds

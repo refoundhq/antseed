@@ -43,12 +43,13 @@ export {
   SET_OPERATOR_TYPES,
   computeMetadataHash,
   encodeMetadata,
+  getServiceMetadataId,
   METADATA_VERSION,
   computeChannelId,
   ZERO_METADATA,
   ZERO_METADATA_HASH,
 } from './evm/signatures.js';
-export type { SpendingAuthMessage, ReserveAuthMessage, SetOperatorMessage, SpendingAuthMetadata } from './evm/signatures.js';
+export type { SpendingAuthMessage, ReserveAuthMessage, SetOperatorMessage, SpendingAuthMetadata, SpendingAuthServiceMetadata } from './evm/signatures.js';
 
 // ANTS token
 export { ANTSTokenClient } from './evm/ants-token-client.js';

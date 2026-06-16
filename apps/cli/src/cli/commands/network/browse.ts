@@ -12,6 +12,10 @@ import {
   type PeerInfo,
 } from '@antseed/node';
 import { parseBootstrapList, toBootstrapConfig } from '@antseed/node/discovery';
+import {
+  collectPeerVerificationLinks,
+  type PeerVerificationLink,
+} from '@antseed/node/discovery';
 import { parsePersistedPeers } from '../../../proxy/buyer-proxy.js';
 import { buildPaymentsConfig } from './chain-config-helper.js';
 import { resolveEffectiveBuyerConfig } from '../../../config/effective.js';
@@ -138,15 +142,37 @@ function collectFreeServiceNames(peer: PeerInfo): string[] {
   return Array.from(names).sort((a, b) => a.localeCompare(b));
 }
 
+function normalizeServiceSearchTerm(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '')
+    .replace(/([a-z])m(?=\d)/g, '$1');
+}
+
+function serviceSearchTerms(value: string): string[] {
+  const raw = value.trim().toLowerCase();
+  const normalized = normalizeServiceSearchTerm(value);
+  return Array.from(new Set([raw, normalized].filter((term) => term.length > 0)));
+}
+
+function serviceNameMatchesFilter(name: string, filter: string): boolean {
+  const haystackTerms = serviceSearchTerms(name);
+  const needleTerms = serviceSearchTerms(filter);
+  if (needleTerms.length === 0) return true;
+  return needleTerms.some((needle) => haystackTerms.some((haystack) => haystack.includes(needle)));
+}
+
 /**
  * Check whether the peer matches a `--service` filter. Matches on provider
- * name OR any announced service name (case-insensitive).
+ * name OR any announced service name using a forgiving normalized substring
+ * comparison so common spelling variants like `minimax-3`, `minimax m3`, and
+ * `MiniMax M3` match the canonical `minimax-m3` service id.
  */
-function peerMatchesServiceFilter(peer: PeerInfo, filter: string): boolean {
-  const needle = filter.trim().toLowerCase();
-  if (needle.length === 0) return true;
-  if (peer.providers.some((p) => p.toLowerCase() === needle)) return true;
-  return collectServiceNames(peer).some((name) => name.toLowerCase() === needle);
+export function peerMatchesServiceFilter(peer: PeerInfo, filter: string): boolean {
+  if (filter.trim().length === 0) return true;
+  if (peer.providers.some((p) => serviceNameMatchesFilter(p, filter))) return true;
+  return collectServiceNames(peer).some((name) => serviceNameMatchesFilter(name, filter));
 }
 
 /**
@@ -223,6 +249,7 @@ type PeerInfoJson = Omit<PeerInfo, 'onChainReputationScore'> & {
   onChainReputationScore: number | null;
   sellerAddress: string;
   isDelegatedSeller: boolean;
+  verificationLinks: PeerVerificationLink[];
 };
 
 function normalizeAddressHex(raw: string | undefined): string | null {
@@ -245,6 +272,19 @@ function delegatedSellerAddress(peer: PeerInfo): string | null {
   return sellerAddress !== peerAddress ? sellerAddress : null;
 }
 
+function formatVerificationLinks(peer: PeerInfo): string {
+  const links = collectPeerVerificationLinks(peer);
+  if (links.length === 0) return chalk.dim('—');
+  return links
+    .map((link) => {
+      if (link.kind === 'domain') {
+        return `${chalk.cyan('🌐')} ${chalk.underline(link.href)}`;
+      }
+      return `${chalk.magenta('GH')} ${chalk.underline(link.href)}`;
+    })
+    .join('\n');
+}
+
 function peerWithReputationScore(peer: PeerInfo): PeerInfoJson {
   const sellerAddress = sellerAddressForPeer(peer);
   return {
@@ -252,6 +292,7 @@ function peerWithReputationScore(peer: PeerInfo): PeerInfoJson {
     onChainReputationScore: effectiveOnChainReputationScore(peer),
     sellerAddress,
     isDelegatedSeller: delegatedSellerAddress(peer) !== null,
+    verificationLinks: collectPeerVerificationLinks(peer),
   };
 }
 
@@ -377,6 +418,7 @@ function renderCompactTable(peers: PeerInfo[], hasChainData: boolean): void {
   // Show the "Seller" column when at least one peer has a sellerContract
   // that differs from its peerId (i.e. a delegated/proxy seller).
   const anyDelegatedSeller = peers.some((peer) => delegatedSellerAddress(peer) !== null);
+  const anyVerificationLinks = peers.some((peer) => collectPeerVerificationLinks(peer).length > 0);
 
   const head: string[] = [
     chalk.bold('Peer'),
@@ -384,6 +426,9 @@ function renderCompactTable(peers: PeerInfo[], hasChainData: boolean): void {
   if (anyDelegatedSeller) head.push(chalk.bold('On-chain seller'));
   head.push(
     chalk.bold('Name'),
+  );
+  if (anyVerificationLinks) head.push(chalk.bold('Verified'));
+  head.push(
     chalk.bold('Providers'),
     chalk.bold('Services'),
     chalk.bold('Min In $/1M'),
@@ -436,6 +481,9 @@ function renderCompactTable(peers: PeerInfo[], hasChainData: boolean): void {
     if (anyDelegatedSeller) row.push(sellerCell);
     row.push(
       peer.displayName ?? chalk.dim('—'),
+    );
+    if (anyVerificationLinks) row.push(formatVerificationLinks(peer));
+    row.push(
       peer.providers.join(', ') || chalk.dim('—'),
       servicesCell,
       formatUsdPerMillion(pricing.input),
@@ -467,6 +515,9 @@ function renderCompactTable(peers: PeerInfo[], hasChainData: boolean): void {
   }
   if (anyDelegatedSeller) {
     console.log(chalk.dim(`  ${chalk.yellow('On-chain seller')} is the contract address that receives payments — differs from Peer when a delegated/proxy operator runs the node.`));
+  }
+  if (anyVerificationLinks) {
+    console.log(chalk.dim(`  Verified shows buyer-verified external claims: ${chalk.cyan('🌐')} domain, ${chalk.magenta('GH')} GitHub.`));
   }
   console.log('');
 }
@@ -504,6 +555,7 @@ function renderExpandedTable(peers: PeerInfo[], requestedTags: Set<string>): voi
   // Show the "Seller" column when at least one peer has a sellerContract
   // that differs from its peerId (i.e. a delegated/proxy seller).
   const anyDelegatedSeller = peers.some((peer) => delegatedSellerAddress(peer) !== null);
+  const anyVerificationLinks = peers.some((peer) => collectPeerVerificationLinks(peer).length > 0);
 
   for (const peer of peers) {
     const pricing = peer.providerPricing;
@@ -572,6 +624,7 @@ function renderExpandedTable(peers: PeerInfo[], requestedTags: Set<string>): voi
     chalk.bold('Peer'),
   ];
   if (anyDelegatedSeller) head.push(chalk.bold('On-chain seller'));
+  if (anyVerificationLinks) head.push(chalk.bold('Verified'));
   head.push(
     chalk.bold('Provider'),
     chalk.bold('Service'),
@@ -593,6 +646,10 @@ function renderExpandedTable(peers: PeerInfo[], requestedTags: Set<string>): voi
       const rowPeer = peers.find((p) => p.peerId === r.peerId);
       const sellerAddress = rowPeer ? delegatedSellerAddress(rowPeer) : null;
       row.push(sellerAddress !== null ? chalk.yellow(sellerAddress) : chalk.dim('—'));
+    }
+    if (anyVerificationLinks) {
+      const rowPeer = peers.find((p) => p.peerId === r.peerId);
+      row.push(rowPeer ? formatVerificationLinks(rowPeer) : chalk.dim('—'));
     }
     row.push(
       r.provider,
@@ -622,6 +679,9 @@ function renderExpandedTable(peers: PeerInfo[], requestedTags: Set<string>): voi
   }
   if (anyDelegatedSeller) {
     console.log(chalk.dim(`  ${chalk.yellow('On-chain seller')} is the contract address that receives payments — differs from Peer when a delegated/proxy operator runs the node.`));
+  }
+  if (anyVerificationLinks) {
+    console.log(chalk.dim(`  Verified shows buyer-verified external claims: ${chalk.cyan('🌐')} domain, ${chalk.magenta('GH')} GitHub.`));
   }
   console.log('');
 }

@@ -1,10 +1,12 @@
 import { useState } from 'react';
 import { useAccount } from 'wagmi';
-import { ConnectButton } from '@rainbow-me/rainbowkit';
 import type { BalanceData, PaymentConfig } from '../types';
 import { useAuthorizedWallet } from '../context/AuthorizedWalletContext';
 import { useWithdraw } from '../hooks/useWithdraw';
 import { usePaymentNetwork } from '../payment-network';
+import { formatUsd, truncateAddress } from '../utils/format';
+import { Button } from './Button';
+import { ConnectWalletAction } from './ConnectWalletAction';
 import './WithdrawView.scss';
 
 interface WithdrawViewProps {
@@ -15,13 +17,10 @@ interface WithdrawViewProps {
 
 const ZERO_ADDR = '0x0000000000000000000000000000000000000000';
 
-function shortAddr(addr: string): string {
-  return `${addr.slice(0, 6)}...${addr.slice(-4)}`;
-}
-
 export function WithdrawView({ config, balance, onAction }: WithdrawViewProps) {
   const [amount, setAmount] = useState('');
   const { address, isConnected } = useAccount();
+  const walletConnected = isConnected && Boolean(address);
   const { requireAuthorization, operator } = useAuthorizedWallet();
   const { targetChainName, walletChainId, wrongChain, isSwitchingChain } = usePaymentNetwork(config);
 
@@ -43,7 +42,7 @@ export function WithdrawView({ config, balance, onAction }: WithdrawViewProps) {
 
   const operatorSet = !!operator && operator !== ZERO_ADDR;
   const wrongWallet = Boolean(
-    isConnected && operatorSet && address && address.toLowerCase() !== operator!.toLowerCase(),
+    walletConnected && operatorSet && address && address.toLowerCase() !== operator!.toLowerCase(),
   );
 
   const amountNum = amount ? parseFloat(amount) : 0;
@@ -77,32 +76,31 @@ export function WithdrawView({ config, balance, onAction }: WithdrawViewProps) {
             <div className="deposit-success-title">Withdrawal confirmed!</div>
             {txHash && <div className="deposit-success-hash">{txHash.slice(0, 18)}...</div>}
             <div className="deposit-success-note">
-              Funds were sent to {address ? shortAddr(address) : 'your authorized wallet'}.
+              Funds were sent to {address ? truncateAddress(address, 6, 4, '...') : 'your authorized wallet'}.
             </div>
-            <button className="btn-outline" onClick={resetForm} style={{ marginTop: 12 }}>
+            <Button fullWidth variant="outline" onClick={resetForm} style={{ marginTop: 12 }}>
               Withdraw more
-            </button>
+            </Button>
           </div>
-        ) : !isConnected ? (
+        ) : !walletConnected ? (
           <div className="deposit-connect-wrapper">
-            <ConnectButton.Custom>
-              {({ openConnectModal, mounted }) => (
-                <button
-                  type="button"
-                  className="btn-primary"
+            <ConnectWalletAction>
+              {({ openConnectModal, ready, connected }) => connected ? null : (
+                <Button
+                  fullWidth
                   onClick={openConnectModal}
-                  disabled={!mounted}
+                  disabled={!ready}
                 >
                   Connect Wallet
-                </button>
+                </Button>
               )}
-            </ConnectButton.Custom>
+            </ConnectWalletAction>
           </div>
         ) : (
           <>
             <div className="deposit-connected">
               <div className="deposit-connected-dot" />
-              <span className="deposit-connected-addr">{address ? shortAddr(address) : ''}</span>
+              <span className="deposit-connected-addr">{address ? truncateAddress(address, 6, 4, '...') : ''}</span>
               <span className="deposit-connected-label">Connected</span>
             </div>
 
@@ -114,7 +112,7 @@ export function WithdrawView({ config, balance, onAction }: WithdrawViewProps) {
 
             {wrongWallet && operator && (
               <div className="status-msg status-error" role="alert" style={{ marginBottom: 16 }}>
-                This account is authorized to <strong>{shortAddr(operator)}</strong>. Connect that wallet
+                This account is authorized to <strong>{truncateAddress(operator, 6, 4, '...')}</strong>. Connect that wallet
                 to withdraw, or transfer authorization to the connected wallet first.
               </div>
             )}
@@ -132,11 +130,11 @@ export function WithdrawView({ config, balance, onAction }: WithdrawViewProps) {
                   onChange={(e) => setAmount(e.target.value)}
                   disabled={running}
                 />
-                <span className="hint">Available: ${availableAmount.toFixed(2)} USDC</span>
+                <span className="hint">Available: ${formatUsd(availableAmount)} USDC</span>
               </div>
 
-              <button
-                className="btn-primary"
+              <Button
+                fullWidth
                 onClick={handleClick}
                 disabled={
                   running ||
@@ -151,7 +149,7 @@ export function WithdrawView({ config, balance, onAction }: WithdrawViewProps) {
                  wrongChain ? `Switch to ${targetChainName}` :
                  running ? 'Processing...' :
                  'Withdraw'}
-              </button>
+              </Button>
             </div>
           </>
         )}

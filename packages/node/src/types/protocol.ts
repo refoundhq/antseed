@@ -27,9 +27,14 @@ export enum MessageType {
   RatingQuery = 0x71,
   RatingResponse = 0x72,
 
+  // Verification / attestation protocol (0x80-0x8F)
+  VerificationResponseAuth = 0x80,
+
   Disconnect = 0xF0,
   Error = 0xFF,
 }
+
+export const CONNECTION_CAPABILITY_RESPONSE_AUTH_V1 = 'verification.response-auth.v1' as const;
 
 export interface FramedMessage {
   type: MessageType;
@@ -50,7 +55,7 @@ export interface SpendingAuthPayload {
   channelId: string;
   cumulativeAmount: string;
   metadataHash: string;         // bytes32 hex
-  metadata: string;             // hex-encoded abi.encode(version, inputTokens, outputTokens, requestCount)
+  metadata: string;             // hex-encoded abi.encode(version, inputTokens, outputTokens, requestCount, services[])
   spendingAuthSig: string;      // EIP-712 SpendingAuth signature (covers amount + metadata)
   // Only for initial reserve
   reserveSalt?: string;
@@ -136,4 +141,26 @@ export interface NeedAuthPayload {
   freshInputTokens?: string;
   /** Service/model name for service-specific pricing validation. */
   service?: string;
+}
+
+// ─── Bilateral Verification Messages ───────────────────────────
+
+/**
+ * Seller-signed commitment for one completed inference response.
+ * Carries hashes and context only; plaintext request/response bytes stay local.
+ */
+export interface ResponseAuthPayload {
+  version: 1;
+  requestId: string;
+  channelId?: string;
+  buyerPeerId: string;
+  sellerPeerId: string;
+  advertisedService: string;
+  provider: string;
+  statusCode: number;
+  requestHash: string;
+  responseHash: string;
+  responseStartedAt: number;
+  responseCompletedAt: number;
+  signature: string;
 }

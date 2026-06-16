@@ -5,31 +5,19 @@ import {
   type PaymentRequiredPayload,
   type NeedAuthPayload,
 } from '../types/protocol.js';
+import { parseJsonObject, requireStringField } from '../utils/json-codec.js';
 
 const encoder = new TextEncoder();
-const decoder = new TextDecoder();
 
 // --- Validation helpers ---
 
 const MAX_PAYLOAD_SIZE = 65536; // 64KB
 
-function parseJson(data: Uint8Array): Record<string, unknown> {
-  if (data.byteLength > MAX_PAYLOAD_SIZE) {
-    throw new Error(`Payment payload too large: ${data.byteLength} bytes (max ${MAX_PAYLOAD_SIZE})`);
-  }
-  const raw: unknown = JSON.parse(decoder.decode(data));
-  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
-    throw new Error('Expected JSON object');
-  }
-  return raw as Record<string, unknown>;
-}
-
-function requireString(obj: Record<string, unknown>, field: string): string {
-  const val = obj[field];
-  if (typeof val !== 'string' || val.length === 0) {
-    throw new Error(`Missing or invalid string field: ${field}`);
-  }
-  return val;
+function parsePaymentJson(data: Uint8Array): Record<string, unknown> {
+  return parseJsonObject(data, {
+    maxBytes: MAX_PAYLOAD_SIZE,
+    payloadName: 'Payment payload',
+  });
 }
 
 // --- Encoders ---
@@ -53,13 +41,13 @@ export function encodeNeedAuth(payload: NeedAuthPayload): Uint8Array {
 // --- Decoders (with runtime validation) ---
 
 export function decodeSpendingAuth(data: Uint8Array): SpendingAuthPayload {
-  const obj = parseJson(data);
+  const obj = parsePaymentJson(data);
   const result: SpendingAuthPayload = {
-    channelId: requireString(obj, 'channelId'),
-    cumulativeAmount: requireString(obj, 'cumulativeAmount'),
-    metadataHash: requireString(obj, 'metadataHash'),
+    channelId: requireStringField(obj, 'channelId'),
+    cumulativeAmount: requireStringField(obj, 'cumulativeAmount'),
+    metadataHash: requireStringField(obj, 'metadataHash'),
     metadata: typeof obj.metadata === 'string' ? obj.metadata : '',
-    spendingAuthSig: requireString(obj, 'spendingAuthSig'),
+    spendingAuthSig: requireStringField(obj, 'spendingAuthSig'),
   };
   // Optional reserve params (only on initial auth)
   if (typeof obj.reserveSalt === 'string') result.reserveSalt = obj.reserveSalt;
@@ -69,18 +57,18 @@ export function decodeSpendingAuth(data: Uint8Array): SpendingAuthPayload {
 }
 
 export function decodeAuthAck(data: Uint8Array): AuthAckPayload {
-  const obj = parseJson(data);
+  const obj = parsePaymentJson(data);
   return {
-    channelId: requireString(obj, 'channelId'),
+    channelId: requireStringField(obj, 'channelId'),
   };
 }
 
 export function decodePaymentRequired(data: Uint8Array): PaymentRequiredPayload {
-  const obj = parseJson(data);
+  const obj = parsePaymentJson(data);
   const result: PaymentRequiredPayload = {
-    minBudgetPerRequest: requireString(obj, 'minBudgetPerRequest'),
-    suggestedAmount: requireString(obj, 'suggestedAmount'),
-    requestId: requireString(obj, 'requestId'),
+    minBudgetPerRequest: requireStringField(obj, 'minBudgetPerRequest'),
+    suggestedAmount: requireStringField(obj, 'suggestedAmount'),
+    requestId: requireStringField(obj, 'requestId'),
   };
   if (typeof obj.inputUsdPerMillion === 'number') result.inputUsdPerMillion = obj.inputUsdPerMillion;
   if (typeof obj.outputUsdPerMillion === 'number') result.outputUsdPerMillion = obj.outputUsdPerMillion;
@@ -95,12 +83,12 @@ export function decodePaymentRequired(data: Uint8Array): PaymentRequiredPayload 
 }
 
 export function decodeNeedAuth(data: Uint8Array): NeedAuthPayload {
-  const obj = parseJson(data);
+  const obj = parsePaymentJson(data);
   const result: NeedAuthPayload = {
-    channelId: requireString(obj, 'channelId'),
-    requiredCumulativeAmount: requireString(obj, 'requiredCumulativeAmount'),
-    currentAcceptedCumulative: requireString(obj, 'currentAcceptedCumulative'),
-    deposit: requireString(obj, 'deposit'),
+    channelId: requireStringField(obj, 'channelId'),
+    requiredCumulativeAmount: requireStringField(obj, 'requiredCumulativeAmount'),
+    currentAcceptedCumulative: requireStringField(obj, 'currentAcceptedCumulative'),
+    deposit: requireStringField(obj, 'deposit'),
   };
   if (typeof obj.requestId === 'string') result.requestId = obj.requestId;
   if (typeof obj.lastRequestCost === 'string') result.lastRequestCost = obj.lastRequestCost;

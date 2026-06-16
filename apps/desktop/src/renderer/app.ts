@@ -1,3 +1,4 @@
+import '@antseed/ui/styles';
 import { initChatModule } from './modules/chat';
 import { initSettingsModule } from './modules/settings';
 import { initRuntimeModule } from './modules/runtime';
@@ -449,6 +450,8 @@ registerActions({
   handleServiceFocus: chatApi.handleServiceFocus,
   handleServiceBlur: chatApi.handleServiceBlur,
   clearPinnedPeer: chatApi.clearPinnedPeer,
+  setChatPermissionMode: chatApi.setChatPermissionMode,
+  decideToolApproval: chatApi.decideToolApproval,
   rejectPaymentSession: () => {
     uiState.chatPaymentApprovalVisible = false;
     uiState.chatPaymentApprovalPeerId = null;

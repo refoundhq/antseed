@@ -4,6 +4,12 @@ import type { SerializedHttpRequest } from '../src/types/http.js';
 import type { SerializedHttpResponse } from '../src/types/http.js';
 import type { PeerInfo, PeerId } from '../src/types/peer.js';
 
+function createNoopVerificationMux(): { waitForResponseAuth: ReturnType<typeof vi.fn> } {
+  return {
+    waitForResponseAuth: vi.fn(() => Promise.reject(new Error('response auth unavailable in test'))),
+  };
+}
+
 describe('BuyerRequestHandler payment mux wiring', () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -38,6 +44,7 @@ describe('BuyerRequestHandler payment mux wiring', () => {
     const handler = new BuyerRequestHandler(
       {},
       {
+        localPeerId: 'a'.repeat(40) as PeerId,
         negotiator: {
           getOrCreatePaymentMux,
           preparePreRequestAuth: vi.fn(),
@@ -46,11 +53,14 @@ describe('BuyerRequestHandler payment mux wiring', () => {
           parseCostHeaders: vi.fn(),
           recordResponseContent: vi.fn(),
         } as any,
+        verificationStorage: null,
+        verificationSampler: null,
         getConnection: vi.fn(async () => conn) as any,
         getMux: vi.fn(() => ({
           sendProxyRequest,
           cancelProxyRequest: vi.fn(),
         })) as any,
+        getVerificationMux: vi.fn(() => createNoopVerificationMux()) as any,
         registerPaymentMux,
       },
     );
@@ -63,6 +73,7 @@ describe('BuyerRequestHandler payment mux wiring', () => {
       peer,
       expect.objectContaining({ statusCode: 200 }),
       undefined,
+      'req-payment-mux',
     );
     expect(
       getOrCreatePaymentMux.mock.invocationCallOrder[0],
@@ -112,6 +123,7 @@ describe('BuyerRequestHandler payment mux wiring', () => {
     const handler = new BuyerRequestHandler(
       {},
       {
+        localPeerId: 'a'.repeat(40) as PeerId,
         negotiator: {
           getOrCreatePaymentMux: vi.fn().mockReturnValue({}),
           preparePreRequestAuth: vi.fn(),
@@ -120,11 +132,14 @@ describe('BuyerRequestHandler payment mux wiring', () => {
           parseCostHeaders: vi.fn(),
           recordResponseContent: vi.fn(),
         } as any,
+        verificationStorage: null,
+        verificationSampler: null,
         getConnection: vi.fn(async () => conn) as any,
         getMux: vi.fn(() => ({
           sendProxyRequest,
           cancelProxyRequest: vi.fn(),
         })) as any,
+        getVerificationMux: vi.fn(() => createNoopVerificationMux()) as any,
         registerPaymentMux: vi.fn(),
       },
     );
@@ -138,6 +153,7 @@ describe('BuyerRequestHandler payment mux wiring', () => {
       peer,
       expect.objectContaining({ statusCode: 200 }),
       undefined,
+      'req-relock',
     );
   });
 });

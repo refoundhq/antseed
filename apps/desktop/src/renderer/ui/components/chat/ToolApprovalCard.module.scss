@@ -1,0 +1,153 @@
+.approval {
+  width: 100%;
+  margin-bottom: 12px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  color: var(--text-primary);
+  display: grid;
+  gap: 8px;
+  box-shadow: var(--shadow-sm);
+}
+
+.header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.header-text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.kicker {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.title {
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.queue-badge {
+  flex: 0 0 auto;
+  padding: 2px 6px;
+  border: 1px solid rgba(249, 115, 22, 0.22);
+  border-radius: 999px;
+  color: #d97706;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.request-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px 10px;
+  border-radius: 7px;
+  background: var(--bg-secondary);
+}
+
+.tool {
+  flex: 0 0 auto;
+  color: var(--text-secondary);
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.subject {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-primary);
+  background: transparent;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.scope-note {
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.35;
+
+  strong {
+    color: var(--text-secondary);
+    font-weight: 600;
+  }
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 7px;
+}
+
+.primary,
+.secondary,
+.danger {
+  min-height: 28px;
+  padding: 5px 11px;
+  border-radius: 7px;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: opacity 0.15s, background 0.15s, border-color 0.15s;
+
+  &:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px rgba(var(--accent-green-rgb), 0.28);
+  }
+}
+
+.primary {
+  border: none;
+  background: var(--accent-green);
+  color: #fff;
+}
+
+.secondary {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-primary);
+}
+
+.danger {
+  border: 1px solid rgba(239, 68, 68, 0.25);
+  background: transparent;
+  color: #ef4444;
+}
+
+.primary:hover,
+.secondary:hover,
+.danger:hover {
+  opacity: 0.86;
+}
+
+@media (max-width: 720px) {
+  .request-line {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .actions {
+    justify-content: flex-start;
+  }
+}

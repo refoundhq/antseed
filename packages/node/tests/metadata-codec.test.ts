@@ -201,6 +201,71 @@ describe('encodeMetadata / decodeMetadata', () => {
     expect(decoded.sellerContract).toBeUndefined();
   });
 
+  it("round-trips domain verification claims", () => {
+    const original = makeMetadata({
+      verifications: {
+        domains: [
+          { domain: "example.com", methods: ["https-well-known", "dns-txt"] },
+          { domain: "api.example.com" },
+        ],
+      },
+    });
+    const decoded = decodeMetadata(encodeMetadata(original));
+    expect(decoded.verifications).toEqual({
+      domains: [
+        { domain: "api.example.com" },
+        { domain: "example.com", methods: ["dns-txt", "https-well-known"] },
+      ],
+    });
+  });
+
+  it("round-trips github verification claims", () => {
+    const original = makeMetadata({
+      verifications: {
+        github: [
+          { username: "Octocat", repository: "Proofs" },
+          { username: "hubber" },
+        ],
+      },
+    });
+    const decoded = decodeMetadata(encodeMetadata(original));
+    expect(decoded.verifications).toEqual({
+      github: [
+        { username: "hubber" },
+        { username: "octocat", repository: "proofs" },
+      ],
+    });
+  });
+
+  it("round-trips combined domain and github verification claims", () => {
+    const original = makeMetadata({
+      verifications: {
+        domains: [{ domain: "example.com", methods: ["dns-txt"] }],
+        github: [{ username: "octocat" }],
+      },
+    });
+    const decoded = decodeMetadata(encodeMetadata(original));
+    expect(decoded.verifications).toEqual({
+      domains: [{ domain: "example.com", methods: ["dns-txt"] }],
+      github: [{ username: "octocat" }],
+    });
+  });
+
+  it("round-trips v10 metadata with peer capabilities", () => {
+    const meta: PeerMetadata = {
+      peerId: "aa".repeat(20),
+      version: METADATA_VERSION,
+      region: "us-east-1",
+      timestamp: 1_700_000_000_000,
+      providers: [],
+      capabilities: ["verification.response-auth.v1"],
+      signature: "dd".repeat(65),
+    };
+    const bytes = encodeMetadata(meta);
+    const decoded = decodeMetadata(bytes);
+    expect(decoded.capabilities).toEqual(["verification.response-auth.v1"]);
+  });
+
   // v2/v3/v4/v5 roundtrip tests removed — pre-v6 format is rejected by the decoder.
 });
 

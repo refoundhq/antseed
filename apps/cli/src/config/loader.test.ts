@@ -120,6 +120,44 @@ test('loadConfig preserves explicit buyer peerRefreshIntervalMs and metadataFetc
   );
 });
 
+test('loadConfig preserves buyer verification sampling settings', async () => {
+  await withTempConfig(
+    JSON.stringify({
+      buyer: {
+        verification: {
+          sampleRate: 1,
+          maxSampleBytes: 1048576,
+        },
+      },
+    }),
+    async (configPath) => {
+      const config = await loadConfig(configPath);
+      assert.deepEqual(config.buyer.verification, {
+        sampleRate: 1,
+        maxSampleBytes: 1048576,
+      });
+    }
+  );
+});
+
+test('loadConfig rejects invalid buyer verification sampleRate', async () => {
+  await withTempConfig(
+    JSON.stringify({
+      buyer: {
+        verification: {
+          sampleRate: 1.1,
+        },
+      },
+    }),
+    async (configPath) => {
+      await assert.rejects(
+        async () => loadConfig(configPath),
+        /buyer\.verification\.sampleRate/
+      );
+    }
+  );
+});
+
 test('loadConfig rejects invalid buyer peerRefreshIntervalMs', async () => {
   await withTempConfig(
     JSON.stringify({
@@ -272,6 +310,108 @@ test('loadConfig preserves seller publicAddress override', async () => {
     async (configPath) => {
       const config = await loadConfig(configPath);
       assert.equal(config.seller.publicAddress, 'peer.example.com:6882');
+    }
+  );
+});
+
+test('loadConfig preserves seller verifications.domains claims', async () => {
+  await withTempConfig(
+    JSON.stringify({
+      seller: {
+        verifications: {
+          domains: [
+            { domain: 'Example.COM', methods: ['https-well-known', 'dns-txt'] },
+          ],
+        },
+      },
+    }),
+    async (configPath) => {
+      const config = await loadConfig(configPath);
+      assert.deepEqual(config.seller.verifications, {
+        domains: [
+          { domain: 'example.com', methods: ['https-well-known', 'dns-txt'] },
+        ],
+      });
+    }
+  );
+});
+
+test('loadConfig rejects unknown domain verification methods instead of dropping them', async () => {
+  await withTempConfig(
+    JSON.stringify({
+      seller: {
+        verifications: {
+          domains: [
+            { domain: 'example.com', methods: ['dns-text'] },
+          ],
+        },
+      },
+    }),
+    async (configPath) => {
+      await assert.rejects(
+        loadConfig(configPath),
+        /verifications\.domains\[0\]\.methods\[0\]/,
+      );
+    }
+  );
+});
+
+test('loadConfig preserves seller verifications.github claims', async () => {
+  await withTempConfig(
+    JSON.stringify({
+      seller: {
+        verifications: {
+          github: [
+            { username: 'OctoCat' },
+            { username: 'hubber', repository: 'Antseed-Proofs' },
+          ],
+        },
+      },
+    }),
+    async (configPath) => {
+      const config = await loadConfig(configPath);
+      assert.deepEqual(config.seller.verifications, {
+        github: [
+          { username: 'octocat' },
+          { username: 'hubber', repository: 'antseed-proofs' },
+        ],
+      });
+    }
+  );
+});
+
+test('loadConfig rejects invalid github verification usernames', async () => {
+  await withTempConfig(
+    JSON.stringify({
+      seller: {
+        verifications: {
+          github: [
+            { username: '-invalid-' },
+          ],
+        },
+      },
+    }),
+    async (configPath) => {
+      await assert.rejects(
+        loadConfig(configPath),
+        /verifications\.github\[0\]\.username/,
+      );
+    }
+  );
+});
+
+test('loadConfig rejects empty seller verifications', async () => {
+  await withTempConfig(
+    JSON.stringify({
+      seller: {
+        verifications: { domains: [] },
+      },
+    }),
+    async (configPath) => {
+      await assert.rejects(
+        loadConfig(configPath),
+        /verifications\.domains/,
+      );
     }
   );
 });

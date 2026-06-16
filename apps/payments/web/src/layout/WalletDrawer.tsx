@@ -1,12 +1,12 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useAccount, useDisconnect } from 'wagmi';
-import { ConnectButton } from '@rainbow-me/rainbowkit';
 import type { BalanceData, PaymentConfig } from '../types';
 import { useSetOperator, useTransferOperator } from '../hooks/useSetOperator';
 import { useAuthorizedWallet } from '../context/AuthorizedWalletContext';
-import { Button } from '../components/Button';
+import { Button, Drawer, TextField } from '@antseed/ui';
 import { InfoHint } from '../components/InfoHint';
-import { useBodyScrollLock } from '../hooks/useBodyScrollLock';
+import { ConnectWalletAction } from '../components/ConnectWalletAction';
+import { formatUsd, truncateAddress } from '../utils/format';
 
 interface WalletDrawerProps {
   isOpen: boolean;
@@ -19,22 +19,6 @@ interface WalletDrawerProps {
 }
 
 const ZERO_ADDR = '0x0000000000000000000000000000000000000000';
-
-function truncate(addr: string): string {
-  return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
-}
-
-function formatUsd(n: number): string {
-  return n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-}
-
-function CloseIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-      <path d="M4 4L12 12M12 4L4 12" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-    </svg>
-  );
-}
 
 function CopyIcon() {
   return (
@@ -79,6 +63,7 @@ export function WalletDrawer({
   const { address: connectedAddress, isConnected, connector } = useAccount();
   const { disconnect } = useDisconnect();
   const { copied, copy } = useCopyable();
+  const walletConnected = isConnected && Boolean(connectedAddress);
 
   const { operator: onChainOperator, operatorSet, refetch: refetchOperator } = useAuthorizedWallet();
   const operatorLoading = operatorSet === null;
@@ -96,22 +81,12 @@ export function WalletDrawer({
     if (!isOpen) { setShowTransfer(false); setTransferAddr(''); transferOperator.reset(); }
   }, [isOpen]);
 
-  useEffect(() => {
-    if (!isOpen) return;
-    function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') onClose();
-    }
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [isOpen, onClose]);
-
-  useBodyScrollLock(isOpen);
-
   const hasOperator = Boolean(
     onChainOperator && onChainOperator.toLowerCase() !== ZERO_ADDR,
   );
   const operatorMatchesConnected = Boolean(
     hasOperator &&
+      walletConnected &&
       connectedAddress &&
       onChainOperator &&
       onChainOperator.toLowerCase() === connectedAddress.toLowerCase(),
@@ -121,50 +96,22 @@ export function WalletDrawer({
   const reserved = balance ? parseFloat(balance.reserved) : 0;
   const total = balance ? parseFloat(balance.total) : 0;
 
-  function handleDepositMore() {
-    onOpenDeposit();
-  }
-
-  function handleWithdraw() {
-    onOpenWithdraw();
-  }
-
   return (
-    <>
-      <div
-        className={`wallet-drawer-backdrop${isOpen ? ' wallet-drawer-backdrop--open' : ''}`}
-        onClick={onClose}
-        aria-hidden={!isOpen}
-      />
-      <aside
-        className={`wallet-drawer${isOpen ? ' wallet-drawer--open' : ''}`}
-        role="dialog"
-        aria-label="Wallet"
-        aria-hidden={!isOpen}
-      >
-        <header className="wallet-drawer-header">
-          <div className="wallet-drawer-header-titles">
-            <div className="wallet-drawer-eyebrow">Wallet</div>
-            <div className="wallet-drawer-title">Accounts &amp; balances</div>
-          </div>
-          <button
-            type="button"
-            className="wallet-drawer-close"
-            onClick={onClose}
-            aria-label="Close wallet"
-          >
-            <CloseIcon />
-          </button>
-        </header>
-
-        <div className="wallet-drawer-body">
+    <Drawer
+      closeLabel="Close wallet"
+      eyebrow="Wallet"
+      isOpen={isOpen}
+      onClose={onClose}
+      side="right"
+      title="Accounts & balances"
+    >
           {/* ── AntSeed account ───────────────────────────────── */}
-          <section className="wallet-drawer-section">
-            <div className="wallet-drawer-section-label">Your AntSeed account</div>
-            <div className="wallet-drawer-card">
-              <div className="wallet-drawer-card-row">
-                <div className="wallet-drawer-role">
-                  <span className="wallet-drawer-role-dot wallet-drawer-role-dot--signer" />
+          <section className="wallet-panel-section">
+            <div className="wallet-panel-section-label">Your AntSeed account</div>
+            <div className="wallet-panel-card">
+              <div className="wallet-panel-card-row">
+                <div className="wallet-panel-role">
+                  <span className="wallet-panel-role-dot wallet-panel-role-dot--signer" />
                   Signer
                   <InfoHint>
                     <p>
@@ -177,119 +124,118 @@ export function WalletDrawer({
                 </div>
                 <button
                   type="button"
-                  className={`wallet-drawer-addr${copied === 'buyer' ? ' wallet-drawer-addr--copied' : ''}`}
+                  className={`wallet-panel-addr${copied === 'buyer' ? ' wallet-panel-addr--copied' : ''}`}
                   onClick={() => buyerEvmAddress && copy(buyerEvmAddress, 'buyer')}
                   disabled={!buyerEvmAddress}
                   title={buyerEvmAddress ?? ''}
                 >
-                  <span className="wallet-drawer-addr-value">
-                    {buyerEvmAddress ? truncate(buyerEvmAddress) : '—'}
+                  <span className="wallet-panel-addr-value">
+                    {buyerEvmAddress ? truncateAddress(buyerEvmAddress) : '—'}
                   </span>
-                  <span className="wallet-drawer-addr-icon">
+                  <span className="wallet-panel-addr-icon">
                     {copied === 'buyer' ? <CheckIcon /> : <CopyIcon />}
                   </span>
                 </button>
               </div>
             </div>
 
-            <div className="wallet-drawer-balances">
-              <div className="wallet-drawer-balance">
-                <span className="wallet-drawer-balance-label">Available</span>
-                <span className="wallet-drawer-balance-value">${formatUsd(available)}</span>
+            <div className="wallet-panel-balances">
+              <div className="wallet-panel-balance">
+                <span className="wallet-panel-balance-label">Available</span>
+                <span className="wallet-panel-balance-value">${formatUsd(available)}</span>
               </div>
-              <div className="wallet-drawer-balance">
-                <span className="wallet-drawer-balance-label">Reserved</span>
-                <span className="wallet-drawer-balance-value">${formatUsd(reserved)}</span>
+              <div className="wallet-panel-balance">
+                <span className="wallet-panel-balance-label">Reserved</span>
+                <span className="wallet-panel-balance-value">${formatUsd(reserved)}</span>
               </div>
-              <div className="wallet-drawer-balance">
-                <span className="wallet-drawer-balance-label">Total</span>
-                <span className="wallet-drawer-balance-value">${formatUsd(total)}</span>
+              <div className="wallet-panel-balance">
+                <span className="wallet-panel-balance-label">Total</span>
+                <span className="wallet-panel-balance-value">${formatUsd(total)}</span>
               </div>
             </div>
 
-            <div className="wallet-drawer-actions">
-              <Button variant="primary" onClick={handleDepositMore}>
-                Deposit more
+            <div className="wallet-panel-actions">
+              <Button variant="primary" fullWidth onClick={onOpenDeposit}>
+                Deposit
               </Button>
-              <Button variant="outline" onClick={handleWithdraw}>
+              <Button variant="outline" fullWidth onClick={onOpenWithdraw}>
                 Withdraw
               </Button>
             </div>
+
           </section>
 
           {/* ── Your wallet ───────────────────────────────────── */}
-          <section className="wallet-drawer-section">
-            <div className="wallet-drawer-section-label">Your wallet</div>
+          <section className="wallet-panel-section">
+            <div className="wallet-panel-section-label">Your wallet</div>
 
-            {!isConnected ? (
-              <div className="wallet-drawer-card">
-                <div className="wallet-drawer-role">
-                  <span className="wallet-drawer-role-dot wallet-drawer-role-dot--operator" />
-                  Wallet
+            {!walletConnected ? (
+              <div className="wallet-panel-card">
+                <div className="wallet-panel-role">
+                  <span className="wallet-panel-role-dot wallet-panel-role-dot--disconnected" />
+                  Not connected
                 </div>
-                <p className="wallet-drawer-explainer">
+                <p className="wallet-panel-explainer">
                   Connect a wallet to receive withdrawals, claim ANTS rewards, and
                   submit on-chain actions for your account. Deposits from any wallet
                   fund your AntSeed account above.
                 </p>
-                <div className="wallet-drawer-connect-wrap">
-                  <ConnectButton.Custom>
-                    {({ openConnectModal, mounted }) => (
-                      <button
-                        type="button"
-                        className="btn-primary"
+                <div className="wallet-panel-connect-wrap">
+                  <ConnectWalletAction>
+                    {({ openConnectModal, ready, connected }) => connected ? null : (
+                      <Button
                         onClick={openConnectModal}
-                        disabled={!mounted}
+                        disabled={!ready}
                       >
                         Connect wallet
-                      </button>
+                      </Button>
                     )}
-                  </ConnectButton.Custom>
+                  </ConnectWalletAction>
                 </div>
               </div>
             ) : (
-              <div className="wallet-drawer-card">
-                <div className="wallet-drawer-card-row">
-                  <div className="wallet-drawer-role">
-                    <span className="wallet-drawer-role-dot wallet-drawer-role-dot--operator" />
+              <div className="wallet-panel-card">
+                <div className="wallet-panel-card-row">
+                  <div className="wallet-panel-role">
+                    <span className="wallet-panel-role-dot wallet-panel-role-dot--connected" />
                     Connected
                   </div>
                   <button
                     type="button"
-                    className={`wallet-drawer-addr${copied === 'operator' ? ' wallet-drawer-addr--copied' : ''}`}
+                    className={`wallet-panel-addr${copied === 'operator' ? ' wallet-panel-addr--copied' : ''}`}
                     onClick={() => connectedAddress && copy(connectedAddress, 'operator')}
                     title={connectedAddress ?? ''}
                   >
-                    <span className="wallet-drawer-addr-value">
-                      {connectedAddress ? truncate(connectedAddress) : '—'}
+                    <span className="wallet-panel-addr-value">
+                      {connectedAddress ? truncateAddress(connectedAddress) : '—'}
                     </span>
-                    <span className="wallet-drawer-addr-icon">
+                    <span className="wallet-panel-addr-icon">
                       {copied === 'operator' ? <CheckIcon /> : <CopyIcon />}
                     </span>
                   </button>
                 </div>
 
-                <div className="wallet-drawer-meta">
-                  <span className="wallet-drawer-meta-label">Provider</span>
-                  <span className="wallet-drawer-meta-value">{connector?.name ?? 'Unknown'}</span>
+                <div className="wallet-panel-meta">
+                  <span className="wallet-panel-meta-label">Provider</span>
+                  <span className="wallet-panel-meta-value">{connector?.name ?? 'Unknown'}</span>
                 </div>
 
-                <div className="wallet-drawer-operator-status">
+                <div className="wallet-panel-operator-status">
                   {operatorLoading ? (
-                    <span className="wallet-drawer-pill wallet-drawer-pill--muted">
+                    <span className="wallet-panel-pill wallet-panel-pill--muted">
                       Checking authorization…
                     </span>
                   ) : operatorMatchesConnected ? (
                     <>
-                      <span className="wallet-drawer-pill wallet-drawer-pill--ok">
+                      <span className="wallet-panel-pill wallet-panel-pill--ok">
                         <CheckIcon /> Authorized for withdrawals
                       </span>
                     </>
                   ) : hasOperator ? (
-                    <div className="wallet-drawer-warn">
-                      <div className="wallet-drawer-warn-title">Wrong wallet connected</div>
-                      <div className="wallet-drawer-warn-desc">
-                        Switch to <strong>{onChainOperator ? truncate(onChainOperator) : ''}</strong> in
+                    <div className="wallet-panel-warn">
+                      <div className="wallet-panel-warn-title">Wrong wallet connected</div>
+                      <div className="wallet-panel-warn-desc">
+                        Switch to <strong>{onChainOperator ? truncateAddress(onChainOperator) : ''}</strong> in
                         your wallet app to withdraw, claim ANTS, and close channels.
                       </div>
                     </div>
@@ -297,10 +243,10 @@ export function WalletDrawer({
                 </div>
 
                 {!operatorMatchesConnected && !operatorLoading && !hasOperator && (
-                  <div className="wallet-drawer-authorize-row">
+                  <div className="wallet-panel-authorize-row">
                     <button
                       type="button"
-                      className="wallet-drawer-link wallet-drawer-link--accent"
+                      className="wallet-panel-link wallet-panel-link--accent"
                       onClick={() => void setOperator.run()}
                       disabled={setOperator.running || !config}
                     >
@@ -319,7 +265,7 @@ export function WalletDrawer({
                 {operatorMatchesConnected && !showTransfer && (
                   <button
                     type="button"
-                    className="wallet-drawer-link"
+                    className="wallet-panel-link"
                     onClick={() => setShowTransfer(true)}
                   >
                     Transfer authorization to another wallet
@@ -327,37 +273,35 @@ export function WalletDrawer({
                 )}
 
                 {operatorMatchesConnected && showTransfer && (
-                  <div className="wallet-drawer-section">
-                    <div className="wallet-drawer-section-label">Transfer to</div>
-                    <input
-                      className="input-field"
+                  <div className="wallet-panel-section">
+                    <div className="wallet-panel-section-label">Transfer to</div>
+                    <TextField
                       type="text"
                       placeholder="0x..."
                       value={transferAddr}
                       onChange={(e) => setTransferAddr(e.target.value)}
                       disabled={transferOperator.running}
                     />
-                    <button
-                      type="button"
-                      className="btn-danger"
+                    <Button
+                      variant="danger"
                       onClick={() => buyerEvmAddress && void transferOperator.run(buyerEvmAddress, transferAddr)}
                       disabled={transferOperator.running || !transferAddr || !buyerEvmAddress}
                     >
                       {transferOperator.running ? 'Transferring…' : 'Transfer authorization'}
-                    </button>
+                    </Button>
                     {transferOperator.error && (
-                      <div className="wallet-drawer-error">{transferOperator.error}</div>
+                      <div className="wallet-panel-error">{transferOperator.error}</div>
                     )}
                   </div>
                 )}
 
                 {setOperator.error && (
-                  <div className="wallet-drawer-error">{setOperator.error}</div>
+                  <div className="wallet-panel-error">{setOperator.error}</div>
                 )}
 
                 <button
                   type="button"
-                  className="wallet-drawer-link"
+                  className="wallet-panel-link"
                   onClick={() => disconnect()}
                 >
                   Disconnect
@@ -365,13 +309,11 @@ export function WalletDrawer({
               </div>
             )}
 
-            <p className="wallet-drawer-footnote">
+            <p className="wallet-panel-footnote">
               Deposits can come from any wallet and fund your AntSeed account.
               Withdrawals are sent to the wallet you authorize here.
             </p>
           </section>
-        </div>
-      </aside>
-    </>
+    </Drawer>
   );
 }

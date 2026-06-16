@@ -1,14 +1,21 @@
 import { Fragment, useMemo, useState } from 'react';
-import type { ReactNode } from 'react';
+import type { KeyboardEvent, ReactNode } from 'react';
 import { Lexer } from 'marked';
 import type { ChatMessage } from './chat-shared';
 import { isToolResultOnlyMessage as isToolResultOnlyMessageShared } from './chat-shared';
+import {
+  formatArtifactLabel,
+  segmentSensitiveChatText,
+} from './chat-safety';
+import type { SensitiveChatArtifact } from './chat-safety';
+import { ChatCopyButton } from './ChatCopyButton';
 
 type MarkdownContentProps = {
   text: string;
   className?: string;
   highlightQuery?: string;
   activeHighlight?: boolean;
+  blockUnsafePaymentInstructions?: boolean;
 };
 
 type MarkdownToken = {
@@ -31,18 +38,6 @@ type MarkdownToken = {
 };
 
 export const isToolResultOnlyMessage = isToolResultOnlyMessageShared;
-
-function isSafeHref(rawHref: string): boolean {
-  const trimmed = rawHref.trim();
-  if (!trimmed) return false;
-  try {
-    const parsed = new URL(trimmed, 'https://antseed.invalid');
-    const protocol = parsed.protocol.toLowerCase();
-    return protocol === 'http:' || protocol === 'https:' || protocol === 'mailto:';
-  } catch {
-    return false;
-  }
-}
 
 function normalizeText(value: unknown): string {
   return typeof value === 'string' ? value : String(value ?? '');
@@ -109,6 +104,90 @@ function splitHighlightedText(text: string, query: string | undefined, keyPrefix
   return <>{parts}</>;
 }
 
+function safeOpenExternalUrl(url: string): void {
+  window.open(url, '_blank', 'noopener,noreferrer');
+}
+
+function firstArtifactFromText(value: string): SensitiveChatArtifact | null {
+  const segment = segmentSensitiveChatText(value).find((part) => part.type === 'artifact');
+  return segment?.type === 'artifact' ? segment.artifact : null;
+}
+
+function HiddenWalletAddress({ artifact }: { artifact: SensitiveChatArtifact }) {
+  const [revealed, setRevealed] = useState(false);
+  const value = artifact.value;
+  const label = formatArtifactLabel(artifact);
+
+  const handleReveal = (): void => {
+    setRevealed(true);
+  };
+
+  const handleKeyDown = (event: KeyboardEvent<HTMLSpanElement>): void => {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    event.preventDefault();
+    handleReveal();
+  };
+
+  if (!revealed) {
+    return (
+      <span
+        className="chat-wallet-redaction"
+        title="Address hidden to keep your funds secure. Click to reveal."
+        role="button"
+        tabIndex={0}
+        onClick={handleReveal}
+        onKeyDown={handleKeyDown}
+      >
+        [address hidden]
+      </span>
+    );
+  }
+
+  return <code className="chat-wallet-revealed-text">{value}</code>;
+}
+
+function SafeExternalLink({ artifact }: { artifact: SensitiveChatArtifact }) {
+  const label = formatArtifactLabel(artifact);
+  const isPaymentLink = artifact.type === 'url' && ['ethereum', 'bitcoin', 'solana', 'wc'].includes(artifact.scheme);
+
+  return (
+    <span className={`chat-sensitive-artifact${isPaymentLink ? ' chat-payment-link-hidden' : ' chat-external-link-gated'}`}>
+      <span className="chat-sensitive-label">{label}</span>
+      <button type="button" className="chat-sensitive-action" onClick={() => safeOpenExternalUrl(artifact.value)}>
+        {isPaymentLink ? 'Open' : 'Open'}
+      </button>
+    </span>
+  );
+}
+
+function SafeArtifact({ artifact }: { artifact: SensitiveChatArtifact; children?: ReactNode }) {
+  if (artifact.type === 'wallet-address') return <HiddenWalletAddress artifact={artifact} />;
+  return <SafeExternalLink artifact={artifact} />;
+}
+
+function splitSafeHighlightedText(text: string, query: string | undefined, keyPrefix: string, activeHighlight = false): ReactNode {
+  const segments = segmentSensitiveChatText(text);
+  if (segments.length === 1 && segments[0]?.type === 'text') {
+    return splitHighlightedText(segments[0].text, query, keyPrefix, activeHighlight);
+  }
+
+  return (
+    <>
+      {segments.map((segment, index) => {
+        const key = `${keyPrefix}-safe-${index}`;
+        if (segment.type === 'text') {
+          return <Fragment key={key}>{splitHighlightedText(segment.text, query, key, activeHighlight)}</Fragment>;
+        }
+        return <SafeArtifact key={key} artifact={segment.artifact} />;
+      })}
+    </>
+  );
+}
+
+function confirmCopyIfSensitive(_text: string): boolean {
+  return true;
+}
+
 function flattenPlainText(tokens: MarkdownToken[] | undefined): string {
   if (!Array.isArray(tokens) || tokens.length === 0) return '';
   let output = '';
@@ -137,19 +216,24 @@ function renderInlineToken(token: MarkdownToken, key: string, highlightQuery?: s
       if (Array.isArray(token.tokens) && token.tokens.length > 0) {
         return <Fragment key={key}>{renderInlineTokens(token.tokens, key, highlightQuery, activeHighlight)}</Fragment>;
       }
-      return <Fragment key={key}>{splitHighlightedText(normalizeText(token.text), highlightQuery, key, activeHighlight)}</Fragment>;
+      return <Fragment key={key}>{splitSafeHighlightedText(normalizeText(token.text), highlightQuery, key, activeHighlight)}</Fragment>;
     case 'escape':
-      return <Fragment key={key}>{splitHighlightedText(normalizeText(token.text), highlightQuery, key, activeHighlight)}</Fragment>;
+      return <Fragment key={key}>{splitSafeHighlightedText(normalizeText(token.text), highlightQuery, key, activeHighlight)}</Fragment>;
     case 'strong':
       return <strong key={key}>{renderInlineTokens(token.tokens, key, highlightQuery, activeHighlight)}</strong>;
     case 'em':
       return <em key={key}>{renderInlineTokens(token.tokens, key, highlightQuery, activeHighlight)}</em>;
-    case 'codespan':
+    case 'codespan': {
+      const codeText = normalizeText(token.text);
       return (
-        <code key={key} className="chat-inline-code">
-          {splitHighlightedText(normalizeText(token.text), highlightQuery, key, activeHighlight)}
-        </code>
+        <span key={key} className="chat-inline-code-wrap">
+          <code className="chat-inline-code">
+            {splitSafeHighlightedText(codeText, highlightQuery, key, activeHighlight)}
+          </code>
+          <CopyButton text={codeText} className="chat-inline-code-copy-btn" size={12} stopClickPropagation />
+        </span>
       );
+    }
     case 'br':
       return <br key={key} />;
     case 'del':
@@ -157,43 +241,41 @@ function renderInlineToken(token: MarkdownToken, key: string, highlightQuery?: s
     case 'link': {
       const href = normalizeText(token.href);
       const content = renderInlineTokens(token.tokens, key, highlightQuery, activeHighlight);
-      if (!isSafeHref(href)) {
+      const artifact = firstArtifactFromText(href);
+      if (!artifact || artifact.type !== 'url') {
         return (
           <span key={key} className="chat-inline-link-invalid">
             {content}
           </span>
         );
       }
-      return (
-        <a
-          key={key}
-          href={href}
-          style={{ color: 'var(--accent-blue)', textDecoration: 'underline' }}
-          target="_blank"
-          rel="noopener noreferrer"
-          title={token.title ?? undefined}
-        >
-          {content}
-        </a>
-      );
+      return <SafeArtifact key={key} artifact={artifact}>{content}</SafeArtifact>;
     }
     case 'image': {
       const href = normalizeText(token.href);
       const alt = flattenPlainText(token.tokens) || normalizeText(token.text) || 'Image';
-      if (!isSafeHref(href)) {
+      const artifact = firstArtifactFromText(href);
+      if (!artifact || artifact.type !== 'url') {
         return (
           <span key={key} className="chat-inline-link-invalid">
             {alt}
           </span>
         );
       }
-      return <img key={key} src={href} alt={alt} className="chat-inline-image" />;
+      return (
+        <span key={key} className="chat-sensitive-artifact chat-external-image-hidden">
+          <span className="chat-sensitive-label">External image hidden: {artifact.display}</span>
+          <button type="button" className="chat-sensitive-action" onClick={() => safeOpenExternalUrl(artifact.value)}>
+            Open
+          </button>
+        </span>
+      );
     }
     default:
       if (Array.isArray(token.tokens) && token.tokens.length > 0) {
         return <Fragment key={key}>{renderInlineTokens(token.tokens, key, highlightQuery, activeHighlight)}</Fragment>;
       }
-      return <Fragment key={key}>{splitHighlightedText(normalizeText(token.text ?? token.raw), highlightQuery, key, activeHighlight)}</Fragment>;
+      return <Fragment key={key}>{splitSafeHighlightedText(normalizeText(token.text ?? token.raw), highlightQuery, key, activeHighlight)}</Fragment>;
   }
 }
 
@@ -205,7 +287,7 @@ function renderTableCell(token: MarkdownToken, key: string, highlightQuery?: str
   if (Array.isArray(token.tokens) && token.tokens.length > 0) {
     return <Fragment key={key}>{renderInlineTokens(token.tokens, key, highlightQuery, activeHighlight)}</Fragment>;
   }
-  return <Fragment key={key}>{splitHighlightedText(normalizeText(token.text ?? token.raw), highlightQuery, key, activeHighlight)}</Fragment>;
+  return <Fragment key={key}>{splitSafeHighlightedText(normalizeText(token.text ?? token.raw), highlightQuery, key, activeHighlight)}</Fragment>;
 }
 
 function renderListItemContent(token: MarkdownToken, key: string, highlightQuery?: string, activeHighlight = false): ReactNode {
@@ -217,30 +299,38 @@ function renderListItemContent(token: MarkdownToken, key: string, highlightQuery
     }
     return <>{renderInlineTokens(token.tokens, key, highlightQuery, activeHighlight)}</>;
   }
-  return splitHighlightedText(normalizeText(token.text ?? token.raw), highlightQuery, key, activeHighlight);
+  return splitSafeHighlightedText(normalizeText(token.text ?? token.raw), highlightQuery, key, activeHighlight);
+}
+
+function CopyButton({ text, className, size = 14, stopClickPropagation = false }: {
+  text: string;
+  className: string;
+  size?: number;
+  stopClickPropagation?: boolean;
+}) {
+  return (
+    <ChatCopyButton
+      text={text}
+      className={className}
+      copiedClassName={`${className}-copied`}
+      iconSize={size}
+      stopClickPropagation={stopClickPropagation}
+      onBeforeCopy={confirmCopyIfSensitive}
+    />
+  );
 }
 
 function CodeBlock({ code, lang, highlightQuery, activeHighlight }: { code: string; lang?: string; highlightQuery?: string; activeHighlight?: boolean }) {
-  const [copied, setCopied] = useState(false);
   const langLabel = normalizeText(lang).trim() || 'code';
-
-  const handleCopy = (): void => {
-    void navigator.clipboard.writeText(code).then(() => {
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1500);
-    });
-  };
 
   return (
     <div className="chat-code-container">
       <div className="chat-code-header">
         <span className="code-lang">{langLabel}</span>
-        <button className="chat-code-copy-btn" type="button" onClick={handleCopy}>
-          {copied ? 'Copied!' : 'Copy'}
-        </button>
+        <CopyButton text={code} className="chat-code-copy-btn" />
       </div>
       <pre>
-        <code>{splitHighlightedText(code, highlightQuery, 'code', activeHighlight)}</code>
+        <code>{splitSafeHighlightedText(code, highlightQuery, 'code', activeHighlight)}</code>
       </pre>
     </div>
   );
@@ -256,7 +346,7 @@ function renderBlockToken(token: MarkdownToken, key: string, highlightQuery?: st
       if (Array.isArray(token.tokens) && token.tokens.length > 0) {
         return <p key={key}>{renderInlineTokens(token.tokens, key, highlightQuery, activeHighlight)}</p>;
       }
-      return <p key={key}>{splitHighlightedText(normalizeText(token.text), highlightQuery, key, activeHighlight)}</p>;
+      return <p key={key}>{splitSafeHighlightedText(normalizeText(token.text), highlightQuery, key, activeHighlight)}</p>;
     case 'heading': {
       const depth = Math.min(Math.max(Number(token.depth) || 1, 1), 6);
       const children = renderInlineTokens(token.tokens, key, highlightQuery, activeHighlight);
@@ -269,8 +359,17 @@ function renderBlockToken(token: MarkdownToken, key: string, highlightQuery?: st
     }
     case 'code':
       return <CodeBlock key={key} code={normalizeText(token.text)} lang={token.lang} highlightQuery={highlightQuery} activeHighlight={activeHighlight} />;
-    case 'blockquote':
-      return <blockquote key={key}>{renderBlockTokens(token.tokens ?? [], key, highlightQuery, activeHighlight)}</blockquote>;
+    case 'blockquote': {
+      const bqText = flattenPlainText(token.tokens);
+      return (
+        <div key={key} className="chat-blockquote-container">
+          <div className="chat-blockquote-header">
+            <CopyButton text={bqText} className="chat-blockquote-copy-btn" />
+          </div>
+          <blockquote>{renderBlockTokens(token.tokens ?? [], key, highlightQuery, activeHighlight)}</blockquote>
+        </div>
+      );
+    }
     case 'hr':
       return <hr key={key} />;
     case 'list': {
@@ -323,7 +422,7 @@ function renderBlockToken(token: MarkdownToken, key: string, highlightQuery?: st
       if (Array.isArray(token.tokens) && token.tokens.length > 0) {
         return <Fragment key={key}>{renderBlockTokens(token.tokens, key, highlightQuery, activeHighlight)}</Fragment>;
       }
-      return <p key={key}>{splitHighlightedText(normalizeText(token.text ?? token.raw), highlightQuery, key, activeHighlight)}</p>;
+      return <p key={key}>{splitSafeHighlightedText(normalizeText(token.text ?? token.raw), highlightQuery, key, activeHighlight)}</p>;
   }
 }
 

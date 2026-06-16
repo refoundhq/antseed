@@ -11,7 +11,24 @@ export const ON_CHAIN_TRUST_RECENCY_DORMANT_FACTOR = 0.25;
 export const ON_CHAIN_TRUST_STAKE_THRESHOLD_USDC = 1.0;
 export const ON_CHAIN_TRUST_NO_STAKE_FACTOR = 0.5;
 
-export const ON_CHAIN_SCORE_LOG_CAP_EXPONENT = 7;
+export const ON_CHAIN_TRUST_INITIAL_CREDIT_USDC = 25;
+export const ON_CHAIN_TRUST_DAILY_CREDIT_USDC = 125;
+export const ON_CHAIN_TRUST_MATURITY_DAYS = 30;
+export const ON_CHAIN_TRUST_CHANNEL_CONFIDENCE_CAP = 1_000;
+export const ON_CHAIN_TRUST_GHOST_PENALTY_WEIGHT = 2.5;
+export const ON_CHAIN_TRUST_MIN_GHOST_FACTOR = 0.25;
+export const ON_CHAIN_TRUST_LOW_TICKET_USDC = 0.25;
+export const ON_CHAIN_TRUST_LOW_TICKET_MIN_CHANNELS = 50;
+export const ON_CHAIN_TRUST_LOW_TICKET_FACTOR = 0.65;
+export const ON_CHAIN_TRUST_HIGH_TICKET_USDC = 50;
+export const ON_CHAIN_TRUST_HIGH_TICKET_MAX_CHANNELS = 20;
+export const ON_CHAIN_TRUST_HIGH_TICKET_FACTOR = 0.75;
+
+export const ON_CHAIN_SCORE_LOG_CAP_USDC = 10_000;
+export const ON_CHAIN_SCORE_LOG_CAP_EXPONENT = Math.log10(1 + ON_CHAIN_SCORE_LOG_CAP_USDC);
+export const ON_CHAIN_VERIFICATION_DOMAIN_POINTS = 5;
+export const ON_CHAIN_VERIFICATION_GITHUB_POINTS = 3;
+export const ON_CHAIN_VERIFICATION_MAX_POINTS = 8;
 
 export const SYBIL_WEIGHT_SUBFLOOR_TICKET = 0.30;
 export const SYBIL_WEIGHT_BURN_RATE       = 0.25;
@@ -49,11 +66,19 @@ export interface SybilContext {
 export interface OnChainTrustBreakdown {
   trust: number;
   volumeUsdc: number;
+  creditedVolumeUsdc: number;
+  volumeCreditCapUsdc: number;
   channels: number;
   avgChannelUsdc: number;
   ticketBonus: number;
+  ticketGate: number;
   recencyGate: number;
   stakeGate: number;
+  ageGate: number;
+  channelConfidence: number;
+  ghostGate: number;
+  scoreMultiplier: number;
+  verificationBonusPoints: number;
   daysSinceLastSettled: number | null;
   daysSinceStaked: number | null;
 }
@@ -67,6 +92,26 @@ function clamp(value: number, lo: number, hi: number): number {
 
 function nonNegativeFinite(value: number | undefined): number | null {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null;
+}
+
+function logConfidence(value: number, cap: number): number {
+  if (!Number.isFinite(value) || value <= 0) return 0;
+  return clamp(Math.log10(1 + value) / Math.log10(1 + cap), 0, 1);
+}
+
+export function computeVerificationScoreBonus(
+  peer: Pick<PeerInfo, 'verificationResults'>,
+): number {
+  const results = peer.verificationResults;
+  if (!results) return 0;
+  const verifiedDomains = results.domains.filter((result) => result.verified).length;
+  const verifiedGithub = results.github.filter((result) => result.verified).length;
+  return clamp(
+    verifiedDomains * ON_CHAIN_VERIFICATION_DOMAIN_POINTS
+      + verifiedGithub * ON_CHAIN_VERIFICATION_GITHUB_POINTS,
+    0,
+    ON_CHAIN_VERIFICATION_MAX_POINTS,
+  );
 }
 
 function collectPeerServices(peer: PeerInfo): string[] {
@@ -106,14 +151,22 @@ function minAdvertisedInputUsdPerMillion(peer: PeerInfo): number | null {
   return best;
 }
 
-/** Compute raw on-chain trust, or `null` when chain stats are unavailable. */
+/**
+ * Compute raw on-chain trust, or `null` when chain stats are unavailable.
+ *
+ * Trust is anchored to settled USDC, but volume credit vests with seller age.
+ * Channel count, ghost rate, last-settled recency, stake, and ticket shape gate
+ * the displayed score instead of multiplying settled volume directly.
+ */
 export function computeOnChainTrustBreakdown(
   peer: Pick<PeerInfo,
     | 'onChainChannelCount'
+    | 'onChainGhostCount'
     | 'onChainTotalVolumeUsdcMicros'
     | 'onChainLastSettledAtSec'
     | 'onChainStakedAtSec'
     | 'onChainStakeUsdcMicros'
+    | 'verificationResults'
   >,
   nowMs: number = Date.now(),
 ): OnChainTrustBreakdown | null {
@@ -155,16 +208,56 @@ export function computeOnChainTrustBreakdown(
     ? Math.max(0, (nowMs - stakedAtSec * 1000) / 86_400_000)
     : null;
 
-  const trust = channels * volumeUsdc * ticketBonus * recencyGate * stakeGate;
+  const maturityDays = daysSinceStaked ?? 0;
+  const volumeCreditCapUsdc = ON_CHAIN_TRUST_INITIAL_CREDIT_USDC
+    + maturityDays * ON_CHAIN_TRUST_DAILY_CREDIT_USDC;
+  const creditedVolumeUsdc = Math.min(volumeUsdc, volumeCreditCapUsdc);
+
+  const ageGate = clamp(maturityDays / ON_CHAIN_TRUST_MATURITY_DAYS, 0.20, 1);
+  const channelConfidence = 0.35
+    + 0.65 * logConfidence(channels, ON_CHAIN_TRUST_CHANNEL_CONFIDENCE_CAP);
+
+  const ghosts = nonNegativeFinite(peer.onChainGhostCount) ?? 0;
+  const ghostRate = channels + ghosts > 0 ? ghosts / (channels + ghosts) : 0;
+  const ghostGate = clamp(
+    1 - ghostRate * ON_CHAIN_TRUST_GHOST_PENALTY_WEIGHT,
+    ON_CHAIN_TRUST_MIN_GHOST_FACTOR,
+    1,
+  );
+
+  let ticketGate = 1;
+  if (channels >= ON_CHAIN_TRUST_LOW_TICKET_MIN_CHANNELS && avgChannelUsdc < ON_CHAIN_TRUST_LOW_TICKET_USDC) {
+    ticketGate = ON_CHAIN_TRUST_LOW_TICKET_FACTOR;
+  } else if (channels > 0 && channels < ON_CHAIN_TRUST_HIGH_TICKET_MAX_CHANNELS && avgChannelUsdc > ON_CHAIN_TRUST_HIGH_TICKET_USDC) {
+    ticketGate = ON_CHAIN_TRUST_HIGH_TICKET_FACTOR;
+  }
+
+  const scoreMultiplier = channelConfidence
+    * ageGate
+    * ghostGate
+    * recencyGate
+    * stakeGate
+    * ticketGate;
+  const verificationBonusPoints = computeVerificationScoreBonus(peer);
+
+  const trust = creditedVolumeUsdc;
 
   return {
     trust,
     volumeUsdc,
+    creditedVolumeUsdc,
+    volumeCreditCapUsdc,
     channels,
     avgChannelUsdc,
     ticketBonus,
+    ticketGate,
     recencyGate,
     stakeGate,
+    ageGate,
+    channelConfidence,
+    ghostGate,
+    scoreMultiplier,
+    verificationBonusPoints,
     daysSinceLastSettled,
     daysSinceStaked,
   };
@@ -276,16 +369,32 @@ export function scoreFromTrust(trust: number): number {
   return Math.min(100, (100 / ON_CHAIN_SCORE_LOG_CAP_EXPONENT) * Math.log10(1 + trust));
 }
 
+function scoreFromBreakdown(breakdown: OnChainTrustBreakdown, risk: number): number {
+  const baseScore = scoreFromTrust(breakdown.trust);
+  const chainScore = baseScore * breakdown.scoreMultiplier * (1 - clamp(risk, 0, 1));
+  if (chainScore <= 0) return chainScore;
+  return Math.min(100, chainScore + breakdown.verificationBonusPoints);
+}
+
+export function computeOnChainScoreWithRisk(
+  peer: PeerInfo,
+  risk: number,
+  nowMs: number = Date.now(),
+): number | null {
+  const breakdown = computeOnChainTrustBreakdown(peer, nowMs);
+  if (breakdown === null) return null;
+  return scoreFromBreakdown(breakdown, risk);
+}
+
 export function computeOnChainScore(
   peer: PeerInfo,
   ctx?: SybilContext,
   nowMs: number = Date.now(),
 ): number | null {
-  const trust = computeOnChainTrust(peer, nowMs);
-  if (trust === null) return null;
-  const baseScore = scoreFromTrust(trust);
+  const breakdown = computeOnChainTrustBreakdown(peer, nowMs);
+  if (breakdown === null) return null;
   const risk = ctx ? computeOnChainSybilRisk(peer, ctx, nowMs).risk : 0;
-  return baseScore * (1 - risk);
+  return scoreFromBreakdown(breakdown, risk);
 }
 
 export function computeOnChainReputationScore(

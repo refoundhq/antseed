@@ -9,7 +9,7 @@
 }
 
 .back {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: 'Share Tech Mono', monospace;
   font-size: 12px;
   color: #8b949e;
   text-decoration: none;
@@ -20,16 +20,16 @@
 }
 
 .back:hover {
-  color: #1FD87A;
+  color: var(--as-green);
   text-decoration: none;
 }
 
 .eyebrow {
   font-size: 12px;
-  color: #1FD87A;
+  color: var(--as-green);
   letter-spacing: 3px;
   text-transform: uppercase;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: 'Share Tech Mono', monospace;
   font-style: italic;
   margin-bottom: 12px;
   margin-top: 0;
@@ -73,7 +73,7 @@
 }
 
 .statNum {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: 'Share Tech Mono', monospace;
   font-size: 32px;
   font-weight: 700;
   color: #0d1117;
@@ -124,7 +124,7 @@
   border: 1px solid #e2e8f0;
   border-radius: 12px;
   font-size: 14px;
-  font-family: 'Space Grotesk', sans-serif;
+  font-family: 'Oxanium', sans-serif;
   background: white;
   color: #0d1117;
   outline: none;
@@ -133,7 +133,7 @@
 }
 
 .searchInput:focus {
-  border-color: #1FD87A;
+  border-color: var(--as-green);
   box-shadow: 0 0 0 3px rgba(31,216,122,0.12);
 }
 
@@ -170,7 +170,7 @@
   border: 1px solid #e2e8f0;
   border-radius: 20px;
   font-size: 12px;
-  font-family: 'Space Grotesk', sans-serif;
+  font-family: 'Oxanium', sans-serif;
   font-weight: 500;
   background: white;
   color: #666e7a;
@@ -180,8 +180,8 @@
 }
 
 .chip:hover {
-  border-color: #1FD87A;
-  color: #1FD87A;
+  border-color: var(--as-green);
+  color: var(--as-green);
 }
 
 .chipActive {
@@ -199,7 +199,7 @@
 /* ── Results count ────────────────────────────────────────────────── */
 
 .resultsCount {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: 'Share Tech Mono', monospace;
   font-size: 11px;
   color: #8b949e;
   letter-spacing: 0.05em;
@@ -228,7 +228,7 @@
 
 .table th {
   padding: 14px 20px;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: 'Share Tech Mono', monospace;
   font-size: 10px;
   font-weight: 600;
   color: #8b949e;
@@ -326,7 +326,7 @@
 
 .tagBadge {
   font-size: 10px;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: 'Share Tech Mono', monospace;
   font-weight: 500;
   border-radius: 10px;
   padding: 2px 8px;
@@ -337,11 +337,11 @@
 /* Tag color variants — applied via data attribute or inline style in TSX */
 .tagCoding    { background: #eff6ff; color: #3b82f6; }
 .tagPrivacy   { background: #fef3f2; color: #ef4444; }
-.tagTee       { background: #f0fdf4; color: #16a34a; }
+.tagTee       { background: #f0fdf4; color: var(--as-green); }
 .tagChat      { background: #f5f3ff; color: #8b5cf6; }
 .tagCode      { background: #eff6ff; color: #3b82f6; }
 .tagFast      { background: #fefce8; color: #ca8a04; }
-.tagCheap     { background: #f0fdf4; color: #16a34a; }
+.tagCheap     { background: #f0fdf4; color: var(--as-green); }
 .tagReasoning { background: #fff7ed; color: #ea580c; }
 .tagOpenSource { background: #f0f9ff; color: #0284c7; }
 .tagRag       { background: #fdf4ff; color: #c026d3; }
@@ -354,7 +354,7 @@
 }
 
 .contextBadge {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: 'Share Tech Mono', monospace;
   font-size: 12px;
   font-weight: 500;
   color: #666e7a;
@@ -366,18 +366,18 @@
 .tdPrice {
   padding: 16px 20px;
   text-align: right;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: 'Share Tech Mono', monospace;
   font-size: 14px;
   font-weight: 600;
 }
 
 .priceFree {
-  color: #1FD87A;
+  color: var(--as-green);
   font-weight: 700;
 }
 
 .priceGood {
-  color: #1FD87A;
+  color: var(--as-green);
 }
 
 .priceNormal {
@@ -397,8 +397,8 @@
   height: 28px;
   border-radius: 50%;
   background: #f0faf4;
-  color: #1FD87A;
-  font-family: 'JetBrains Mono', monospace;
+  color: var(--as-green);
+  font-family: 'Share Tech Mono', monospace;
   font-size: 12px;
   font-weight: 700;
 }
@@ -409,7 +409,7 @@
 }
 
 .statValue {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: 'Share Tech Mono', monospace;
   font-size: 13px;
   font-weight: 600;
   color: #0d1117;
@@ -442,7 +442,7 @@
   border: 1px solid #e2e8f0;
   border-radius: 12px;
   font-size: 13px;
-  font-family: 'Space Grotesk', sans-serif;
+  font-family: 'Oxanium', sans-serif;
   font-weight: 500;
   background: white;
   color: #666e7a;
@@ -452,14 +452,14 @@
 }
 
 .filterToggle:hover {
-  border-color: #1FD87A;
+  border-color: var(--as-green);
   color: #0d1117;
 }
 
 .filterToggleActive {
-  border-color: #1FD87A;
+  border-color: var(--as-green);
   background: #f0fdf4;
-  color: #16a34a;
+  color: var(--as-green);
 }
 
 /* ── Advanced filters panel ───────────────────────────────────────── */
@@ -492,7 +492,7 @@
 }
 
 .filterLabel {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: 'Share Tech Mono', monospace;
   font-size: 10px;
   font-weight: 600;
   color: #8b949e;
@@ -501,7 +501,7 @@
 }
 
 .filterValue {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: 'Share Tech Mono', monospace;
   font-size: 11px;
   font-weight: 600;
   color: #0d1117;
@@ -558,7 +558,7 @@
 .checkbox {
   width: 16px;
   height: 16px;
-  accent-color: #1FD87A;
+  accent-color: var(--as-green);
   cursor: pointer;
 }
 
@@ -567,7 +567,7 @@
   border: 1px solid #e2e8f0;
   border-radius: 8px;
   font-size: 12px;
-  font-family: 'Space Grotesk', sans-serif;
+  font-family: 'Oxanium', sans-serif;
   background: white;
   color: #8b949e;
   cursor: pointer;
@@ -586,10 +586,10 @@
   align-items: center;
   justify-content: center;
   gap: 8px;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: 'Share Tech Mono', monospace;
   font-size: 18px;
   font-weight: 700;
-  color: #1FD87A;
+  color: var(--as-green);
   margin-bottom: 8px;
 }
 
@@ -597,23 +597,23 @@
   width: 10px;
   height: 10px;
   border-radius: 50%;
-  background: #1FD87A;
-  box-shadow: 0 0 8px #1FD87A;
+  background: var(--as-green);
+  box-shadow: 0 0 8px var(--as-green);
   animation: pulse 2s infinite;
   display: inline-block;
   flex-shrink: 0;
 }
 
 @keyframes pulse {
-  0%, 100% { opacity: 1; box-shadow: 0 0 8px #1FD87A; }
-  50% { opacity: 0.5; box-shadow: 0 0 3px #1FD87A; }
+  0%, 100% { opacity: 1; box-shadow: 0 0 8px var(--as-green); }
+  50% { opacity: 0.5; box-shadow: 0 0 3px var(--as-green); }
 }
 
 .bestPeer {
   font-size: 10px;
   color: #8b949e;
   margin-top: 2px;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: 'Share Tech Mono', monospace;
 }
 
 /* ── Footer ───────────────────────────────────────────────────────── */
@@ -627,7 +627,7 @@
 }
 
 .footer a {
-  color: #1FD87A;
+  color: var(--as-green);
   text-decoration: none;
 }
 
@@ -738,7 +738,7 @@
   }
 
   .tdPrice::before {
-    font-family: 'JetBrains Mono', monospace;
+    font-family: 'Share Tech Mono', monospace;
     font-size: 9px;
     color: #8b949e;
     text-transform: uppercase;
@@ -763,7 +763,7 @@
   }
 
   .tdStat::before {
-    font-family: 'JetBrains Mono', monospace;
+    font-family: 'Share Tech Mono', monospace;
     font-size: 9px;
     color: #8b949e;
     text-transform: uppercase;

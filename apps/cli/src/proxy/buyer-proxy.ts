@@ -35,9 +35,7 @@ import {
   summarizeRequestShape,
   summarizeErrorResponse,
   requestWantsStreaming,
-  rewriteServiceInBody,
-  isConnectionChurnError,
-  isConnectionHealthy,
+  rewritePeerPinnedServiceInBody,
 } from './request-utils.js'
 import {
   getExplicitProviderOverride,
@@ -56,12 +54,12 @@ import { DEFAULT_BUYER_PEER_REFRESH_INTERVAL_MS } from '../config/defaults.js'
 
 // Re-export for backward compatibility (used by tests and other consumers)
 export { selectCandidatePeersForRouting, type CandidatePeerRouteSelection } from './routing.js'
-export { rewriteServiceInBody } from './request-utils.js'
+export { parsePeerPinnedService, rewritePeerPinnedServiceInBody } from './request-utils.js'
 
 export interface BuyerProxyConfig {
   port: number
   node: AntseedNode
-  /** Data directory used to persist buyer.state.json (discovered peers, session overrides). */
+  /** Data directory used to persist buyer.state.json (discovered peers, session peer pin). */
   dataDir: string
   /** How often to refresh the peer list from DHT in the background (ms). Default: 300000 (5 min) */
   backgroundRefreshIntervalMs?: number
@@ -78,15 +76,18 @@ export interface BuyerProxyConfig {
    * and allowed by the buyer's pricing policy. A 502 is returned if the peer cannot be reached.
    */
   pinnedPeerId?: string
-  /**
-   * Pin all requests to a specific service ID for this session.
-   * Overrides the service field in the request body before routing and forwarding.
-   * Can be updated at runtime via `antseed buyer connection set --service`.
-   */
-  pinnedService?: string
 }
 
 const RETRYABLE_STATUS_CODES = new Set([408, 429, 500, 502, 503, 504])
+
+function isControlPlaneServicesPath(path: string): boolean {
+  return path.toLowerCase().startsWith('/v1/models')
+}
+
+function isRouterSuccess(statusCode: number, path: string, retryableStatusCodes: Set<number>): boolean {
+  return isControlPlaneServicesPath(path) || !retryableStatusCodes.has(statusCode)
+}
+
 /**
  * Max age for carrying forward peers not seen in the latest DHT scan.
  * Intentionally longer than `peer-lookup.ts` `maxAnnouncementAgeMs` (30 min) so
@@ -95,16 +96,14 @@ const RETRYABLE_STATUS_CODES = new Set([408, 429, 500, 502, 503, 504])
  * liveness (`lastReachedAt`) even if the DHT record is older.
  */
 const CARRY_FORWARD_TTL_MS = 2 * 60 * 60_000
-
-/**
- * A single failed request is not enough to evict a peer: timeouts, transient
- * upstream slowness, or one flaky stream shouldn't wipe a peer (and its
- * service metadata) from cache — that just breaks every follow-up request
- * pinned to the same peer/service. We only drop a peer once it has failed
- * repeatedly within a short window.
- */
-const PEER_FAILURE_THRESHOLD = 10
 const PEER_FAILURE_WINDOW_MS = 5 * 60_000
+
+type PeerFailureEntry = {
+  count: number
+  firstFailureAt: number
+  lastFailureAt: number
+  lastReason: string
+}
 
 type TransformResult = { request: SerializedHttpRequest; streamRequested: boolean; requestedModel: string | null }
 type AdaptResponseMeta = { streamRequested: boolean; fallbackModel: string | null }
@@ -256,6 +255,10 @@ export function parsePersistedPeers(
       lastSeen,
       providers,
     }
+    if (Array.isArray(entry.capabilities)) {
+      const capabilities = entry.capabilities.filter((capability): capability is string => typeof capability === 'string')
+      if (capabilities.length > 0) peer.capabilities = capabilities
+    }
     if (lastReachedAt > 0) peer.lastReachedAt = lastReachedAt
     if (typeof entry.displayName === 'string') peer.displayName = entry.displayName
     if (typeof entry.publicAddress === 'string') peer.publicAddress = entry.publicAddress
@@ -324,7 +327,16 @@ export function parsePersistedPeers(
     // wallet, and `reserve()` reverts on-chain with InvalidSignature() because
     // the contract derives channelId from msg.sender (the facade).
     if (typeof entry.sellerContract === 'string' && entry.sellerContract.length > 0) {
-      peer.metadata = { sellerContract: entry.sellerContract } as PeerMetadata
+      peer.metadata = { ...(peer.metadata ?? {}), sellerContract: entry.sellerContract } as PeerMetadata
+    }
+    if (peer.capabilities && peer.capabilities.length > 0) {
+      peer.metadata = { ...(peer.metadata ?? {}), capabilities: [...peer.capabilities] } as PeerMetadata
+    }
+    if (entry.verifications && typeof entry.verifications === 'object') {
+      peer.metadata = { ...(peer.metadata ?? {}), verifications: entry.verifications as PeerMetadata['verifications'] } as PeerMetadata
+    }
+    if (entry.verificationResults && typeof entry.verificationResults === 'object') {
+      peer.verificationResults = entry.verificationResults as PeerInfo['verificationResults']
     }
     peers.push(peer)
   }
@@ -348,7 +360,6 @@ export class BuyerProxy {
   private readonly _stateFile: string
   private _stateFileWatching = false
   private _pinnedPeer: string | null
-  private _pinnedService: string | null
   private _stateWatchDebounce: ReturnType<typeof setTimeout> | null = null
 
   private _stateWriteChain: Promise<void> = Promise.resolve()
@@ -359,14 +370,7 @@ export class BuyerProxy {
   private _peerRefreshPromise: Promise<PeerInfo[]> | null = null
   private _lastStaleCacheLogAtMs = 0
   private _bgRefreshHandle: ReturnType<typeof setInterval> | null = null
-
-  /**
-   * Per-peer rolling failure counters. Entries are created on the first
-   * failure and cleared on the next successful request, or when eviction
-   * actually fires. A stale window (older than PEER_FAILURE_WINDOW_MS) resets
-   * the counter so a peer that recovers isn't penalised forever.
-   */
-  private _peerFailures: Map<string, { count: number; firstFailureAt: number; lastFailureAt: number }> = new Map()
+  private _peerFailures: Map<string, PeerFailureEntry> = new Map()
 
   constructor(config: BuyerProxyConfig) {
     this._node = config.node
@@ -376,7 +380,6 @@ export class BuyerProxy {
     this._stateDir = config.dataDir
     this._stateFile = join(config.dataDir, 'buyer.state.json')
     this._pinnedPeer = config.pinnedPeerId?.toLowerCase() ?? null
-    this._pinnedService = config.pinnedService?.trim() ?? null
     this._server = createServer((req, res) => {
       this._handleRequest(req, res).catch((err) => {
         log('Unhandled error:', err)
@@ -405,10 +408,10 @@ export class BuyerProxy {
     // startup route from the warm cache without blocking on DHT discovery.
     // The background refresh still runs to pick up fresh peers and IP changes.
     await this._hydratePeersFromStateFile()
-    // If the CLI didn't pass --peer/--service, adopt whatever a previous
-    // `antseed buyer connection set` wrote to buyer.state.json so the pin
-    // survives daemon restart.
-    if (this._pinnedPeer === null && this._pinnedService === null) {
+    // If the CLI didn't pass --peer, adopt whatever a previous
+    // `antseed buyer connection set --peer` wrote to buyer.state.json so the
+    // pin survives daemon restart.
+    if (this._pinnedPeer === null) {
       await this._reloadSessionOverrides()
     }
     await new Promise<void>((resolve, reject) => {
@@ -495,15 +498,11 @@ export class BuyerProxy {
     try {
       const raw = await readFile(this._stateFile, 'utf-8')
       const parsed = JSON.parse(raw) as Record<string, unknown>
-      const pinnedService = typeof parsed.pinnedService === 'string' && parsed.pinnedService.trim().length > 0
-        ? parsed.pinnedService.trim()
-        : null
       const pinnedPeer = typeof parsed.pinnedPeerId === 'string' && parsed.pinnedPeerId.trim().length > 0
         ? parsed.pinnedPeerId.trim().toLowerCase()
         : null
-      this._pinnedService = pinnedService
       this._pinnedPeer = pinnedPeer
-      log(`Session overrides reloaded: service=${pinnedService ?? 'none'} peer=${pinnedPeer ?? 'none'}`)
+      log(`Session overrides reloaded: peer=${pinnedPeer ?? 'none'}`)
     } catch {
       // state file unreadable; keep current values
     }
@@ -533,11 +532,11 @@ export class BuyerProxy {
   }
 
   private async _writeStateFile(state: 'connected' | 'stopped'): Promise<void> {
-    // When stopping, preserve whatever pinnedService/pinnedPeerId is already
+    // When stopping, preserve whatever pinnedPeerId is already
     // in the file — the debounce may have been cancelled before
     // _reloadSessionOverrides could commit the latest CLI-written values.
     const sessionOverrides = state === 'connected'
-      ? { pinnedService: this._pinnedService, pinnedPeerId: this._pinnedPeer }
+      ? { pinnedPeerId: this._pinnedPeer }
       : {}
     await this._mergeStateFile({
       state,
@@ -570,10 +569,19 @@ export class BuyerProxy {
     // and losing it on each refresh would defeat the carry-forward tracking.
     const merged: PeerInfo[] = incoming.map((peer) => {
       const prev = prevById.get(peer.peerId)
-      if (prev?.lastReachedAt && (!peer.lastReachedAt || prev.lastReachedAt > peer.lastReachedAt)) {
-        return { ...peer, lastReachedAt: prev.lastReachedAt }
+      if (!prev) return peer
+      const metadata = peer.metadata || prev.metadata
+        ? { ...(prev.metadata ?? {}), ...(peer.metadata ?? {}) } as PeerMetadata
+        : undefined
+      const mergedPeer: PeerInfo = {
+        ...prev,
+        ...peer,
+        ...(metadata ? { metadata } : {}),
       }
-      return peer
+      if (prev.lastReachedAt && (!peer.lastReachedAt || prev.lastReachedAt > peer.lastReachedAt)) {
+        mergedPeer.lastReachedAt = prev.lastReachedAt
+      }
+      return mergedPeer
     })
 
     // Carry forward previously known peers that are missing from this scan.
@@ -613,6 +621,7 @@ export class BuyerProxy {
         displayName: p.displayName ?? null,
         publicAddress: p.publicAddress ?? null,
         providers: p.providers,
+        capabilities: p.capabilities ?? p.metadata?.capabilities ?? [],
         services,
         providerPricing: p.providerPricing ?? null,
         providerServiceCategories: p.providerServiceCategories ?? null,
@@ -641,6 +650,11 @@ export class BuyerProxy {
         // Persisted so cold-started buyers can still resolve the facade address
         // for channelId derivation. See parsePersistedPeers for the round-trip.
         sellerContract: p.metadata?.sellerContract ?? null,
+        // External ownership claims and buyer-computed proof results. Claim
+        // verification runs asynchronously after discovery, so this may be
+        // null on first sighting and filled by a later peers:discovered update.
+        verifications: p.metadata?.verifications ?? null,
+        verificationResults: p.verificationResults ?? null,
         lastSeen: p.lastSeen,
         lastReachedAt: p.lastReachedAt ?? null,
       }
@@ -655,63 +669,36 @@ export class BuyerProxy {
     })
   }
 
-  private _evictPeer(peerId: string): void {
-    const before = this._cachedPeers.length
-    this._cachedPeers = this._cachedPeers.filter((p) => p.peerId !== peerId)
-    this._peerFailures.delete(peerId)
-    if (this._cachedPeers.length < before) {
-      this._cacheLastUpdatedAtMs = Date.now()
-      this._cacheMutationEpoch += 1
-      this._persistPeersToState()
-      log(`Evicted failing peer ${peerId.slice(0, 12)}... from cache (${this._cachedPeers.length} remaining)`)
-    }
-  }
-
   /**
-   * Record a failure against a peer and evict only once it has accumulated
-   * enough failures inside the rolling window. A single timeout or stream
-   * drop is no longer enough to wipe the peer (and its service metadata)
-   * from cache — this kept breaking pinned chats whose peer went briefly
-   * slow but was otherwise healthy.
-   *
-   * Returns true when the threshold was reached and the peer was evicted.
+   * Keep buyer-local failure diagnostics without changing reachability.
+   * The router and discovery cache remain untouched; this is only state the
+   * buyer can later use for logs or UI indication.
    */
-  private _recordPeerFailure(peerId: string, reason: string): boolean {
+  private _recordPeerFailure(peerId: string, reason: string): void {
     const now = Date.now()
     const existing = this._peerFailures.get(peerId)
-    let entry: { count: number; firstFailureAt: number; lastFailureAt: number }
-    if (!existing || now - existing.lastFailureAt > PEER_FAILURE_WINDOW_MS) {
-      // First failure, or the previous window lapsed — start fresh.
-      entry = { count: 1, firstFailureAt: now, lastFailureAt: now }
-    } else {
-      entry = {
-        count: existing.count + 1,
-        firstFailureAt: existing.firstFailureAt,
-        lastFailureAt: now,
-      }
-    }
+    const shouldStartFresh = !existing || now - existing.lastFailureAt > PEER_FAILURE_WINDOW_MS
+    const entry: PeerFailureEntry = shouldStartFresh
+      ? { count: 1, firstFailureAt: now, lastFailureAt: now, lastReason: reason }
+      : {
+          count: existing.count + 1,
+          firstFailureAt: existing.firstFailureAt,
+          lastFailureAt: now,
+          lastReason: reason,
+        }
+
     this._peerFailures.set(peerId, entry)
-
-    if (entry.count >= PEER_FAILURE_THRESHOLD) {
-      log(
-        `Peer ${peerId.slice(0, 12)}... reached failure threshold `
-        + `(${entry.count}/${PEER_FAILURE_THRESHOLD} within ${PEER_FAILURE_WINDOW_MS}ms, reason=${reason}); evicting.`,
-      )
-      this._evictPeer(peerId)
-      return true
-    }
-
     log(
-      `Peer ${peerId.slice(0, 12)}... failure ${entry.count}/${PEER_FAILURE_THRESHOLD} within window (reason=${reason}); keeping in cache.`,
+      `Peer ${peerId.slice(0, 12)}... failure ${entry.count} within diagnostic window `
+      + `(reason=${reason}); retaining cached discovery metadata.`,
     )
-    return false
   }
 
   /**
    * Stamp `lastReachedAt` on a peer after a successful request so the
    * carry-forward heuristic can trust local transport liveness even when the
    * DHT record grows stale. Persisted so the signal survives restarts. Also
-   * clears any accumulated failure counter so the peer starts fresh.
+   * clears buyer-local diagnostic failures because the peer recovered.
    */
   private _rememberSuccessfulPeer(peerId: string): void {
     this._peerFailures.delete(peerId)
@@ -988,19 +975,18 @@ export class BuyerProxy {
       body: new Uint8Array(body),
     }
 
-    // Snapshot both session overrides together before any await so a concurrent
-    // _reloadSessionOverrides() cannot produce a service/peer mismatch mid-request.
-    const effectivePinnedService = this._pinnedService
+    // Snapshot the session peer pin before any await so a concurrent
+    // _reloadSessionOverrides() cannot change routing mid-request.
     const effectivePinnedPeer = this._pinnedPeer
-    if (effectivePinnedService) {
-      const { body: rewrittenBody, headers: rewrittenHeaders } = rewriteServiceInBody(
-        serializedReq.body,
-        serializedReq.headers,
-        effectivePinnedService,
-      )
-      if (rewrittenBody !== serializedReq.body) {
-        serializedReq = { ...serializedReq, body: rewrittenBody, headers: rewrittenHeaders }
-        log(`Service override applied: ${effectivePinnedService}`)
+    const {
+      body: servicePinBody,
+      headers: servicePinHeaders,
+      pinnedPeerId: bodyPinnedPeer,
+    } = rewritePeerPinnedServiceInBody(serializedReq.body, serializedReq.headers)
+    if (servicePinBody !== serializedReq.body) {
+      serializedReq = { ...serializedReq, body: servicePinBody, headers: servicePinHeaders }
+      if (bodyPinnedPeer) {
+        log(`Model peer pin applied: peer=${bodyPinnedPeer.slice(0, 12)}...`)
       }
     }
 
@@ -1027,12 +1013,13 @@ export class BuyerProxy {
     const requestedService = extractRequestedService(serializedReq)
     log(`Routing: protocol=${requestProtocol ?? 'null'} service=${requestedService ?? 'null'}`)
     const explicitProvider = getExplicitProviderOverride(serializedReq)
-    const explicitPeerId = getExplicitPeerIdOverride(serializedReq, effectivePinnedPeer ?? undefined)
+    const explicitPeerId = getExplicitPeerIdOverride(serializedReq, effectivePinnedPeer ?? undefined, bodyPinnedPeer)
     log(`Routing hints: provider=${explicitProvider ?? 'auto'} pin-peer=${explicitPeerId ?? 'none'}`)
 
     // Auto peer selection is disabled. Every request MUST target a specific
-    // peer, either via the per-request `x-antseed-pin-peer` header or via a
-    // session-wide pin set by `antseed buyer connection set --peer <peerId>`.
+    // peer, either via the per-request `x-antseed-pin-peer` header, a
+    // `<peerId>@<model>` model prefix, or a session-wide pin set by
+    // `antseed buyer connection set --peer <peerId>`.
     //
     // Surface the error in the structured shape OpenAI/Anthropic SDKs expect
     // (`{ error: { type, code, message, ... } }`) so callers see a proper
@@ -1044,8 +1031,9 @@ export class BuyerProxy {
       log('Request rejected: no peer pinned')
       const errorMessage =
         'No peer pinned. Auto-selection is disabled.\n'
-        + 'Pin a peer one of two ways:\n'
+        + 'Pin a peer one of three ways:\n'
         + '  • Per-request header:   x-antseed-pin-peer: <peerId>    (40-char hex EVM address)\n'
+        + '  • Model name prefix:    <peerId>@<model>\n'
         + '  • Session pin:          antseed buyer connection set --peer <peerId>\n'
         + 'Discover peers with:       antseed network browse'
       res.writeHead(400, { 'content-type': 'application/json' })
@@ -1057,6 +1045,7 @@ export class BuyerProxy {
           param: 'x-antseed-pin-peer',
           help: {
             perRequestHeader: 'x-antseed-pin-peer: <peerId>',
+            modelPrefix: '<peerId>@<model>',
             sessionPin: 'antseed buyer connection set --peer <peerId>',
             discoverPeers: 'antseed network browse',
           },
@@ -1129,7 +1118,11 @@ export class BuyerProxy {
     }
 
     if (!pinnedDiscovered) {
-      const logSource = serializedReq.headers['x-antseed-pin-peer'] ? 'x-antseed-pin-peer header' : '--peer flag or session pin'
+      const logSource = serializedReq.headers['x-antseed-pin-peer']
+        ? 'x-antseed-pin-peer header'
+        : bodyPinnedPeer
+          ? 'model peer prefix'
+          : '--peer flag or session pin'
       const diagnostics = this._formatPeerSelectionDiagnostics(discoveredPeers)
       log(`Pinned peer ${explicitPeerId.slice(0, 12)}... not discoverable in DHT (${logSource})`)
       res.writeHead(502, { 'content-type': 'text/plain' })
@@ -1442,7 +1435,7 @@ export class BuyerProxy {
         )
         if (router) {
           router.onResult(selectedPeer, {
-            success: !retryableStatusCodes.has(responseForClient.statusCode),
+            success: isRouterSuccess(responseForClient.statusCode, requestForPeer.path, retryableStatusCodes),
             latencyMs,
             tokens: telemetry.usage.totalTokens,
           })
@@ -1518,7 +1511,7 @@ export class BuyerProxy {
         // Report result to router for learning
         if (router) {
           router.onResult(selectedPeer, {
-            success: !retryableStatusCodes.has(response.statusCode),
+            success: isRouterSuccess(response.statusCode, requestForPeer.path, retryableStatusCodes),
             latencyMs,
             tokens: telemetry.usage.totalTokens,
           })
@@ -1541,7 +1534,6 @@ export class BuyerProxy {
       const latencyMs = Date.now() - startTime
       const message = err instanceof Error ? err.message : String(err)
       const abortedLocally = requestSignal.aborted
-      const connectionChurnError = isConnectionChurnError(message)
       log(`Request failed after ${latencyMs}ms: ${message}`)
 
       if (abortedLocally) {
@@ -1574,37 +1566,7 @@ export class BuyerProxy {
         return { done: true }
       }
 
-      if (router) {
-        router.onResult(selectedPeer, {
-          success: false,
-          latencyMs,
-          tokens: 0,
-        })
-      }
-
-      // Avoid poisoning routing cache from control-plane service enumeration failures.
-      // Some peers can time out on /v1/models (service probe) while still serving inference paths.
-      const normalizedPath = requestForPeer.path.toLowerCase()
-      const isControlPlaneServicesRequest = normalizedPath.startsWith('/v1/models')
-      if (isControlPlaneServicesRequest) {
-        log(`Skipping peer failure accounting for control-plane failure on ${requestForPeer.path}`)
-      } else if (connectionChurnError) {
-        const currentState = this._node.getPeerConnectionState(selectedPeer.peerId)
-        if (isConnectionHealthy(currentState)) {
-          log(
-            `Skipping peer failure accounting after connection churn: peer ${selectedPeer.peerId.slice(0, 12)}... `
-            + `has replacement connection state=${currentState}`,
-          )
-        } else {
-          // Route churn-without-replacement through the softened counter so
-          // a single transport hiccup doesn't wipe the peer.
-          this._recordPeerFailure(selectedPeer.peerId, 'connection-churn')
-        }
-      } else {
-        // Soft-evict: only wipe the peer after repeated failures within the
-        // rolling window. A single timeout / 5xx is not enough.
-        this._recordPeerFailure(selectedPeer.peerId, 'request-failed')
-      }
+      this._recordPeerFailure(selectedPeer.peerId, 'request-failed')
 
       if (res.headersSent) {
         // Headers already sent (streaming), can't retry

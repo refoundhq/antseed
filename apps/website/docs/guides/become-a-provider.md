@@ -110,6 +110,66 @@ export ANTSEED_IDENTITY_HEX=<your-64-char-hex-private-key>
 Use a dedicated key for your provider node. Generate one with any EVM wallet tool. The corresponding address is where you'll receive USDC earnings.
 :::
 
+### Optional: Verify your domain and GitHub account
+
+Production providers can attach public ownership proofs to their signed peer metadata. This helps buyers and directories recognize that a peer is operated by the same party that controls a domain or GitHub account.
+
+These proofs bind to your **peer ID** — the EVM address derived from `ANTSEED_IDENTITY_HEX`. If your deployment uses a seller contract or staking proxy, do not put the contract address in the proof. Buyers verify seller-contract delegation separately.
+
+To verify a domain with DNS, create a TXT record at `_antseed.<domain>`:
+
+```text
+Name:  _antseed.provider.example.com
+Type:  TXT
+Value: antseed-peer=<your-peer-id-without-0x>
+```
+
+Then add the claim to `~/.antseed/config.json`:
+
+```json
+{
+  "seller": {
+    "verifications": {
+      "domains": [
+        {
+          "domain": "provider.example.com",
+          "methods": ["dns-txt"]
+        }
+      ]
+    }
+  }
+}
+```
+
+To verify GitHub, create a public repository containing `antseed.json` at the root:
+
+```json
+{
+  "type": "antseed-github-verification",
+  "peerId": "<your-peer-id-without-0x>",
+  "username": "example-org"
+}
+```
+
+Then add:
+
+```json
+{
+  "seller": {
+    "verifications": {
+      "github": [
+        {
+          "username": "example-org",
+          "repository": "antseed-verification"
+        }
+      ]
+    }
+  }
+}
+```
+
+You can combine both `domains` and `github` under the same `seller.verifications` object. See [Configuration](/docs/config#domain-and-github-verification) for the full proof formats, including HTTPS well-known domain verification.
+
 ## 4. Recommended: Set a Custom Base RPC URL
 
 Production sellers should use their own Base JSON-RPC endpoint instead of relying on public defaults. Public RPCs are useful for testing, but they can be rate limited, slow during traffic spikes, or unavailable when your node needs to reserve, settle, register, or stake on-chain.

@@ -5,6 +5,7 @@ import type {
   RuntimeProcessState,
 } from '../types/bridge';
 import type { ChatMessage } from '../ui/components/chat/chat-shared';
+import type { ChatPermissionMode, ToolApprovalRequest } from '../types/bridge';
 
 export type BadgeTone = 'active' | 'idle' | 'warn' | 'bad';
 
@@ -35,6 +36,7 @@ export type PeerEntry = {
   outputUsdPerMillion: number;
   capacityMsgPerHour: number;
   reputation: number;
+  onChainReputationScore: number | null;
   lastSeen: number;
   lastReachedAt: number | null;
   source: string;
@@ -69,6 +71,12 @@ export type ChatServiceOptionEntry = {
   description: string;
 };
 
+export type DiscoverVerificationLink = {
+  kind: 'domain' | 'github';
+  label: string;
+  href: string;
+};
+
 export type DiscoverRow = {
   // Identity
   rowKey: string;              // `${peerId}:${serviceId}`
@@ -90,6 +98,7 @@ export type DiscoverRow = {
    * identification badge on the Discover card. See docs/protocol/diem-proxy.md.
    */
   sellerContract: string | null;
+  verificationLinks: DiscoverVerificationLink[];
   peerDisplayName: string | null;
   peerLabel: string;
 
@@ -209,6 +218,11 @@ export type RendererUiState = {
   creditsOperatorAddress: string | null;
   creditsLoading: boolean;
   creditsLastRefreshedAt: number;
+
+  // --- Agent access / tool approval ---
+  chatPermissionMode: ChatPermissionMode;
+  chatToolApprovalRequests: ToolApprovalRequest[];
+  chatToolApprovalRequest: ToolApprovalRequest | null;
 
   // --- Session approval ---
   chatPaymentApprovalVisible: boolean;
@@ -359,6 +373,11 @@ export function createInitialUiState(): RendererUiState {
     creditsOperatorAddress: null,
     creditsLoading: false,
     creditsLastRefreshedAt: 0,
+
+    // Agent access / tool approval
+    chatPermissionMode: 'manual',
+    chatToolApprovalRequests: [],
+    chatToolApprovalRequest: null,
 
     // Session approval
     chatPaymentApprovalVisible: false,
