@@ -45,6 +45,9 @@ interface IAntseedSellerPools {
     event MaxLockDisabled(
         uint256 indexed positionId, address indexed staker, uint256 effectiveEpoch, uint256 stakeEndEpoch
     );
+    event LockExtended(
+        uint256 indexed positionId, address indexed staker, uint256 effectiveEpoch, uint256 stakeEndEpoch
+    );
     event PoolConfigSet(
         uint256 minStakeEpochs,
         uint256 maxStakeEpochs,
@@ -84,6 +87,7 @@ interface IAntseedSellerPools {
     function moveStakes(uint256[] calldata positionIds, uint256 toAgentId)
         external
         returns (uint256[] memory newPositionIds);
+    function extendLock(uint256 positionId, uint256 additionalEpochs) external;
     function enableMaxLock(uint256 positionId) external;
     function disableMaxLock(uint256 positionId) external;
     function withdrawStake(uint256 positionId) external;

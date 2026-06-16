@@ -331,6 +331,39 @@ contract AntseedSellerPools is IAntseedSellerPools, ERC721, Ownable2Step, Reentr
         }
     }
 
+    /**
+     * @notice Extend a normal locked position from the next epoch onward.
+     *         Historical epochs keep the old lock curve. The new end cannot be
+     *         further than `maxStakeEpochs` from the effective epoch.
+     */
+    function extendLock(uint256 positionId, uint256 additionalEpochs) external nonReentrant {
+        if (additionalEpochs == 0) revert InvalidValue();
+
+        Position storage position = positions[positionId];
+        if (position.owner == address(0)) revert InvalidPosition();
+        if (ownerOf(positionId) != msg.sender) revert NotPositionOwner();
+        if (position.withdrawn || position.closedAtEpoch != 0) revert PositionClosed();
+
+        uint256 effectiveEpoch = currentEpoch() + 1;
+        if (effectiveEpoch < position.stakeStartEpoch) effectiveEpoch = position.stakeStartEpoch;
+        if (_positionMaxLockPower[positionId].upperLookupRecent(effectiveEpoch) != 0) revert PositionClosed();
+
+        uint256 oldEndEpoch = _positionNormalEndEpoch[positionId].upperLookupRecent(effectiveEpoch);
+        if (oldEndEpoch == 0 || effectiveEpoch >= oldEndEpoch) revert StakeDurationOutOfBounds();
+
+        uint256 maxEndEpoch = effectiveEpoch + maxStakeEpochs;
+        uint256 requestedEndEpoch = oldEndEpoch + additionalEpochs;
+        uint256 newEndEpoch = requestedEndEpoch > maxEndEpoch ? maxEndEpoch : requestedEndEpoch;
+        if (newEndEpoch <= oldEndEpoch) revert StakeDurationOutOfBounds();
+
+        position.stakeEndEpoch = uint64(newEndEpoch);
+        _positionNormalEndEpoch[positionId].push(effectiveEpoch, newEndEpoch);
+        _removePowerRange(position.agentId, effectiveEpoch, oldEndEpoch, position.weightAmount);
+        _addPowerRange(position.agentId, effectiveEpoch, newEndEpoch, position.weightAmount);
+
+        emit LockExtended(positionId, msg.sender, effectiveEpoch, newEndEpoch);
+    }
+
     // ═══════════════════════════════════════════════════════════════════
     //                        CORE — MAX LOCK
     // ═══════════════════════════════════════════════════════════════════

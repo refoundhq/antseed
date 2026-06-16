@@ -372,6 +372,59 @@ contract AntseedSellerPoolsTest is Test {
         assertEq(pools.stakerAgentActiveStake(staker, otherAgentId), 100 ether);
     }
 
+    function test_extendLockOnlyChangesFutureEpochPower() public {
+        uint256 positionId = _stake(staker, agentId, 100 ether, 4);
+
+        vm.warp(block.timestamp + EPOCH_DURATION);
+        assertEq(pools.positionWeightAtEpoch(positionId, 1), 400 ether);
+        assertEq(pools.positionWeightAtEpoch(positionId, 2), 300 ether);
+        assertEq(pools.poolWeightAtEpoch(agentId, 1), 400 ether);
+        assertEq(pools.poolWeightAtEpoch(agentId, 2), 300 ether);
+
+        vm.prank(staker);
+        pools.extendLock(positionId, 3);
+
+        (,,,,, uint64 stakeEndEpoch,,) = pools.positions(positionId);
+        assertEq(stakeEndEpoch, 8);
+
+        assertEq(pools.positionWeightAtEpoch(positionId, 1), 400 ether);
+        assertEq(pools.positionWeightAtEpoch(positionId, 2), 600 ether);
+        assertEq(pools.positionWeightAtEpoch(positionId, 7), 100 ether);
+        assertEq(pools.positionWeightAtEpoch(positionId, 8), 0);
+        assertEq(pools.poolWeightAtEpoch(agentId, 1), 400 ether);
+        assertEq(pools.poolWeightAtEpoch(agentId, 2), 600 ether);
+        assertEq(pools.poolWeightAtEpoch(agentId, 7), 100 ether);
+        assertEq(pools.poolWeightAtEpoch(agentId, 8), 0);
+    }
+
+    function test_extendLockCapsAtMaxDurationAndRejectsInvalidStates() public {
+        uint256 positionId = _stake(staker, agentId, 100 ether, 4);
+
+        vm.expectRevert(IAntseedSellerPools.InvalidValue.selector);
+        vm.prank(staker);
+        pools.extendLock(positionId, 0);
+
+        vm.prank(staker);
+        pools.extendLock(positionId, 100);
+
+        (,,,,, uint64 stakeEndEpoch,,) = pools.positions(positionId);
+        assertEq(stakeEndEpoch, 53);
+        assertEq(pools.positionWeightAtEpoch(positionId, 1), 5_200 ether);
+
+        vm.expectRevert(IAntseedSellerPools.StakeDurationOutOfBounds.selector);
+        vm.prank(staker);
+        pools.extendLock(positionId, 1);
+
+        uint256 maxLockPositionId = _stake(staker, otherAgentId, 100 ether, 4);
+        vm.warp(block.timestamp + EPOCH_DURATION);
+        vm.prank(staker);
+        pools.enableMaxLock(maxLockPositionId);
+
+        vm.expectRevert(IAntseedSellerPools.PositionClosed.selector);
+        vm.prank(staker);
+        pools.extendLock(maxLockPositionId, 1);
+    }
+
     function test_batchMoveCreatesPortfolioPositions() public {
         uint256 firstPositionId = _stake(staker, agentId, 100 ether, 4);
         uint256 secondPositionId = _stake(staker, agentId, 50 ether, 3);
