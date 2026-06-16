@@ -31,9 +31,9 @@ import { IERC8004Registry } from "../interfaces/IERC8004Registry.sol";
  *           - This contract only tracks stake, pool power, bootstrap power,
  *             position weights, slashing, and APY caps. Usage verification,
  *             wash-trading policy, and reward-program shares live outside it.
- *           - Pool power is precomputed at stake time into per-epoch totals.
- *             High-frequency settlement should read O(1) epoch power and never
- *             loop over positions.
+ *           - Pool power is stored as start/end range deltas. Reads derive
+ *             epoch power from a bounded lookback (`MAX_STAKE_EPOCHS_CAP`) and
+ *             never loop over positions.
  *           - New stake, matched bootstrap stake, and restaked rewards activate
  *             after `stakeActivationDelay`. Moves and early withdrawals take
  *             effect at the next epoch so current-epoch power stays frozen.
@@ -123,10 +123,12 @@ contract AntseedSellerPools is IAntseedSellerPools, ERC721, Ownable2Step, Reentr
     // ─── Position And Epoch Accounting ───────────────────────────────
     mapping(uint256 => Position) public positions;
 
-    mapping(uint256 => mapping(uint256 => uint256)) public poolPowerByEpoch;
-    mapping(uint256 => mapping(uint256 => uint256)) public poolActiveStakeByEpoch;
-    mapping(uint256 => mapping(uint256 => uint256)) public bootstrapPowerByEpoch;
-    mapping(uint256 => uint256) public totalPowerByEpoch;
+    mapping(uint256 => mapping(uint256 => int256)) private _poolWeightAmountDelta;
+    mapping(uint256 => mapping(uint256 => int256)) private _poolWeightedEndDelta;
+    mapping(uint256 => mapping(uint256 => int256)) private _bootstrapWeightAmountDelta;
+    mapping(uint256 => mapping(uint256 => int256)) private _bootstrapWeightedEndDelta;
+    mapping(uint256 => int256) private _totalWeightAmountDelta;
+    mapping(uint256 => int256) private _totalWeightedEndDelta;
 
     // ─── Bootstrap And Reward-Staker Permissions ─────────────────────
     mapping(address => bool) public rewardStakers;
@@ -492,7 +494,7 @@ contract AntseedSellerPools is IAntseedSellerPools, ERC721, Ownable2Step, Reentr
     }
 
     function poolWeightAtEpoch(uint256 agentId, uint256 epoch) public view returns (uint256 weight) {
-        weight = poolPowerByEpoch[agentId][epoch];
+        (weight,) = _poolPowerAndActiveWeightAtEpoch(agentId, epoch);
     }
 
     function poolWeightAtEpoch(address seller, uint256 epoch) public view returns (uint256 weight) {
@@ -559,7 +561,7 @@ contract AntseedSellerPools is IAntseedSellerPools, ERC721, Ownable2Step, Reentr
     }
 
     function poolActiveStakeAtEpoch(uint256 agentId, uint256 epoch) public view returns (uint256 activeStake) {
-        activeStake = poolActiveStakeByEpoch[agentId][epoch];
+        (, activeStake) = _poolPowerAndActiveWeightAtEpoch(agentId, epoch);
     }
 
     function poolActiveStakeAtEpoch(address seller, uint256 epoch) public view returns (uint256 activeStake) {
@@ -577,7 +579,7 @@ contract AntseedSellerPools is IAntseedSellerPools, ERC721, Ownable2Step, Reentr
     }
 
     function totalPowerWeightAtEpoch(uint256 epoch) external view returns (uint256) {
-        return totalPowerByEpoch[epoch];
+        return _powerAtEpoch(_totalWeightAmountDelta, _totalWeightedEndDelta, epoch);
     }
 
     function currentPoolSecurityWeight(uint256 agentId) external view returns (uint256) {
@@ -589,13 +591,13 @@ contract AntseedSellerPools is IAntseedSellerPools, ERC721, Ownable2Step, Reentr
     }
 
     function currentTotalSecurityWeight() external view returns (uint256) {
-        return totalPowerByEpoch[currentEpoch()];
+        return _powerAtEpoch(_totalWeightAmountDelta, _totalWeightedEndDelta, currentEpoch());
     }
 
     function currentPoolSecurityShareBps(uint256 agentId) external view returns (uint256 shareBps) {
         uint256 epoch = currentEpoch();
         uint256 poolWeight = poolPowerWeightAtEpoch(agentId, epoch);
-        uint256 totalWeight = totalPowerByEpoch[epoch];
+        uint256 totalWeight = _powerAtEpoch(_totalWeightAmountDelta, _totalWeightedEndDelta, epoch);
         if (poolWeight == 0 || totalWeight == 0) return 0;
         return (poolWeight * BPS_DENOMINATOR) / totalWeight;
     }
@@ -605,13 +607,13 @@ contract AntseedSellerPools is IAntseedSellerPools, ERC721, Ownable2Step, Reentr
         if (agentId == 0) return 0;
         uint256 epoch = currentEpoch();
         uint256 poolWeight = poolPowerWeightAtEpoch(agentId, epoch);
-        uint256 totalWeight = totalPowerByEpoch[epoch];
+        uint256 totalWeight = _powerAtEpoch(_totalWeightAmountDelta, _totalWeightedEndDelta, epoch);
         if (poolWeight == 0 || totalWeight == 0) return 0;
         return (poolWeight * BPS_DENOMINATOR) / totalWeight;
     }
 
     function bootstrapWeightAtEpoch(uint256 agentId, uint256 epoch) public view returns (uint256 weight) {
-        weight = bootstrapPowerByEpoch[agentId][epoch];
+        weight = _powerAtEpoch(_bootstrapWeightAmountDelta[agentId], _bootstrapWeightedEndDelta[agentId], epoch);
     }
 
     function bootstrapWeightAtEpoch(address seller, uint256 epoch) public view returns (uint256 weight) {
@@ -740,8 +742,7 @@ contract AntseedSellerPools is IAntseedSellerPools, ERC721, Ownable2Step, Reentr
             if (decayEndEpoch == 0 || fromEpoch < decayEndEpoch) revert InvalidValue();
         }
 
-        ApyCapOverride memory capOverride =
-            ApyCapOverride({ fromEpoch: uint64(fromEpoch), capBps: uint16(capBps) });
+        ApyCapOverride memory capOverride = ApyCapOverride({ fromEpoch: uint64(fromEpoch), capBps: uint16(capBps) });
 
         uint256 count = apyCapOverrides.length;
         if (count != 0) {
@@ -875,36 +876,92 @@ contract AntseedSellerPools is IAntseedSellerPools, ERC721, Ownable2Step, Reentr
     }
 
     function _addPowerRange(uint256 agentId, uint256 startEpoch, uint256 stakeEndEpoch, uint256 amount) internal {
-        for (uint256 epoch = startEpoch; epoch < stakeEndEpoch; epoch++) {
-            uint256 weight = amount * (stakeEndEpoch - epoch);
-            poolPowerByEpoch[agentId][epoch] += weight;
-            totalPowerByEpoch[epoch] += weight;
-            poolActiveStakeByEpoch[agentId][epoch] += amount;
-        }
+        _applyPowerRange(agentId, startEpoch, stakeEndEpoch, amount, true);
     }
 
     function _removePowerRange(uint256 agentId, uint256 startEpoch, uint256 stakeEndEpoch, uint256 amount) internal {
-        for (uint256 epoch = startEpoch; epoch < stakeEndEpoch; epoch++) {
-            uint256 weight = amount * (stakeEndEpoch - epoch);
-            poolPowerByEpoch[agentId][epoch] -= weight;
-            totalPowerByEpoch[epoch] -= weight;
-            poolActiveStakeByEpoch[agentId][epoch] -= amount;
-        }
+        _applyPowerRange(agentId, startEpoch, stakeEndEpoch, amount, false);
     }
 
     function _addBootstrapPowerRange(uint256 agentId, uint256 startEpoch, uint256 stakeEndEpoch, uint256 amount)
         internal
     {
-        for (uint256 epoch = startEpoch; epoch < stakeEndEpoch; epoch++) {
-            bootstrapPowerByEpoch[agentId][epoch] += amount * (stakeEndEpoch - epoch);
-        }
+        _applyBootstrapPowerRange(agentId, startEpoch, stakeEndEpoch, amount, true);
     }
 
     function _removeBootstrapPowerRange(uint256 agentId, uint256 startEpoch, uint256 stakeEndEpoch, uint256 amount)
         internal
     {
-        for (uint256 epoch = startEpoch; epoch < stakeEndEpoch; epoch++) {
-            bootstrapPowerByEpoch[agentId][epoch] -= amount * (stakeEndEpoch - epoch);
+        _applyBootstrapPowerRange(agentId, startEpoch, stakeEndEpoch, amount, false);
+    }
+
+    function _applyPowerRange(uint256 agentId, uint256 startEpoch, uint256 stakeEndEpoch, uint256 amount, bool add)
+        internal
+    {
+        int256 signedAmount = _signedAmount(amount, add);
+        int256 signedWeightedEnd = _signedAmount(amount * stakeEndEpoch, add);
+        _poolWeightAmountDelta[agentId][startEpoch] += signedAmount;
+        _poolWeightedEndDelta[agentId][startEpoch] += signedWeightedEnd;
+        _poolWeightAmountDelta[agentId][stakeEndEpoch] -= signedAmount;
+        _poolWeightedEndDelta[agentId][stakeEndEpoch] -= signedWeightedEnd;
+        _totalWeightAmountDelta[startEpoch] += signedAmount;
+        _totalWeightedEndDelta[startEpoch] += signedWeightedEnd;
+        _totalWeightAmountDelta[stakeEndEpoch] -= signedAmount;
+        _totalWeightedEndDelta[stakeEndEpoch] -= signedWeightedEnd;
+    }
+
+    function _applyBootstrapPowerRange(
+        uint256 agentId,
+        uint256 startEpoch,
+        uint256 stakeEndEpoch,
+        uint256 amount,
+        bool add
+    ) internal {
+        int256 signedAmount = _signedAmount(amount, add);
+        int256 signedWeightedEnd = _signedAmount(amount * stakeEndEpoch, add);
+        _bootstrapWeightAmountDelta[agentId][startEpoch] += signedAmount;
+        _bootstrapWeightedEndDelta[agentId][startEpoch] += signedWeightedEnd;
+        _bootstrapWeightAmountDelta[agentId][stakeEndEpoch] -= signedAmount;
+        _bootstrapWeightedEndDelta[agentId][stakeEndEpoch] -= signedWeightedEnd;
+    }
+
+    function _poolPowerAndActiveWeightAtEpoch(uint256 agentId, uint256 epoch)
+        internal
+        view
+        returns (uint256 power, uint256 activeWeight)
+    {
+        (power, activeWeight) =
+            _powerAndActiveWeightAtEpoch(_poolWeightAmountDelta[agentId], _poolWeightedEndDelta[agentId], epoch);
+    }
+
+    function _powerAtEpoch(
+        mapping(uint256 => int256) storage weightAmountDelta,
+        mapping(uint256 => int256) storage weightedEndDelta,
+        uint256 epoch
+    ) internal view returns (uint256 power) {
+        (power,) = _powerAndActiveWeightAtEpoch(weightAmountDelta, weightedEndDelta, epoch);
+    }
+
+    function _powerAndActiveWeightAtEpoch(
+        mapping(uint256 => int256) storage weightAmountDelta,
+        mapping(uint256 => int256) storage weightedEndDelta,
+        uint256 epoch
+    ) internal view returns (uint256 power, uint256 activeWeight) {
+        uint256 firstEpoch = epoch > MAX_STAKE_EPOCHS_CAP ? epoch - MAX_STAKE_EPOCHS_CAP : 0;
+        int256 activeAmount;
+        int256 activeWeightedEnd;
+        for (uint256 cursor = firstEpoch; cursor <= epoch; cursor++) {
+            activeAmount += weightAmountDelta[cursor];
+            activeWeightedEnd += weightedEndDelta[cursor];
         }
+        if (activeAmount <= 0 || activeWeightedEnd <= 0) return (0, 0);
+        int256 signedPower = activeWeightedEnd - activeAmount * int256(epoch);
+        if (signedPower <= 0) return (0, 0);
+        return (uint256(signedPower), uint256(activeAmount));
+    }
+
+    function _signedAmount(uint256 amount, bool add) internal pure returns (int256 signedAmount) {
+        signedAmount = int256(amount);
+        if (!add) signedAmount = -signedAmount;
     }
 }

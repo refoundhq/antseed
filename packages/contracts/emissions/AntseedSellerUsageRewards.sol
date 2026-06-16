@@ -15,27 +15,25 @@ import { IAntseedUsageAccounting } from "../interfaces/IAntseedUsageAccounting.s
  * @notice Lazy seller-pool reward controller for recognized usage.
  *
  *         Usage accounting records raw seller usage and weighted pool points
- *         during each epoch. When a staker claims or restakes, this contract
- *         calculates that position's share of its pool's program budget:
+ *         during each epoch. The pool epoch is settled once, APY cap and
+ *         burn/reserve routing are applied at the pool budget level, and
+ *         stakers/bootstrap commitments split the settled claimable budget:
  *
  *         poolReward = programBudget(epoch) * poolWeightedPoints / totalWeightedPoints
- *         positionReward = poolReward * positionWeight / poolWeight
+ *         poolClaimable = min(poolReward, poolApyCap)
+ *         positionReward = poolClaimable * positionWeight / poolWeight
  *
- *         APY caps are applied at the position level. Claimable rewards and
- *         over-cap amounts are minted lazily for each claimed epoch. Per epoch,
- *         burn routing is capped at 30% of the full weekly emissions; excess
- *         over that cap is routed to the protocol reserve.
+ *         Per epoch, burn routing is capped at 30% of the full weekly
+ *         emissions; excess over that cap is routed to the protocol reserve.
  *
  *         Important behavior:
  *           - This is the staker pool-reward program, not the direct seller
  *             operator reward program.
  *           - Rewards are not pre-minted into this contract. Claim/restake
- *             computes the position's epoch share, mints claimable ANTS to the
- *             recipient or seller-pools contract, mints capped over-cap amounts
- *             to the dead address, and routes the remaining over-cap amount to
- *             the protocol reserve.
- *           - APY caps are position-specific. A large pool reward can still
- *             burn at claim time if an individual position exceeds its cap.
+ *             settles the pool epoch if needed, mints claimable ANTS to the
+ *             recipient or seller-pools contract, mints capped pool over-cap
+ *             amounts to the dead address, and routes the remaining over-cap
+ *             amount to the protocol reserve.
  *           - Restaking rewards creates a new locked position in the source
  *             agent pool and may receive a configured weight bonus based on lock
  *             length.
@@ -61,11 +59,20 @@ contract AntseedSellerUsageRewards is Ownable2Step, Pausable, ReentrancyGuard {
     mapping(uint256 => mapping(uint256 => bool)) public positionEpochClaimed;
     mapping(address => mapping(uint256 => bool)) public bootstrapEpochClaimed;
     mapping(uint256 => uint256) public epochBurnedAmount;
+    mapping(uint256 => mapping(uint256 => PoolEpochEmission)) public poolEpochEmissions;
 
     struct ClaimRoute {
         address recipient;
         address staker;
         bool emitClaimEvents;
+    }
+
+    struct PoolEpochEmission {
+        bool settled;
+        uint256 grossAmount;
+        uint256 claimableAmount;
+        uint256 burnedAmount;
+        uint256 reserveAmount;
     }
 
     // ─── Events ──────────────────────────────────────────────────────
@@ -95,6 +102,14 @@ contract AntseedSellerUsageRewards is Ownable2Step, Pausable, ReentrancyGuard {
         uint256 indexed agentId,
         uint256 indexed epoch,
         address recipient,
+        uint256 grossAmount,
+        uint256 claimableAmount,
+        uint256 burnedAmount,
+        uint256 reserveAmount
+    );
+    event PoolUsageRewardSettled(
+        uint256 indexed agentId,
+        uint256 indexed epoch,
         uint256 grossAmount,
         uint256 claimableAmount,
         uint256 burnedAmount,
@@ -218,12 +233,12 @@ contract AntseedSellerUsageRewards is Ownable2Step, Pausable, ReentrancyGuard {
         uint256 totalReserved;
         for (uint256 i = 0; i < epochs.length; i++) {
             uint256 epoch = epochs[i];
-            (uint256 grossAmount, uint256 claimableAmount, uint256 excessAmount) =
-                _bootstrapReward(msg.sender, agentId, epoch);
+            (uint256 grossAmount, uint256 claimableAmount,) = _bootstrapReward(msg.sender, agentId, epoch);
             if (grossAmount == 0) continue;
 
             bootstrapEpochClaimed[msg.sender][epoch] = true;
-            (uint256 burnedAmount, uint256 reserveAmount) = _routeReward(epoch, recipient, claimableAmount, excessAmount);
+            (, uint256 burnedAmount, uint256 reserveAmount) = _settlePoolEpoch(agentId, epoch);
+            _mint(epoch, recipient, claimableAmount);
             totalClaimed += claimableAmount;
             totalBurned += burnedAmount;
             totalReserved += reserveAmount;
@@ -294,11 +309,7 @@ contract AntseedSellerUsageRewards is Ownable2Step, Pausable, ReentrancyGuard {
     //                        INTERNAL HELPERS
     // ═══════════════════════════════════════════════════════════════════
 
-    function _claimStakerRewards(
-        uint256 positionId,
-        uint256[] calldata epochs,
-        ClaimRoute memory route
-    )
+    function _claimStakerRewards(uint256 positionId, uint256[] calldata epochs, ClaimRoute memory route)
         internal
         returns (uint256 totalClaimed, uint256 totalBurned, uint256 totalReserved)
     {
@@ -315,35 +326,28 @@ contract AntseedSellerUsageRewards is Ownable2Step, Pausable, ReentrancyGuard {
         }
     }
 
-    function _claimStakerRewardEpoch(
-        uint256 positionId,
-        uint256 agentId,
-        uint256 epoch,
-        ClaimRoute memory route
-    ) internal returns (uint256 claimableAmount, uint256 burnedAmount, uint256 reserveAmount) {
+    function _claimStakerRewardEpoch(uint256 positionId, uint256 agentId, uint256 epoch, ClaimRoute memory route)
+        internal
+        returns (uint256 claimableAmount, uint256 burnedAmount, uint256 reserveAmount)
+    {
         uint256 grossAmount;
-        uint256 excessAmount;
-        (grossAmount, claimableAmount, excessAmount) = _positionReward(positionId, agentId, epoch);
+        (grossAmount, claimableAmount,) = _positionReward(positionId, agentId, epoch);
         if (grossAmount == 0) return (0, 0, 0);
 
         positionEpochClaimed[positionId][epoch] = true;
-        (burnedAmount, reserveAmount) = _routeReward(epoch, route.recipient, claimableAmount, excessAmount);
+        (, burnedAmount, reserveAmount) = _settlePoolEpoch(agentId, epoch);
+        _mint(epoch, route.recipient, claimableAmount);
         if (route.emitClaimEvents) {
             emit StakerUsageRewardClaimed(
-                positionId, route.staker, route.recipient, epoch, grossAmount, claimableAmount, burnedAmount, reserveAmount
+                positionId,
+                route.staker,
+                route.recipient,
+                epoch,
+                grossAmount,
+                claimableAmount,
+                burnedAmount,
+                reserveAmount
             );
-        }
-    }
-
-    function _routeReward(uint256 epoch, address recipient, uint256 claimableAmount, uint256 excessAmount)
-        internal
-        returns (uint256 burnedAmount, uint256 reserveAmount)
-    {
-        (burnedAmount, reserveAmount) = _allocateExcessForEpoch(epoch, excessAmount);
-        _mint(epoch, recipient, claimableAmount);
-        _mint(epoch, DEAD_ADDRESS, burnedAmount);
-        if (reserveAmount != 0) {
-            _mint(epoch, _protocolReserve(), reserveAmount);
         }
     }
 
@@ -359,12 +363,13 @@ contract AntseedSellerUsageRewards is Ownable2Step, Pausable, ReentrancyGuard {
         if (positionWeight == 0) return (0, 0, 0);
 
         uint256 poolWeight = pools.poolWeightAtEpoch(agentId, epoch);
-        uint256 poolGrossReward = _poolGrossReward(agentId, epoch);
-        if (poolWeight == 0 || poolGrossReward == 0) return (0, 0, 0);
+        if (poolWeight == 0) return (0, 0, 0);
+
+        (uint256 poolGrossReward, uint256 poolClaimableReward) = _poolRewardPreview(agentId, epoch);
+        if (poolGrossReward == 0) return (0, 0, 0);
 
         grossAmount = Math.mulDiv(poolGrossReward, positionWeight, poolWeight);
-        uint256 cap = pools.positionRewardCapAtEpoch(positionId, epoch);
-        claimableAmount = grossAmount < cap ? grossAmount : cap;
+        claimableAmount = Math.mulDiv(poolClaimableReward, positionWeight, poolWeight);
         burnedAmount = grossAmount - claimableAmount;
     }
 
@@ -380,13 +385,62 @@ contract AntseedSellerUsageRewards is Ownable2Step, Pausable, ReentrancyGuard {
         if (bootstrapWeight == 0) return (0, 0, 0);
 
         uint256 poolWeight = pools.poolWeightAtEpoch(agentId, epoch);
-        uint256 poolGrossReward = _poolGrossReward(agentId, epoch);
-        if (poolWeight == 0 || poolGrossReward == 0) return (0, 0, 0);
+        if (poolWeight == 0) return (0, 0, 0);
+
+        (uint256 poolGrossReward, uint256 poolClaimableReward) = _poolRewardPreview(agentId, epoch);
+        if (poolGrossReward == 0) return (0, 0, 0);
 
         grossAmount = Math.mulDiv(poolGrossReward, bootstrapWeight, poolWeight);
-        uint256 cap = pools.bootstrapRewardCapAtEpoch(seller, epoch);
-        claimableAmount = grossAmount < cap ? grossAmount : cap;
+        claimableAmount = Math.mulDiv(poolClaimableReward, bootstrapWeight, poolWeight);
         burnedAmount = grossAmount - claimableAmount;
+    }
+
+    function _settlePoolEpoch(uint256 agentId, uint256 epoch)
+        internal
+        returns (PoolEpochEmission storage emission, uint256 burnedAmount, uint256 reserveAmount)
+    {
+        emission = poolEpochEmissions[epoch][agentId];
+        if (emission.settled) return (emission, 0, 0);
+
+        (uint256 grossAmount, uint256 claimableAmount) = _poolRewardPreview(agentId, epoch);
+        uint256 excessAmount = grossAmount - claimableAmount;
+        (burnedAmount, reserveAmount) = _allocateExcessForEpoch(epoch, excessAmount);
+
+        emission.settled = true;
+        emission.grossAmount = grossAmount;
+        emission.claimableAmount = claimableAmount;
+        emission.burnedAmount = burnedAmount;
+        emission.reserveAmount = reserveAmount;
+
+        _mint(epoch, DEAD_ADDRESS, burnedAmount);
+        if (reserveAmount != 0) {
+            _mint(epoch, _protocolReserve(), reserveAmount);
+        }
+        emit PoolUsageRewardSettled(agentId, epoch, grossAmount, claimableAmount, burnedAmount, reserveAmount);
+    }
+
+    function _poolRewardPreview(uint256 agentId, uint256 epoch)
+        internal
+        view
+        returns (uint256 grossAmount, uint256 claimableAmount)
+    {
+        PoolEpochEmission memory settledEmission = poolEpochEmissions[epoch][agentId];
+        if (settledEmission.settled) {
+            return (settledEmission.grossAmount, settledEmission.claimableAmount);
+        }
+
+        grossAmount = _poolGrossReward(agentId, epoch);
+        if (grossAmount == 0) return (0, 0);
+
+        IAntseedSellerPools pools = sellerPools;
+        uint256 activeWeight = pools.poolActiveStakeAtEpoch(agentId, epoch);
+        if (activeWeight == 0) return (grossAmount, 0);
+
+        uint256 capBps = pools.apyCapBpsAtEpoch(epoch);
+        if (capBps == 0) return (grossAmount, grossAmount);
+
+        uint256 poolCap = Math.mulDiv(activeWeight, capBps, BPS_DENOMINATOR * 52);
+        claimableAmount = grossAmount < poolCap ? grossAmount : poolCap;
     }
 
     function _poolGrossReward(uint256 agentId, uint256 epoch) internal view returns (uint256) {
@@ -406,9 +460,7 @@ contract AntseedSellerUsageRewards is Ownable2Step, Pausable, ReentrancyGuard {
     }
 
     function burnCapForEpoch(uint256 epoch) public view returns (uint256) {
-        return Math.mulDiv(
-            emissionsAuthority.schedule().getEpochEmission(epoch), BURN_CAP_BPS, BPS_DENOMINATOR
-        );
+        return Math.mulDiv(emissionsAuthority.schedule().getEpochEmission(epoch), BURN_CAP_BPS, BPS_DENOMINATOR);
     }
 
     function _previewBurnedAmount(uint256 epoch, uint256 excessAmount) internal view returns (uint256) {

@@ -833,6 +833,13 @@ contract AntseedEmissionsGateTest is Test {
         assertEq(token.balanceOf(sellerUsageRewards.DEAD_ADDRESS()), burnCap);
         assertEq(token.balanceOf(reserveDest), overCapReward - burnCap);
         assertEq(sellerUsageRewards.epochBurnedAmount(5), burnCap);
+        (bool settled, uint256 settledGross, uint256 settledClaimable, uint256 settledBurned, uint256 settledReserved) =
+            sellerUsageRewards.poolEpochEmissions(5, _agentId(otherSeller));
+        assertTrue(settled);
+        assertEq(settledGross, grossReward);
+        assertEq(settledClaimable, claimableReward);
+        assertEq(settledBurned, burnCap);
+        assertEq(settledReserved, overCapReward - burnCap);
     }
 
     function test_stressWashTradingCannotDominateSellerOrBuyerPrograms() public {

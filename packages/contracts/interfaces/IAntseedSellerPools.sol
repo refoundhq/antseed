@@ -110,6 +110,7 @@ interface IAntseedSellerPools {
     function poolWeightAtEpoch(address seller, uint256 epoch) external view returns (uint256 weight);
     function positionWeightAtEpoch(uint256 positionId, uint256 epoch) external view returns (uint256 weight);
     function positionRewardCapAtEpoch(uint256 positionId, uint256 epoch) external view returns (uint256 cap);
+    function apyCapBpsAtEpoch(uint256 epoch) external view returns (uint256 capBps);
     function bootstrapWeightAtEpoch(uint256 agentId, uint256 epoch) external view returns (uint256 weight);
     function bootstrapWeightAtEpoch(address seller, uint256 epoch) external view returns (uint256 weight);
     function bootstrapRewardCapAtEpoch(address seller, uint256 epoch) external view returns (uint256 cap);
