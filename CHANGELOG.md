@@ -4,15 +4,20 @@ All notable user-facing changes to AntSeed packages are documented here.
 
 This project uses selective package publishing. Each release entry lists the published packages affected by that release.
 
-## 2026-06-15 — Buyer peer failure accounting
+## 2026-06-15 — Buyer peer failure accounting and desktop stream responsiveness
 
 ### Published
 
 - `@antseed/cli@0.1.130`
 
+### Desktop
+
+- `@antseed/desktop`
+
 ### Fixed
 
 - Fixed buyer proxy failure accounting so transient request failures, local buyer payment errors, and `/v1/models` service probes do not make pinned peers unreachable by deleting cached discovery metadata.
+- Fixed Desktop chat sessions becoming sluggish or appearing stuck during long streamed responses by batching streaming UI updates per animation frame while preserving in-progress chat switching behavior.
 
 ## 2026-06-15 — Seller verification links and response-auth sampling
 

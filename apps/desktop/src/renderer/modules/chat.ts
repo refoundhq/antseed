@@ -164,6 +164,7 @@ export function initChatModule({
   const streamFailedAtByConversation = new Map<string, number>();
   const localConversationMessages = new Map<string, ChatMessage[]>();
   const streamingMessagesByConversation = new Map<string, ChatMessage>();
+  const pendingStreamingUiFlushes = new Set<string>();
   let newChatDraftVersion = 0;
 
   const normalizePermissionMode = (value: unknown): ChatPermissionMode => (
@@ -979,6 +980,14 @@ export function initChatModule({
     });
   }
 
+  function queueAnimationFrame(callback: () => void): void {
+    if (typeof requestAnimationFrame === 'function') {
+      requestAnimationFrame(callback);
+      return;
+    }
+    setTimeout(callback, 16);
+  }
+
   function cloneStreamingMessage(message: ChatMessage): ChatMessage {
     return {
       ...message,
@@ -1008,6 +1017,32 @@ export function initChatModule({
     if (message) queueScrollChatToBottom();
   }
 
+  function publishActiveStreamingMessage(): void {
+    const activeConvId = uiState.chatActiveConversation;
+    const message = activeConvId
+      ? streamingMessagesByConversation.get(activeConvId) ?? null
+      : null;
+    uiState.chatStreamingMessage = message ? cloneStreamingMessage(message) : null;
+  }
+
+  function flushStreamingMessage(): void {
+    publishActiveStreamingMessage();
+    notifyUiStateChanged();
+    if (uiState.chatStreamingMessage) queueScrollChatToBottom();
+  }
+
+  function scheduleStreamingMessageFlush(convId: string): void {
+    if (uiState.chatActiveConversation !== convId) return;
+    if (pendingStreamingUiFlushes.has(convId)) return;
+    pendingStreamingUiFlushes.add(convId);
+    queueAnimationFrame(() => {
+      pendingStreamingUiFlushes.delete(convId);
+      if (uiState.chatActiveConversation === convId) {
+        flushStreamingMessage();
+      }
+    });
+  }
+
   function getConversationStreamingMessage(convId: string): ChatMessage | null {
     const message = streamingMessagesByConversation.get(convId);
     return message ? cloneStreamingMessage(message) : null;
@@ -1023,6 +1058,7 @@ export function initChatModule({
     } else {
       streamingMessagesByConversation.delete(convId);
     }
+    pendingStreamingUiFlushes.delete(convId);
 
     if (uiState.chatActiveConversation === convId) {
       setStreamingMessage(message);
@@ -1032,9 +1068,8 @@ export function initChatModule({
   function updateStreamingMessage(convId: string, mutator: (message: ChatMessage) => void): void {
     const current = streamingMessagesByConversation.get(convId);
     if (!current) return;
-    const next = cloneStreamingMessage(current);
-    mutator(next);
-    setConversationStreamingMessage(convId, next);
+    mutator(current);
+    scheduleStreamingMessageFlush(convId);
   }
 
   // ---------------------------------------------------------------------------
