@@ -150,7 +150,7 @@ export interface NodePaymentsConfig {
 }
 
 export interface NodeVerificationConfig {
-  /** Random sample rate for storing full buyer request/response evidence. Default: 0.01. */
+  /** Random sample rate for storing full buyer request/response evidence. Default: 0.005. */
   sampleRate?: number;
   /** Maximum combined encoded request + response bytes per sample. Default: 16 MiB. */
   maxSampleBytes?: number;
