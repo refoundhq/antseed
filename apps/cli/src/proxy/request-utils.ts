@@ -1,4 +1,4 @@
-import type { ConnectionState, PeerInfo, SerializedHttpRequest, SerializedHttpResponse } from '@antseed/node'
+import type { PeerInfo, SerializedHttpRequest, SerializedHttpResponse } from '@antseed/node'
 import { parseJsonObject } from '@antseed/api-adapter'
 
 const debugEnabled = ['1', 'true', 'yes', 'on'].includes(
@@ -226,18 +226,6 @@ export function requestWantsStreaming(headers: Record<string, string>, body: Uin
 
   const parsed = parseJsonObject(body)
   return parsed?.stream === true
-}
-
-export function isConnectionChurnError(message: string): boolean {
-  return /connection .*?\b(closed|failed)\s+during request\b/i.test(message)
-}
-
-export function isConnectionHealthy(state: ConnectionState | null): boolean {
-  if (!state) {
-    return false
-  }
-  const normalized = String(state).toLowerCase()
-  return normalized === 'open' || normalized === 'authenticated' || normalized === 'connecting'
 }
 
 function extractHostFromAddress(address: string): string {
