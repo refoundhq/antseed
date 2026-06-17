@@ -8,13 +8,13 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/utils/structs/Checkpoints.sol";
 
-import { IAntseedRegistry } from "../interfaces/IAntseedRegistry.sol";
-import { IANTSToken } from "../interfaces/IANTSToken.sol";
-import { IAntseedSellerPools } from "../interfaces/IAntseedSellerPools.sol";
-import { IAntseedSellerRewardsPool } from "../interfaces/IAntseedSellerRewardsPool.sol";
-import { IAntseedStaking } from "../interfaces/IAntseedStaking.sol";
-import { IAntseedUsageAccounting } from "../interfaces/IAntseedUsageAccounting.sol";
-import { IERC8004Registry } from "../interfaces/IERC8004Registry.sol";
+import {IAntseedRegistry} from "../interfaces/IAntseedRegistry.sol";
+import {IANTSToken} from "../interfaces/IANTSToken.sol";
+import {IAntseedSellerPools} from "../interfaces/IAntseedSellerPools.sol";
+import {IAntseedSellerRewardsPool} from "../interfaces/IAntseedSellerRewardsPool.sol";
+import {IAntseedStaking} from "../interfaces/IAntseedStaking.sol";
+import {IAntseedUsageAccounting} from "../interfaces/IAntseedUsageAccounting.sol";
+import {IERC8004Registry} from "../interfaces/IERC8004Registry.sol";
 
 /**
  * @title AntseedSellerPools
@@ -29,12 +29,11 @@ import { IERC8004Registry } from "../interfaces/IERC8004Registry.sol";
  *             agent id has active stake or bootstrap power for an epoch.
  *           - Pools are keyed by agent id, not seller address. If an agent is
  *             sold, historical stake remains attached to that agent pool.
- *           - This contract only tracks stake, pool power, bootstrap power,
+ *           - This contract only tracks stake, pool power, bootstrap positions,
  *             position weights, slashing, and APY caps. Usage verification,
  *             wash-trading policy, and reward-program shares live outside it.
- *           - Pool power is stored as start/end range deltas. Reads derive
- *             epoch power from a bounded lookback (`MAX_STAKE_EPOCHS_CAP`) and
- *             never loop over positions.
+ *           - Normal pool power is stored as range deltas in Fenwick trees.
+ *             Reads use exact prefix sums and never loop over positions.
  *           - New stake, matched bootstrap stake, and restaked rewards activate
  *             after `stakeActivationDelay`. Moves and early withdrawals take
  *             effect at the next epoch so current-epoch power stays frozen.
@@ -56,6 +55,7 @@ contract AntseedSellerPools is IAntseedSellerPools, ERC721, Ownable2Step, Reentr
     uint256 public constant MAX_STAKE_EPOCHS_CAP = 52;
     uint256 public constant MAX_RESTAKED_REWARD_WEIGHT_BONUS_BPS = 2_000;
     uint256 public constant BOOTSTRAP_COMMITMENT_STAKE_EPOCHS = 52;
+    uint256 public constant FENWICK_SIZE = 4096;
     address public constant DEAD_ADDRESS = 0x000000000000000000000000000000000000dEaD;
 
     // ─── External Contracts ──────────────────────────────────────────
@@ -116,6 +116,7 @@ contract AntseedSellerPools is IAntseedSellerPools, ERC721, Ownable2Step, Reentr
         uint256 agentId;
         uint256 amount;
         uint256 matchedAmount;
+        uint256 positionId;
         uint64 startEpoch;
         uint64 stakeEndEpoch;
         // bootstrapWeightBps snapshot taken at activation; matching must remove
@@ -124,17 +125,19 @@ contract AntseedSellerPools is IAntseedSellerPools, ERC721, Ownable2Step, Reentr
         uint64 weightBps;
     }
 
+    struct FenwickTree {
+        mapping(uint256 => int256) values;
+    }
+
     // ─── Position And Epoch Accounting ───────────────────────────────
     mapping(uint256 => Position) public positions;
 
-    mapping(uint256 => mapping(uint256 => int256)) private _poolWeightAmountDelta;
-    mapping(uint256 => mapping(uint256 => int256)) private _poolWeightedEndDelta;
-    mapping(uint256 => mapping(uint256 => int256)) private _bootstrapWeightAmountDelta;
-    mapping(uint256 => mapping(uint256 => int256)) private _bootstrapWeightedEndDelta;
-    mapping(uint256 => int256) private _totalWeightAmountDelta;
-    mapping(uint256 => int256) private _totalWeightedEndDelta;
+    mapping(uint256 => FenwickTree) private _poolPowerTree;
+    mapping(uint256 => FenwickTree) private _bootstrapPowerTree;
+    FenwickTree private _totalPowerTree;
     mapping(uint256 => Checkpoints.Trace256) private _poolMaxLockWeightAmount;
     Checkpoints.Trace256 private _totalMaxLockWeightAmount;
+    mapping(uint256 => PositionKind) private _positionKind;
     mapping(uint256 => Checkpoints.Trace256) private _positionMaxLockPower;
     mapping(uint256 => Checkpoints.Trace256) private _positionNormalStartEpoch;
     mapping(uint256 => Checkpoints.Trace256) private _positionNormalEndEpoch;
@@ -222,7 +225,7 @@ contract AntseedSellerPools is IAntseedSellerPools, ERC721, Ownable2Step, Reentr
      *         This does not move ANTS from the rewards pool. It records security
      *         power only, capped and discounted by configuration.
      */
-    function activateBootstrapCommitment(uint256 agentId) external nonReentrant returns (uint256) {
+    function activateBootstrapCommitment(uint256 agentId) external nonReentrant returns (uint256 positionId) {
         if (agentId == 0) revert InvalidValue();
         if (IANTSToken(address(antsToken)).transfersEnabled()) revert BootstrapClosed();
         address seller = msg.sender;
@@ -246,21 +249,21 @@ contract AntseedSellerPools is IAntseedSellerPools, ERC721, Ownable2Step, Reentr
 
         uint256 startEpoch = currentEpoch() + stakeActivationDelay;
         uint256 stakeEndEpoch = startEpoch + BOOTSTRAP_COMMITMENT_STAKE_EPOCHS;
+        uint256 effectiveAmount = (bootstrapAmount * bootstrapWeightBps) / BPS_DENOMINATOR;
+        positionId = _createBootstrapPosition(seller, agentId, effectiveAmount, startEpoch, stakeEndEpoch);
         bootstrapCommitments[seller] = BootstrapCommitment({
             agentId: agentId,
             amount: bootstrapAmount,
             matchedAmount: 0,
+            positionId: positionId,
             startEpoch: uint64(startEpoch),
             stakeEndEpoch: uint64(stakeEndEpoch),
             weightBps: uint64(bootstrapWeightBps)
         });
         bootstrapSellerByAgentId[agentId] = seller;
 
-        uint256 effectiveAmount = (bootstrapAmount * bootstrapWeightBps) / BPS_DENOMINATOR;
-        _addPowerRange(agentId, startEpoch, stakeEndEpoch, effectiveAmount);
         _addBootstrapPowerRange(agentId, startEpoch, stakeEndEpoch, effectiveAmount);
         emit BootstrapCommitmentRecorded(seller, agentId, bootstrapAmount, startEpoch, stakeEndEpoch);
-        return agentId;
     }
 
     /**
@@ -283,16 +286,30 @@ contract AntseedSellerPools is IAntseedSellerPools, ERC721, Ownable2Step, Reentr
         // Remove power at the activation-time discount (telescoping over
         // matchedAmount so partial matches never remove more than was added),
         // and never before the epoch the bootstrap power started at.
+        uint256 effectiveTotal = (commitment.amount * commitment.weightBps) / BPS_DENOMINATOR;
         uint256 effectiveBefore = (commitment.matchedAmount * commitment.weightBps) / BPS_DENOMINATOR;
         commitment.matchedAmount += amount;
-        uint256 effectiveBootstrapAmount =
-            (commitment.matchedAmount * commitment.weightBps) / BPS_DENOMINATOR - effectiveBefore;
+        uint256 effectiveAfter = (commitment.matchedAmount * commitment.weightBps) / BPS_DENOMINATOR;
         uint256 removalStartEpoch = startEpoch < commitment.startEpoch ? commitment.startEpoch : startEpoch;
-        if (effectiveBootstrapAmount != 0 && removalStartEpoch < commitment.stakeEndEpoch) {
-            _removePowerRange(commitment.agentId, removalStartEpoch, commitment.stakeEndEpoch, effectiveBootstrapAmount);
-            _removeBootstrapPowerRange(
-                commitment.agentId, removalStartEpoch, commitment.stakeEndEpoch, effectiveBootstrapAmount
-            );
+        if (removalStartEpoch < commitment.stakeEndEpoch) {
+            uint256 currentBootstrapAmount = effectiveTotal - effectiveBefore;
+            uint256 remainingBootstrapAmount = effectiveTotal - effectiveAfter;
+            if (currentBootstrapAmount != 0) {
+                _closeBootstrapPosition(commitment.positionId, removalStartEpoch);
+                _removeBootstrapPowerRange(
+                    commitment.agentId, removalStartEpoch, commitment.stakeEndEpoch, currentBootstrapAmount
+                );
+            }
+            if (remainingBootstrapAmount != 0) {
+                commitment.positionId = _createBootstrapPosition(
+                    seller, commitment.agentId, remainingBootstrapAmount, removalStartEpoch, commitment.stakeEndEpoch
+                );
+                _addBootstrapPowerRange(
+                    commitment.agentId, removalStartEpoch, commitment.stakeEndEpoch, remainingBootstrapAmount
+                );
+            } else {
+                commitment.positionId = 0;
+            }
         }
         antsToken.safeTransferFrom(msg.sender, address(this), amount);
         positionId = _createWeightedPosition(
@@ -342,6 +359,7 @@ contract AntseedSellerPools is IAntseedSellerPools, ERC721, Ownable2Step, Reentr
         Position storage position = positions[positionId];
         if (position.owner == address(0)) revert InvalidPosition();
         if (ownerOf(positionId) != msg.sender) revert NotPositionOwner();
+        if (_positionKind[positionId] == PositionKind.Bootstrap) revert NonTransferablePosition();
         if (position.withdrawn || position.closedAtEpoch != 0) revert PositionClosed();
 
         uint256 effectiveEpoch = currentEpoch() + 1;
@@ -378,6 +396,7 @@ contract AntseedSellerPools is IAntseedSellerPools, ERC721, Ownable2Step, Reentr
         Position storage position = positions[positionId];
         if (position.owner == address(0)) revert InvalidPosition();
         if (ownerOf(positionId) != msg.sender) revert NotPositionOwner();
+        if (_positionKind[positionId] == PositionKind.Bootstrap) revert NonTransferablePosition();
         if (position.withdrawn || position.closedAtEpoch != 0) revert PositionClosed();
 
         uint256 effectiveEpoch = currentEpoch() + 1;
@@ -408,6 +427,7 @@ contract AntseedSellerPools is IAntseedSellerPools, ERC721, Ownable2Step, Reentr
         Position storage position = positions[positionId];
         if (position.owner == address(0)) revert InvalidPosition();
         if (ownerOf(positionId) != msg.sender) revert NotPositionOwner();
+        if (_positionKind[positionId] == PositionKind.Bootstrap) revert NonTransferablePosition();
         if (position.withdrawn || position.closedAtEpoch != 0) revert PositionClosed();
 
         uint256 effectiveEpoch = currentEpoch() + 1;
@@ -432,6 +452,7 @@ contract AntseedSellerPools is IAntseedSellerPools, ERC721, Ownable2Step, Reentr
         Position storage position = positions[positionId];
         if (position.owner == address(0)) revert InvalidPosition();
         if (ownerOf(positionId) != staker) revert NotPositionOwner();
+        if (_positionKind[positionId] == PositionKind.Bootstrap) revert NonTransferablePosition();
         if (position.withdrawn) revert AlreadyWithdrawn();
         if (position.closedAtEpoch != 0) revert PositionClosed();
         if (_positionMaxLockPower[positionId].upperLookupRecent(effectiveEpoch) != 0) revert PositionClosed();
@@ -533,6 +554,7 @@ contract AntseedSellerPools is IAntseedSellerPools, ERC721, Ownable2Step, Reentr
         Position storage position = positions[positionId];
         if (position.owner == address(0)) revert InvalidPosition();
         if (ownerOf(positionId) != staker) revert NotPositionOwner();
+        if (_positionKind[positionId] == PositionKind.Bootstrap) revert NonTransferablePosition();
         if (position.withdrawn) revert AlreadyWithdrawn();
         if (position.closedAtEpoch != 0) revert PositionClosed();
 
@@ -723,7 +745,7 @@ contract AntseedSellerPools is IAntseedSellerPools, ERC721, Ownable2Step, Reentr
     }
 
     function totalPowerWeightAtEpoch(uint256 epoch) external view returns (uint256) {
-        return _powerAtEpoch(_totalWeightAmountDelta, _totalWeightedEndDelta, epoch) + _totalMaxLockPowerAtEpoch(epoch);
+        return _powerAtEpoch(_totalPowerTree, epoch) + _totalMaxLockPowerAtEpoch(epoch);
     }
 
     function currentPoolSecurityWeight(uint256 agentId) external view returns (uint256) {
@@ -736,14 +758,13 @@ contract AntseedSellerPools is IAntseedSellerPools, ERC721, Ownable2Step, Reentr
 
     function currentTotalSecurityWeight() external view returns (uint256) {
         uint256 epoch = currentEpoch();
-        return _powerAtEpoch(_totalWeightAmountDelta, _totalWeightedEndDelta, epoch) + _totalMaxLockPowerAtEpoch(epoch);
+        return _powerAtEpoch(_totalPowerTree, epoch) + _totalMaxLockPowerAtEpoch(epoch);
     }
 
     function currentPoolSecurityShareBps(uint256 agentId) external view returns (uint256 shareBps) {
         uint256 epoch = currentEpoch();
         uint256 poolWeight = poolPowerWeightAtEpoch(agentId, epoch);
-        uint256 totalWeight =
-            _powerAtEpoch(_totalWeightAmountDelta, _totalWeightedEndDelta, epoch) + _totalMaxLockPowerAtEpoch(epoch);
+        uint256 totalWeight = _powerAtEpoch(_totalPowerTree, epoch) + _totalMaxLockPowerAtEpoch(epoch);
         if (poolWeight == 0 || totalWeight == 0) return 0;
         return (poolWeight * BPS_DENOMINATOR) / totalWeight;
     }
@@ -753,14 +774,13 @@ contract AntseedSellerPools is IAntseedSellerPools, ERC721, Ownable2Step, Reentr
         if (agentId == 0) return 0;
         uint256 epoch = currentEpoch();
         uint256 poolWeight = poolPowerWeightAtEpoch(agentId, epoch);
-        uint256 totalWeight =
-            _powerAtEpoch(_totalWeightAmountDelta, _totalWeightedEndDelta, epoch) + _totalMaxLockPowerAtEpoch(epoch);
+        uint256 totalWeight = _powerAtEpoch(_totalPowerTree, epoch) + _totalMaxLockPowerAtEpoch(epoch);
         if (poolWeight == 0 || totalWeight == 0) return 0;
         return (poolWeight * BPS_DENOMINATOR) / totalWeight;
     }
 
     function bootstrapWeightAtEpoch(uint256 agentId, uint256 epoch) public view returns (uint256 weight) {
-        weight = _powerAtEpoch(_bootstrapWeightAmountDelta[agentId], _bootstrapWeightedEndDelta[agentId], epoch);
+        weight = _powerAtEpoch(_bootstrapPowerTree[agentId], epoch);
     }
 
     function bootstrapWeightAtEpoch(address seller, uint256 epoch) public view returns (uint256 weight) {
@@ -786,6 +806,11 @@ contract AntseedSellerPools is IAntseedSellerPools, ERC721, Ownable2Step, Reentr
 
     function sellerBootstrapMatchedCommitment(address seller) public view returns (uint256) {
         return bootstrapCommitments[seller].matchedAmount;
+    }
+
+    function positionKind(uint256 positionId) public view returns (PositionKind) {
+        if (positions[positionId].owner == address(0)) revert InvalidPosition();
+        return _positionKind[positionId];
     }
 
     function stakerPositionCount(address staker) public view returns (uint256) {
@@ -889,7 +914,7 @@ contract AntseedSellerPools is IAntseedSellerPools, ERC721, Ownable2Step, Reentr
             if (decayEndEpoch == 0 || fromEpoch < decayEndEpoch) revert InvalidValue();
         }
 
-        ApyCapOverride memory capOverride = ApyCapOverride({ fromEpoch: uint64(fromEpoch), capBps: uint16(capBps) });
+        ApyCapOverride memory capOverride = ApyCapOverride({fromEpoch: uint64(fromEpoch), capBps: uint16(capBps)});
 
         uint256 count = apyCapOverrides.length;
         if (count != 0) {
@@ -948,6 +973,7 @@ contract AntseedSellerPools is IAntseedSellerPools, ERC721, Ownable2Step, Reentr
             withdrawn: false
         });
 
+        _positionKind[positionId] = PositionKind.Normal;
         _positionNormalStartEpoch[positionId].push(startEpoch, startEpoch);
         _positionNormalEndEpoch[positionId].push(startEpoch, stakeEndEpoch);
         _addPowerRange(agentId, startEpoch, stakeEndEpoch, weightAmount);
@@ -956,7 +982,52 @@ contract AntseedSellerPools is IAntseedSellerPools, ERC721, Ownable2Step, Reentr
         emit StakeCreated(positionId, owner, agentId, amount, weightAmount, startEpoch, stakeEndEpoch);
     }
 
+    function _createBootstrapPosition(
+        address owner,
+        uint256 agentId,
+        uint256 weightAmount,
+        uint256 startEpoch,
+        uint256 stakeEndEpoch
+    ) internal returns (uint256 positionId) {
+        positionId = nextPositionId++;
+        positions[positionId] = Position({
+            owner: owner,
+            agentId: agentId,
+            amount: 0,
+            weightAmount: weightAmount,
+            stakeStartEpoch: uint64(startEpoch),
+            stakeEndEpoch: uint64(stakeEndEpoch),
+            closedAtEpoch: 0,
+            withdrawn: false
+        });
+
+        _positionKind[positionId] = PositionKind.Bootstrap;
+        _positionNormalStartEpoch[positionId].push(startEpoch, startEpoch);
+        _positionNormalEndEpoch[positionId].push(startEpoch, stakeEndEpoch);
+        _addPowerRange(agentId, startEpoch, stakeEndEpoch, weightAmount);
+        _mint(owner, positionId);
+        emit StakeCreated(positionId, owner, agentId, 0, weightAmount, startEpoch, stakeEndEpoch);
+    }
+
+    function _closeBootstrapPosition(uint256 positionId, uint256 effectiveCloseEpoch) internal {
+        Position storage position = positions[positionId];
+        if (position.owner == address(0)) revert InvalidPosition();
+        if (_positionKind[positionId] != PositionKind.Bootstrap) revert InvalidPosition();
+        if (position.closedAtEpoch != 0 || position.withdrawn) revert PositionClosed();
+
+        uint256 normalEndEpoch = _positionNormalEndEpoch[positionId].upperLookupRecent(effectiveCloseEpoch);
+        if (normalEndEpoch == 0 || effectiveCloseEpoch >= normalEndEpoch) revert StakeDurationOutOfBounds();
+
+        position.closedAtEpoch = uint64(effectiveCloseEpoch);
+        _removePowerRange(position.agentId, effectiveCloseEpoch, normalEndEpoch, position.weightAmount);
+    }
+
     function _update(address to, uint256 tokenId, address auth) internal override returns (address from) {
+        address existingOwner = _ownerOf(tokenId);
+        if (existingOwner != address(0) && to != address(0) && _positionKind[tokenId] == PositionKind.Bootstrap) {
+            revert NonTransferablePosition();
+        }
+
         from = super._update(to, tokenId, auth);
 
         if (from == address(0)) {
@@ -1049,14 +1120,8 @@ contract AntseedSellerPools is IAntseedSellerPools, ERC721, Ownable2Step, Reentr
     {
         int256 signedAmount = _signedAmount(amount, add);
         int256 signedWeightedEnd = _signedAmount(amount * stakeEndEpoch, add);
-        _poolWeightAmountDelta[agentId][startEpoch] += signedAmount;
-        _poolWeightedEndDelta[agentId][startEpoch] += signedWeightedEnd;
-        _poolWeightAmountDelta[agentId][stakeEndEpoch] -= signedAmount;
-        _poolWeightedEndDelta[agentId][stakeEndEpoch] -= signedWeightedEnd;
-        _totalWeightAmountDelta[startEpoch] += signedAmount;
-        _totalWeightedEndDelta[startEpoch] += signedWeightedEnd;
-        _totalWeightAmountDelta[stakeEndEpoch] -= signedAmount;
-        _totalWeightedEndDelta[stakeEndEpoch] -= signedWeightedEnd;
+        _applyRangeDelta(_poolPowerTree[agentId], startEpoch, stakeEndEpoch, signedAmount, signedWeightedEnd);
+        _applyRangeDelta(_totalPowerTree, startEpoch, stakeEndEpoch, signedAmount, signedWeightedEnd);
     }
 
     function _applyBootstrapPowerRange(
@@ -1068,10 +1133,7 @@ contract AntseedSellerPools is IAntseedSellerPools, ERC721, Ownable2Step, Reentr
     ) internal {
         int256 signedAmount = _signedAmount(amount, add);
         int256 signedWeightedEnd = _signedAmount(amount * stakeEndEpoch, add);
-        _bootstrapWeightAmountDelta[agentId][startEpoch] += signedAmount;
-        _bootstrapWeightedEndDelta[agentId][startEpoch] += signedWeightedEnd;
-        _bootstrapWeightAmountDelta[agentId][stakeEndEpoch] -= signedAmount;
-        _bootstrapWeightedEndDelta[agentId][stakeEndEpoch] -= signedWeightedEnd;
+        _applyRangeDelta(_bootstrapPowerTree[agentId], startEpoch, stakeEndEpoch, signedAmount, signedWeightedEnd);
     }
 
     function _poolPowerAndActiveWeightAtEpoch(uint256 agentId, uint256 epoch)
@@ -1079,8 +1141,7 @@ contract AntseedSellerPools is IAntseedSellerPools, ERC721, Ownable2Step, Reentr
         view
         returns (uint256 power, uint256 activeWeight)
     {
-        (power, activeWeight) =
-            _powerAndActiveWeightAtEpoch(_poolWeightAmountDelta[agentId], _poolWeightedEndDelta[agentId], epoch);
+        (power, activeWeight) = _powerAndActiveWeightAtEpoch(_poolPowerTree[agentId], epoch);
         uint256 maxLockWeightAmount = _poolMaxLockWeightAmount[agentId].upperLookupRecent(epoch);
         if (maxLockWeightAmount != 0) {
             power += maxLockWeightAmount * maxStakeEpochs;
@@ -1120,30 +1181,81 @@ contract AntseedSellerPools is IAntseedSellerPools, ERC721, Ownable2Step, Reentr
         _totalMaxLockWeightAmount.push(epoch, add ? totalAmount + amount : totalAmount - amount);
     }
 
-    function _powerAtEpoch(
-        mapping(uint256 => int256) storage weightAmountDelta,
-        mapping(uint256 => int256) storage weightedEndDelta,
-        uint256 epoch
-    ) internal view returns (uint256 power) {
-        (power,) = _powerAndActiveWeightAtEpoch(weightAmountDelta, weightedEndDelta, epoch);
+    function _powerAtEpoch(FenwickTree storage tree, uint256 epoch) internal view returns (uint256 power) {
+        (power,) = _powerAndActiveWeightAtEpoch(tree, epoch);
     }
 
-    function _powerAndActiveWeightAtEpoch(
-        mapping(uint256 => int256) storage weightAmountDelta,
-        mapping(uint256 => int256) storage weightedEndDelta,
-        uint256 epoch
-    ) internal view returns (uint256 power, uint256 activeWeight) {
-        uint256 firstEpoch = epoch > MAX_STAKE_EPOCHS_CAP ? epoch - MAX_STAKE_EPOCHS_CAP : 0;
-        int256 activeAmount;
-        int256 activeWeightedEnd;
-        for (uint256 cursor = firstEpoch; cursor <= epoch; cursor++) {
-            activeAmount += weightAmountDelta[cursor];
-            activeWeightedEnd += weightedEndDelta[cursor];
-        }
+    function _powerAndActiveWeightAtEpoch(FenwickTree storage tree, uint256 epoch)
+        internal
+        view
+        returns (uint256 power, uint256 activeWeight)
+    {
+        (int256 activeAmount, int256 activeWeightedEnd) = _fenwickPrefixSum(tree, epoch);
         if (activeAmount <= 0 || activeWeightedEnd <= 0) return (0, 0);
         int256 signedPower = activeWeightedEnd - activeAmount * int256(epoch);
         if (signedPower <= 0) return (0, 0);
         return (uint256(signedPower), uint256(activeAmount));
+    }
+
+    function _applyRangeDelta(
+        FenwickTree storage tree,
+        uint256 startEpoch,
+        uint256 stakeEndEpoch,
+        int256 amountDelta,
+        int256 weightedEndDelta
+    ) internal {
+        _fenwickAdd(tree, startEpoch, amountDelta, weightedEndDelta);
+        _fenwickAdd(tree, stakeEndEpoch, -amountDelta, -weightedEndDelta);
+    }
+
+    function _fenwickAdd(FenwickTree storage tree, uint256 epoch, int256 amountDelta, int256 weightedEndDelta)
+        internal
+    {
+        uint256 index = _fenwickIndex(epoch);
+        int128 amountDelta128 = _toInt128(amountDelta);
+        int128 weightedEndDelta128 = _toInt128(weightedEndDelta);
+        while (index <= FENWICK_SIZE) {
+            (int128 amount, int128 weightedEnd) = _unpackFenwickValue(tree.values[index]);
+            tree.values[index] = _packFenwickValue(
+                _toInt128(int256(amount) + int256(amountDelta128)),
+                _toInt128(int256(weightedEnd) + int256(weightedEndDelta128))
+            );
+            index += index & (~index + 1);
+        }
+    }
+
+    function _fenwickPrefixSum(FenwickTree storage tree, uint256 epoch)
+        internal
+        view
+        returns (int256 amountSum, int256 weightedEndSum)
+    {
+        uint256 index = _fenwickIndex(epoch);
+        while (index != 0) {
+            (int128 amount, int128 weightedEnd) = _unpackFenwickValue(tree.values[index]);
+            amountSum += amount;
+            weightedEndSum += weightedEnd;
+            index -= index & (~index + 1);
+        }
+    }
+
+    function _fenwickIndex(uint256 epoch) internal pure returns (uint256 index) {
+        index = epoch + 1;
+        if (index == 0 || index > FENWICK_SIZE) revert InvalidValue();
+    }
+
+    function _packFenwickValue(int128 amount, int128 weightedEnd) internal pure returns (int256) {
+        return int256(uint256(uint128(amount)) | (uint256(uint128(weightedEnd)) << 128));
+    }
+
+    function _unpackFenwickValue(int256 value) internal pure returns (int128 amount, int128 weightedEnd) {
+        uint256 raw = uint256(value);
+        amount = int128(uint128(raw));
+        weightedEnd = int128(uint128(raw >> 128));
+    }
+
+    function _toInt128(int256 value) internal pure returns (int128) {
+        if (value < type(int128).min || value > type(int128).max) revert InvalidValue();
+        return int128(value);
     }
 
     function _signedAmount(uint256 amount, bool add) internal pure returns (int256 signedAmount) {

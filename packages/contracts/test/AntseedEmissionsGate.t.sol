@@ -3,21 +3,23 @@ pragma solidity ^0.8.24;
 
 import "forge-std/Test.sol";
 
-import { ANTSToken } from "../core/ANTSToken.sol";
-import { AntseedEmissions } from "../legacy/AntseedEmissions.sol";
-import { AntseedBuyerUsageRewards } from "../emissions/AntseedBuyerUsageRewards.sol";
-import { AntseedEmissionPrograms } from "../emissions/AntseedEmissionPrograms.sol";
-import { AntseedEmissionsGate } from "../emissions/AntseedEmissionsGate.sol";
-import { AntseedEmissionsV2 } from "../legacy/AntseedEmissionsV2.sol";
-import { AntseedSellerOperatorUsageRewards } from "../emissions/AntseedSellerOperatorUsageRewards.sol";
-import { AntseedSellerPools } from "../sellers/AntseedSellerPools.sol";
-import { AntseedSellerUsageRewards } from "../emissions/AntseedSellerUsageRewards.sol";
-import { AntseedUsageAccounting } from "../emissions/AntseedUsageAccounting.sol";
-import { AntseedRegistry } from "../core/AntseedRegistry.sol";
-import { IAntseedUsageAccounting } from "../interfaces/IAntseedUsageAccounting.sol";
-import { IAntseedPointsPolicy } from "../interfaces/IAntseedPointsPolicy.sol";
-import { AntseedSellerRewardsPool } from "../rewards/AntseedSellerRewardsPool.sol";
-import { MockERC8004Registry } from "./mocks/MockERC8004Registry.sol";
+import {ANTSToken} from "../core/ANTSToken.sol";
+import {AntseedEmissions} from "../legacy/AntseedEmissions.sol";
+import {AntseedBuyerUsageRewards} from "../emissions/AntseedBuyerUsageRewards.sol";
+import {AntseedEmissionPrograms} from "../emissions/AntseedEmissionPrograms.sol";
+import {AntseedEmissionsGate} from "../emissions/AntseedEmissionsGate.sol";
+import {AntseedEmissionsV2} from "../legacy/AntseedEmissionsV2.sol";
+import {AntseedSellerOperatorUsageRewards} from "../emissions/AntseedSellerOperatorUsageRewards.sol";
+import {AntseedSellerPools} from "../sellers/AntseedSellerPools.sol";
+import {AntseedSellerUsageRewards} from "../emissions/AntseedSellerUsageRewards.sol";
+import {AntseedUsageAccounting} from "../emissions/AntseedUsageAccounting.sol";
+import {AntseedRegistry} from "../core/AntseedRegistry.sol";
+import {IAntseedEmissionsAuthority} from "../interfaces/IAntseedEmissionsAuthority.sol";
+import {IAntseedEmissionSchedule} from "../interfaces/IAntseedEmissionSchedule.sol";
+import {IAntseedUsageAccounting} from "../interfaces/IAntseedUsageAccounting.sol";
+import {IAntseedPointsPolicy} from "../interfaces/IAntseedPointsPolicy.sol";
+import {AntseedSellerRewardsPool} from "../rewards/AntseedSellerRewardsPool.sol";
+import {MockERC8004Registry} from "./mocks/MockERC8004Registry.sol";
 
 contract MockDepositsForEmissionsGate {
     mapping(address => address) private _operators;
@@ -62,6 +64,51 @@ contract MockSellerAgentLookup {
 
     function getAgentId(address seller) external view returns (uint256) {
         return agentIdBySeller[seller];
+    }
+}
+
+contract MockSellerUsageRewardsAuthority is IAntseedEmissionsAuthority, IAntseedEmissionSchedule {
+    ANTSToken public immutable token;
+    uint256 public immutable genesis;
+    uint256 public constant EPOCH_DURATION = 1 weeks;
+    uint256 public constant EPOCH_EMISSION = 1_000_000 ether;
+
+    mapping(bytes32 => mapping(uint256 => uint256)) public budgets;
+    mapping(bytes32 => mapping(uint256 => uint256)) public minted;
+
+    constructor(ANTSToken token_) {
+        token = token_;
+        genesis = block.timestamp;
+    }
+
+    function setProgramEpochBudget(bytes32 programId, uint256 epoch, uint256 amount) external {
+        budgets[programId][epoch] = amount;
+    }
+
+    function schedule() external view returns (IAntseedEmissionSchedule) {
+        return this;
+    }
+
+    function currentEpoch() public view returns (uint256) {
+        if (block.timestamp <= genesis) return 0;
+        return (block.timestamp - genesis) / EPOCH_DURATION;
+    }
+
+    function getEpochEmission(uint256) external pure returns (uint256) {
+        return EPOCH_EMISSION;
+    }
+
+    function mintScheduleEmission(uint256, address recipient, uint256 amount) external {
+        token.mint(recipient, amount);
+    }
+
+    function programEpochBudget(bytes32 programId, uint256 epoch) external view returns (uint256) {
+        return budgets[programId][epoch];
+    }
+
+    function mintProgramEmission(bytes32 programId, uint256 epoch, address recipient, uint256 amount) external {
+        minted[programId][epoch] += amount;
+        token.mint(recipient, amount);
     }
 }
 
@@ -493,6 +540,77 @@ contract AntseedEmissionsGateTest is Test {
         vm.expectRevert(AntseedSellerUsageRewards.NothingToClaim.selector);
         vm.prank(staker);
         sellerUsageRewards.claimStakerRewards(positionId, staker);
+    }
+
+    function test_bootstrapPositionClaimsThroughIndexedStakerRewards() public {
+        vm.warp(2_000_000_000);
+        bytes32 programId = keccak256("recognized-seller-usage-v1");
+
+        AntseedRegistry registry_ = new AntseedRegistry();
+        ANTSToken token_ = new ANTSToken();
+        token_.setRegistry(address(registry_));
+        registry_.setAntsToken(address(token_));
+        registry_.setProtocolReserve(reserveDest);
+
+        MockSellerUsageRewardsAuthority authority = new MockSellerUsageRewardsAuthority(token_);
+        registry_.setEmissions(address(authority));
+
+        MockERC8004Registry identityRegistry_ = new MockERC8004Registry();
+        MockSellerAgentLookup sellerAgentLookup_ = new MockSellerAgentLookup();
+        registry_.setIdentityRegistry(address(identityRegistry_));
+        registry_.setStaking(address(sellerAgentLookup_));
+
+        AntseedSellerPools pools_ = new AntseedSellerPools(address(registry_), 0, 0, 0);
+        AntseedSellerRewardsPool rewardsPool_ = new AntseedSellerRewardsPool(address(registry_));
+        pools_.setSellerRewardsPool(address(rewardsPool_));
+
+        vm.prank(seller);
+        uint256 agentId = identityRegistry_.register();
+        sellerAgentLookup_.setAgent(seller, agentId);
+
+        vm.prank(address(authority));
+        rewardsPool_.recordLockedReward(seller, 100 ether);
+
+        vm.prank(seller);
+        uint256 bootstrapPositionId = pools_.activateBootstrapCommitment(agentId);
+
+        token_.enableTransfers();
+        authority.mintProgramEmission(programId, 0, staker, 100 ether);
+        vm.startPrank(staker);
+        token_.approve(address(pools_), 50 ether);
+        uint256 normalPositionId = pools_.stake(agentId, 50 ether, 52);
+        vm.stopPrank();
+
+        AntseedUsageAccounting usageAccounting_ =
+            new AntseedUsageAccounting(address(pools_), address(this), address(authority));
+        AntseedSellerUsageRewards rewards_ =
+            new AntseedSellerUsageRewards(address(authority), address(pools_), address(usageAccounting_), programId);
+        authority.setProgramEpochBudget(programId, 1, 1_000 ether);
+
+        vm.warp(2_000_000_000 + EPOCH_DURATION);
+        assertEq(pools_.positionWeightAtEpoch(bootstrapPositionId, 1), 2_600 ether);
+        assertEq(pools_.positionWeightAtEpoch(normalPositionId, 1), 2_600 ether);
+        assertEq(pools_.poolWeightAtEpoch(agentId, 1), 5_200 ether);
+
+        usageAccounting_.accrueSellerPoints(seller, 100);
+        usageAccounting_.accrueBuyerPoints(buyer, 100);
+
+        vm.warp(2_000_000_000 + 2 * EPOCH_DURATION);
+        rewards_.indexPoolRewards(agentId, 10);
+
+        uint256 rewardPerWeight = (uint256(1_000 ether) * rewards_.INDEX_SCALE()) / 5_200 ether;
+        uint256 expectedClaim = (uint256(2_600 ether) * rewardPerWeight) / rewards_.INDEX_SCALE();
+        assertEq(rewards_.pendingIndexedStakerReward(bootstrapPositionId), expectedClaim);
+        assertEq(rewards_.pendingIndexedStakerReward(normalPositionId), expectedClaim);
+
+        vm.prank(seller);
+        rewards_.claimStakerRewards(bootstrapPositionId, seller);
+        vm.prank(staker);
+        rewards_.claimStakerRewards(normalPositionId, staker);
+
+        assertEq(token_.balanceOf(seller), expectedClaim);
+        assertEq(token_.balanceOf(staker), 50 ether + expectedClaim);
+        assertEq(token_.balanceOf(address(rewards_)), 1_000 ether - 2 * expectedClaim);
     }
 
     function test_sellerUsageRewardsIndexedClaimUsesExtendedLockSegments() public {
@@ -1637,9 +1755,7 @@ contract AntseedEmissionsGateTest is Test {
         programs.setRewardProgram(keccak256("team"), teamWallet, teamWallet, 1_500, 4, 0, true);
         programs.setRewardProgram(keccak256("reserve"), reserveDest, reserveDest, 1_500, 4, 0, true);
         bytes32 verificationProgramId = keccak256("verification");
-        programs.setRewardProgram(
-            verificationProgramId, verificationWallet, verificationWallet, 1_500, 4, 0, true
-        );
+        programs.setRewardProgram(verificationProgramId, verificationWallet, verificationWallet, 1_500, 4, 0, true);
 
         // No further share fits on top of the full split.
         vm.expectRevert(AntseedEmissionPrograms.ProgramShareExceeded.selector);

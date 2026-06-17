@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-import { IAntseedRegistry } from "./IAntseedRegistry.sol";
+import {IAntseedRegistry} from "./IAntseedRegistry.sol";
 
 interface IAntseedSellerPools {
     event RegistrySet(address indexed registry);
@@ -64,6 +64,11 @@ interface IAntseedSellerPools {
         address indexed staker, uint256 indexed agentId, uint256 totalActiveStake, uint256 agentActiveStake
     );
 
+    enum PositionKind {
+        Normal,
+        Bootstrap
+    }
+
     error InvalidAddress();
     error InvalidValue();
     error InvalidPosition();
@@ -78,6 +83,7 @@ interface IAntseedSellerPools {
     error BootstrapAlreadyActive();
     error BootstrapClosed();
     error NotAgentOwner();
+    error NonTransferablePosition();
 
     function stake(uint256 agentId, uint256 amount, uint256 stakeEpochs) external returns (uint256 positionId);
     function stakeFor(address staker, uint256 agentId, uint256 amount, uint256 stakeEpochs)
@@ -99,7 +105,7 @@ interface IAntseedSellerPools {
         returns (uint256 newPositionId);
     function ownerOf(uint256 positionId) external view returns (address owner);
     function matchBootstrapCommitment(uint256 amount) external returns (uint256 positionId);
-    function activateBootstrapCommitment(uint256 agentId) external returns (uint256);
+    function activateBootstrapCommitment(uint256 agentId) external returns (uint256 positionId);
     function setRestakedRewardWeightBonus(uint256 bonusBps) external;
     function setMoveWeightPenalty(uint256 penaltyBps) external;
     function setRewardStaker(address rewardStaker, bool allowed) external;
@@ -140,6 +146,7 @@ interface IAntseedSellerPools {
 
     function sellerBootstrapCommitment(address seller) external view returns (uint256);
     function sellerBootstrapMatchedCommitment(address seller) external view returns (uint256);
+    function positionKind(uint256 positionId) external view returns (PositionKind);
     function stakerTotalActiveStake(address staker) external view returns (uint256);
     function stakerAgentActiveStake(address staker, uint256 agentId) external view returns (uint256);
     function stakerPositionCount(address staker) external view returns (uint256);
@@ -170,6 +177,7 @@ interface IAntseedSellerPools {
             uint256 agentId,
             uint256 amount,
             uint256 matchedAmount,
+            uint256 positionId,
             uint64 startEpoch,
             uint64 stakeEndEpoch,
             uint64 weightBps

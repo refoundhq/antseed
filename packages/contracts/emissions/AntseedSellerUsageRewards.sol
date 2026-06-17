@@ -9,9 +9,9 @@ import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/utils/math/Math.sol";
 import "@openzeppelin/contracts/utils/structs/Checkpoints.sol";
 
-import { IAntseedEmissionsAuthority } from "../interfaces/IAntseedEmissionsAuthority.sol";
-import { IAntseedSellerPools } from "../interfaces/IAntseedSellerPools.sol";
-import { IAntseedUsageAccounting } from "../interfaces/IAntseedUsageAccounting.sol";
+import {IAntseedEmissionsAuthority} from "../interfaces/IAntseedEmissionsAuthority.sol";
+import {IAntseedSellerPools} from "../interfaces/IAntseedSellerPools.sol";
+import {IAntseedUsageAccounting} from "../interfaces/IAntseedUsageAccounting.sol";
 
 /**
  * @title AntseedSellerUsageRewards
@@ -20,7 +20,7 @@ import { IAntseedUsageAccounting } from "../interfaces/IAntseedUsageAccounting.s
  *         Usage accounting records raw seller usage and weighted pool points
  *         during each epoch. The pool epoch is settled once, APY cap and
  *         burn/reserve routing are applied at the pool budget level, and
- *         stakers/bootstrap commitments split the settled claimable budget:
+ *         staker positions split the settled claimable budget:
  *
  *         poolReward = programBudget(epoch) * poolWeightedPoints / totalWeightedPoints
  *         poolClaimable = min(poolReward, poolApyCap)
@@ -39,9 +39,8 @@ import { IAntseedUsageAccounting } from "../interfaces/IAntseedUsageAccounting.s
  *           - Restaking rewards creates a new locked position in the source
  *             agent pool and may receive a configured weight bonus based on lock
  *             length.
- *           - Bootstrap rewards are accounted separately from normal positions
- *             because bootstrap power is discounted security weight, not real
- *             transferable ANTS held by this contract.
+ *           - Bootstrap commitments mint non-transferable position NFTs in
+ *             seller pools and claim through the same indexed position path.
  */
 contract AntseedSellerUsageRewards is Ownable2Step, Pausable, ReentrancyGuard {
     using Math for uint256;
@@ -61,7 +60,6 @@ contract AntseedSellerUsageRewards is Ownable2Step, Pausable, ReentrancyGuard {
     bytes32 public immutable programId;
 
     // ─── Claim State ─────────────────────────────────────────────────
-    mapping(address => mapping(uint256 => bool)) public bootstrapEpochClaimed;
     mapping(uint256 => uint256) public epochBurnedAmount;
     mapping(uint256 => mapping(uint256 => PoolEpochEmission)) public poolEpochEmissions;
     mapping(uint256 => uint256) public poolRewardIndexNextEpoch;
@@ -93,16 +91,6 @@ contract AntseedSellerUsageRewards is Ownable2Step, Pausable, ReentrancyGuard {
         uint256 indexed newPositionId,
         address indexed staker,
         uint256 amount,
-        uint256 burnedAmount,
-        uint256 reserveAmount
-    );
-    event BootstrapUsageRewardClaimed(
-        address indexed seller,
-        uint256 indexed agentId,
-        uint256 indexed epoch,
-        address recipient,
-        uint256 grossAmount,
-        uint256 claimableAmount,
         uint256 burnedAmount,
         uint256 reserveAmount
     );
@@ -238,38 +226,6 @@ contract AntseedSellerUsageRewards is Ownable2Step, Pausable, ReentrancyGuard {
     }
 
     // ═══════════════════════════════════════════════════════════════════
-    //                        CORE — CLAIM BOOTSTRAP REWARDS
-    // ═══════════════════════════════════════════════════════════════════
-
-    function claimBootstrapRewards(uint256[] calldata epochs, address recipient) external nonReentrant whenNotPaused {
-        if (recipient == address(0)) revert InvalidAddress();
-
-        (uint256 agentId,,,,,) = sellerPools.bootstrapCommitments(msg.sender);
-        if (agentId == 0) revert InvalidValue();
-
-        uint256 totalClaimed;
-        uint256 totalBurned;
-        uint256 totalReserved;
-        for (uint256 i = 0; i < epochs.length; i++) {
-            uint256 epoch = epochs[i];
-            (uint256 grossAmount, uint256 claimableAmount,) = _bootstrapReward(msg.sender, agentId, epoch);
-            if (grossAmount == 0) continue;
-
-            bootstrapEpochClaimed[msg.sender][epoch] = true;
-            (, uint256 burnedAmount, uint256 reserveAmount) = _settlePoolEpoch(agentId, epoch);
-            _transferReward(recipient, claimableAmount);
-            totalClaimed += claimableAmount;
-            totalBurned += burnedAmount;
-            totalReserved += reserveAmount;
-            emit BootstrapUsageRewardClaimed(
-                msg.sender, agentId, epoch, recipient, grossAmount, claimableAmount, burnedAmount, reserveAmount
-            );
-        }
-
-        if (totalClaimed == 0 && totalBurned == 0 && totalReserved == 0) revert NothingToClaim();
-    }
-
-    // ═══════════════════════════════════════════════════════════════════
     //                        VIEWS
     // ═══════════════════════════════════════════════════════════════════
 
@@ -281,16 +237,6 @@ contract AntseedSellerUsageRewards is Ownable2Step, Pausable, ReentrancyGuard {
         (address owner, uint256 agentId,,,,,,) = sellerPools.positions(positionId);
         if (owner == address(0)) revert InvalidValue();
         (grossAmount, claimableAmount, burnedAmount) = _positionReward(positionId, agentId, epoch);
-        burnedAmount = _previewBurnedAmount(epoch, burnedAmount);
-    }
-
-    function pendingBootstrapReward(address seller, uint256 epoch)
-        external
-        view
-        returns (uint256 grossAmount, uint256 claimableAmount, uint256 burnedAmount)
-    {
-        (uint256 agentId,,,,,) = sellerPools.bootstrapCommitments(seller);
-        (grossAmount, claimableAmount, burnedAmount) = _bootstrapReward(seller, agentId, epoch);
         burnedAmount = _previewBurnedAmount(epoch, burnedAmount);
     }
 
@@ -465,28 +411,6 @@ contract AntseedSellerUsageRewards is Ownable2Step, Pausable, ReentrancyGuard {
 
         grossAmount = Math.mulDiv(poolGrossReward, positionWeight, poolWeight);
         claimableAmount = Math.mulDiv(poolClaimableReward, positionWeight, poolWeight);
-        burnedAmount = grossAmount - claimableAmount;
-    }
-
-    function _bootstrapReward(address seller, uint256 agentId, uint256 epoch)
-        internal
-        view
-        returns (uint256 grossAmount, uint256 claimableAmount, uint256 burnedAmount)
-    {
-        if (bootstrapEpochClaimed[seller][epoch] || agentId == 0) return (0, 0, 0);
-
-        IAntseedSellerPools pools = sellerPools;
-        uint256 bootstrapWeight = pools.bootstrapWeightAtEpoch(agentId, epoch);
-        if (bootstrapWeight == 0) return (0, 0, 0);
-
-        uint256 poolWeight = pools.poolWeightAtEpoch(agentId, epoch);
-        if (poolWeight == 0) return (0, 0, 0);
-
-        (uint256 poolGrossReward, uint256 poolClaimableReward) = _poolRewardPreview(agentId, epoch);
-        if (poolGrossReward == 0) return (0, 0, 0);
-
-        grossAmount = Math.mulDiv(poolGrossReward, bootstrapWeight, poolWeight);
-        claimableAmount = Math.mulDiv(poolClaimableReward, bootstrapWeight, poolWeight);
         burnedAmount = grossAmount - claimableAmount;
     }
 

@@ -3,14 +3,14 @@ pragma solidity ^0.8.24;
 
 import "forge-std/Test.sol";
 
-import { ANTSToken } from "../core/ANTSToken.sol";
-import { AntseedRegistry } from "../core/AntseedRegistry.sol";
-import { IAntseedSellerPools } from "../interfaces/IAntseedSellerPools.sol";
-import { AntseedBootstrapCommitmentClaimPolicy } from "../policies/AntseedBootstrapCommitmentClaimPolicy.sol";
-import { AntseedSellerRewardsPool } from "../rewards/AntseedSellerRewardsPool.sol";
-import { AntseedSellerRegistry } from "../sellers/AntseedSellerRegistry.sol";
-import { AntseedSellerPools } from "../sellers/AntseedSellerPools.sol";
-import { MockERC8004Registry } from "./mocks/MockERC8004Registry.sol";
+import {ANTSToken} from "../core/ANTSToken.sol";
+import {AntseedRegistry} from "../core/AntseedRegistry.sol";
+import {IAntseedSellerPools} from "../interfaces/IAntseedSellerPools.sol";
+import {AntseedBootstrapCommitmentClaimPolicy} from "../policies/AntseedBootstrapCommitmentClaimPolicy.sol";
+import {AntseedSellerRewardsPool} from "../rewards/AntseedSellerRewardsPool.sol";
+import {AntseedSellerRegistry} from "../sellers/AntseedSellerRegistry.sol";
+import {AntseedSellerPools} from "../sellers/AntseedSellerPools.sol";
+import {MockERC8004Registry} from "./mocks/MockERC8004Registry.sol";
 
 contract MockLegacyStaking {
     mapping(address => uint256) public agentIds;
@@ -264,6 +264,17 @@ contract AntseedSellerPoolsTest is Test {
         vm.warp(block.timestamp + EPOCH_DURATION);
         assertEq(pools.poolActiveStakeAtEpoch(agentId, 1), stakerCount * stakeAmount);
         assertEq(pools.poolWeightAtEpoch(agentId, 1), stakerCount * stakeAmount * 52);
+    }
+
+    function test_expiredMaxDurationStakeDoesNotCorruptHighEpochPower() public {
+        _stake(staker, agentId, 1 ether, 52); // active on [1, 53)
+
+        vm.warp(genesis + 53 * EPOCH_DURATION);
+        _stake(recipient, agentId, 10 ether, 1); // active on [54, 55)
+
+        assertEq(pools.poolActiveStakeAtEpoch(agentId, 54), 10 ether);
+        assertEq(pools.poolWeightAtEpoch(agentId, 54), 10 ether);
+        assertEq(pools.totalPowerWeightAtEpoch(54), 10 ether);
     }
 
     function test_rewardStakerCanStakeMintedRewardsIntoNewLockedPosition() public {
@@ -575,23 +586,85 @@ contract AntseedSellerPoolsTest is Test {
         sellerRewardsPool.setSellerClaimPolicy(address(new AntseedBootstrapCommitmentClaimPolicy(address(pools))));
 
         vm.prank(seller);
-        pools.activateBootstrapCommitment(agentId);
+        uint256 bootstrapPositionId = pools.activateBootstrapCommitment(agentId);
 
-        (uint256 commitmentAgentId, uint256 amount, uint256 matchedAmount, uint64 startEpoch, uint64 stakeEndEpoch,) =
-            pools.bootstrapCommitments(seller);
-        assertEq(commitmentAgentId, agentId);
-        assertEq(amount, 1_000_000 ether);
-        assertEq(matchedAmount, 0);
-        assertEq(startEpoch, 1);
-        assertEq(stakeEndEpoch, 53);
+        {
+            (
+                uint256 commitmentAgentId,
+                uint256 amount,
+                uint256 matchedAmount,
+                uint256 commitmentPositionId,
+                uint64 startEpoch,
+                uint64 stakeEndEpoch,
+            ) = pools.bootstrapCommitments(seller);
+            assertEq(commitmentAgentId, agentId);
+            assertEq(amount, 1_000_000 ether);
+            assertEq(matchedAmount, 0);
+            assertEq(commitmentPositionId, bootstrapPositionId);
+            assertEq(startEpoch, 1);
+            assertEq(stakeEndEpoch, 53);
+        }
         assertEq(pools.sellerBootstrapCommitment(seller), 1_000_000 ether);
+        assertEq(uint256(pools.positionKind(bootstrapPositionId)), uint256(IAntseedSellerPools.PositionKind.Bootstrap));
+        assertEq(pools.ownerOf(bootstrapPositionId), seller);
+
+        {
+            (
+                address positionOwner,
+                uint256 positionAgentId,
+                uint256 positionAmount,
+                uint256 positionWeightAmount,
+                uint64 positionStartEpoch,
+                uint64 positionEndEpoch,
+                uint64 closedAtEpoch,
+                bool withdrawn
+            ) = pools.positions(bootstrapPositionId);
+            assertEq(positionOwner, seller);
+            assertEq(positionAgentId, agentId);
+            assertEq(positionAmount, 0);
+            assertEq(positionWeightAmount, 500_000 ether);
+            assertEq(positionStartEpoch, 1);
+            assertEq(positionEndEpoch, 53);
+            assertEq(closedAtEpoch, 0);
+            assertFalse(withdrawn);
+        }
+        assertEq(pools.stakerTotalActiveStake(seller), 0);
 
         vm.warp(block.timestamp + EPOCH_DURATION);
+        assertEq(pools.positionWeightAtEpoch(bootstrapPositionId, 1), 26_000_000 ether);
         assertEq(pools.poolActiveStakeAtEpoch(agentId, 1), 500_000 ether);
         assertEq(pools.bootstrapWeightAtEpoch(agentId, 1), 26_000_000 ether);
         assertEq(pools.poolWeightAtEpoch(agentId, 1), 26_000_000 ether);
 
         assertEq(pools.bootstrapRewardCapAtEpoch(seller, 1), type(uint256).max);
+    }
+
+    function test_bootstrapPositionIsNonTransferableAndNotMutable() public {
+        sellerRewardsPool.recordLockedReward(seller, 1_000_000 ether);
+        token.mint(address(sellerRewardsPool), 1_000_000 ether);
+
+        vm.prank(seller);
+        uint256 bootstrapPositionId = pools.activateBootstrapCommitment(agentId);
+
+        vm.startPrank(seller);
+        vm.expectRevert(IAntseedSellerPools.NonTransferablePosition.selector);
+        pools.transferFrom(seller, recipient, bootstrapPositionId);
+
+        vm.expectRevert(IAntseedSellerPools.NonTransferablePosition.selector);
+        pools.moveStake(bootstrapPositionId, otherAgentId);
+
+        vm.expectRevert(IAntseedSellerPools.NonTransferablePosition.selector);
+        pools.withdrawStake(bootstrapPositionId);
+
+        vm.expectRevert(IAntseedSellerPools.NonTransferablePosition.selector);
+        pools.extendLock(bootstrapPositionId, 1);
+
+        vm.expectRevert(IAntseedSellerPools.NonTransferablePosition.selector);
+        pools.enableMaxLock(bootstrapPositionId);
+
+        vm.expectRevert(IAntseedSellerPools.NonTransferablePosition.selector);
+        pools.disableMaxLock(bootstrapPositionId);
+        vm.stopPrank();
     }
 
     function test_bootstrapCommitmentUnavailableAfterTransfersEnabled() public {
@@ -608,7 +681,7 @@ contract AntseedSellerPoolsTest is Test {
         token.mint(address(sellerRewardsPool), 1_000_000 ether);
 
         vm.prank(seller);
-        pools.activateBootstrapCommitment(agentId);
+        uint256 bootstrapPositionId = pools.activateBootstrapCommitment(agentId);
 
         vm.warp(block.timestamp + EPOCH_DURATION);
         token.mint(seller, 400_000 ether);
@@ -621,7 +694,14 @@ contract AntseedSellerPoolsTest is Test {
         assertEq(pools.sellerBootstrapMatchedCommitment(seller), 400_000 ether);
         vm.warp(block.timestamp + EPOCH_DURATION);
 
+        (,,, uint256 residualPositionId,,,) = pools.bootstrapCommitments(seller);
+        assertTrue(residualPositionId > bootstrapPositionId);
+        assertEq(pools.positionWeightAtEpoch(bootstrapPositionId, 1), 26_000_000 ether);
+        assertEq(pools.positionWeightAtEpoch(bootstrapPositionId, 2), 0);
+        assertEq(uint256(pools.positionKind(residualPositionId)), uint256(IAntseedSellerPools.PositionKind.Bootstrap));
+        assertEq(pools.ownerOf(residualPositionId), seller);
         assertEq(pools.bootstrapWeightAtEpoch(agentId, 2), 15_300_000 ether);
+        assertEq(pools.positionWeightAtEpoch(residualPositionId, 2), 15_300_000 ether);
         assertEq(pools.positionWeightAtEpoch(realPositionId, 2), 20_800_000 ether);
         assertEq(pools.poolWeightAtEpoch(agentId, 2), 36_100_000 ether);
     }
@@ -651,7 +731,7 @@ contract AntseedSellerPoolsTest is Test {
         vm.prank(seller);
         pools.activateBootstrapCommitment(agentId);
 
-        (uint256 commitmentAgentId, uint256 amount, uint256 matchedAmount, uint64 startEpoch, uint64 stakeEndEpoch,) =
+        (uint256 commitmentAgentId, uint256 amount, uint256 matchedAmount,, uint64 startEpoch, uint64 stakeEndEpoch,) =
             pools.bootstrapCommitments(seller);
         assertEq(commitmentAgentId, agentId);
         assertEq(amount, 1_000_000 ether);
@@ -805,6 +885,8 @@ contract AntseedSellerPoolsTest is Test {
         // stays frozen; removal applies from the next epoch onward.
         vm.prank(seller);
         pools.matchBootstrapCommitment(600_000 ether);
+        (,,, uint256 activeBootstrapPositionId,,,) = pools.bootstrapCommitments(seller);
+        assertEq(activeBootstrapPositionId, 0);
         assertEq(pools.bootstrapWeightAtEpoch(agentId, 2), 15_300_000 ether);
         assertEq(pools.bootstrapWeightAtEpoch(agentId, 3), 0);
     }
@@ -951,8 +1033,7 @@ contract AntseedSellerPoolsTest is Test {
 
     function test_sellerRegistryLegacyStakeFallbackKeepsSellersEligible() public {
         MockLegacyStaking legacy = new MockLegacyStaking();
-        AntseedSellerRegistry adapter =
-            new AntseedSellerRegistry(address(registry), address(pools), address(legacy));
+        AntseedSellerRegistry adapter = new AntseedSellerRegistry(address(registry), address(pools), address(legacy));
 
         legacy.setAgent(seller, agentId);
         legacy.setStaked(seller, true);
@@ -974,8 +1055,7 @@ contract AntseedSellerPoolsTest is Test {
 
     function test_sellerRegistryAgentHandoverSupersedesLegacyBinding() public {
         MockLegacyStaking legacy = new MockLegacyStaking();
-        AntseedSellerRegistry adapter =
-            new AntseedSellerRegistry(address(registry), address(pools), address(legacy));
+        AntseedSellerRegistry adapter = new AntseedSellerRegistry(address(registry), address(pools), address(legacy));
 
         address oldSeller = address(0x600);
         vm.prank(oldSeller);
