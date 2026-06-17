@@ -38,6 +38,8 @@ describe('BuyerRequestHandler payment mux wiring', () => {
       }, { streamingStart: false });
     });
 
+    const preparePreRequestAuth = vi.fn();
+    const sendPostResponseAuth = vi.fn();
     const estimateCostFromResponse = vi.fn();
     const getOrCreatePaymentMux = vi.fn().mockReturnValue({});
     const registerPaymentMux = vi.fn();
@@ -47,8 +49,8 @@ describe('BuyerRequestHandler payment mux wiring', () => {
         localPeerId: 'a'.repeat(40) as PeerId,
         negotiator: {
           getOrCreatePaymentMux,
-          preparePreRequestAuth: vi.fn(),
-          sendPostResponseAuth: vi.fn(),
+          preparePreRequestAuth,
+          sendPostResponseAuth,
           estimateCostFromResponse,
           parseCostHeaders: vi.fn(),
           recordResponseContent: vi.fn(),
@@ -68,6 +70,7 @@ describe('BuyerRequestHandler payment mux wiring', () => {
     await handler.sendRequest(peer, request);
 
     expect(getOrCreatePaymentMux).toHaveBeenCalledWith(peer.peerId, conn);
+    expect(preparePreRequestAuth).toHaveBeenCalledWith(peer, conn);
     expect(sendProxyRequest).toHaveBeenCalledOnce();
     expect(estimateCostFromResponse).toHaveBeenCalledWith(
       peer,
@@ -75,9 +78,16 @@ describe('BuyerRequestHandler payment mux wiring', () => {
       undefined,
       'req-payment-mux',
     );
+    expect(sendPostResponseAuth).toHaveBeenCalledWith(peer, conn);
     expect(
       getOrCreatePaymentMux.mock.invocationCallOrder[0],
     ).toBeLessThan(sendProxyRequest.mock.invocationCallOrder[0]);
+    expect(
+      preparePreRequestAuth.mock.invocationCallOrder[0],
+    ).toBeLessThan(sendProxyRequest.mock.invocationCallOrder[0]);
+    expect(
+      sendProxyRequest.mock.invocationCallOrder[0],
+    ).toBeLessThan(sendPostResponseAuth.mock.invocationCallOrder[0]);
   });
 
   it('re-negotiates on 402 even when the peer was already locked', async () => {
@@ -119,6 +129,8 @@ describe('BuyerRequestHandler payment mux wiring', () => {
     });
 
     const estimateCostFromResponse = vi.fn();
+    const preparePreRequestAuth = vi.fn();
+    const sendPostResponseAuth = vi.fn();
     const handle402 = vi.fn(async () => ({ action: 'retry' as const }));
     const handler = new BuyerRequestHandler(
       {},
@@ -126,7 +138,8 @@ describe('BuyerRequestHandler payment mux wiring', () => {
         localPeerId: 'a'.repeat(40) as PeerId,
         negotiator: {
           getOrCreatePaymentMux: vi.fn().mockReturnValue({}),
-          preparePreRequestAuth: vi.fn(),
+          preparePreRequestAuth,
+          sendPostResponseAuth,
           handle402,
           estimateCostFromResponse,
           parseCostHeaders: vi.fn(),
@@ -147,6 +160,7 @@ describe('BuyerRequestHandler payment mux wiring', () => {
     const response = await handler.sendRequest(peer, request);
 
     expect(response.statusCode).toBe(200);
+    expect(preparePreRequestAuth).toHaveBeenCalledTimes(2);
     expect(handle402).toHaveBeenCalledOnce();
     expect(estimateCostFromResponse).toHaveBeenCalledTimes(1);
     expect(estimateCostFromResponse).toHaveBeenCalledWith(
@@ -155,5 +169,7 @@ describe('BuyerRequestHandler payment mux wiring', () => {
       undefined,
       'req-relock',
     );
+    expect(sendPostResponseAuth).toHaveBeenCalledTimes(1);
+    expect(sendPostResponseAuth).toHaveBeenCalledWith(peer, conn);
   });
 });
