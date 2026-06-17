@@ -10,7 +10,7 @@ import {AntseedRegistry} from "../AntseedRegistry.sol";
  * @title DeployBaseSepolia
  * @notice Deploys AntSeed protocol to Base Sepolia testnet.
  *         Uses real USDC (Circle testnet) and real ERC-8004 IdentityRegistry.
- *         Skips AntseedSlashing and AntseedSubPool (not needed for v1).
+ *         Skips AntseedSlashing (not needed for v1).
  *
  * Usage:
  *   cd packages/contracts

@@ -10,7 +10,7 @@ import {AntseedRegistry} from "../AntseedRegistry.sol";
  * @title DeployBaseMainnet
  * @notice Deploys AntSeed protocol to Base mainnet.
  *         Uses real USDC (Circle) and real ERC-8004 IdentityRegistry.
- *         Skips AntseedSlashing and AntseedSubPool (not needed for v1).
+ *         Skips AntseedSlashing (not needed for v1).
  *
  * Usage:
  *   cd packages/contracts

@@ -100,16 +100,6 @@ contract Deploy is Script {
         require(emissions != address(0), "Emissions deploy failed");
         console.log("AntseedEmissions:     ", emissions);
 
-        // 10. AntseedSubPool(usdc, registry)
-        bytes memory subPoolBytecode = abi.encodePacked(
-            vm.getCode("AntseedSubPool.sol:AntseedSubPool"),
-            abi.encode(usdc, address(antseedRegistry))
-        );
-        address subPool;
-        assembly { subPool := create(0, add(subPoolBytecode, 0x20), mload(subPoolBytecode)) }
-        require(subPool != address(0), "SubPool deploy failed");
-        console.log("AntseedSubPool:       ", subPool);
-
         // ---- Wire registry ----
         antseedRegistry.setChannels(channels);
         antseedRegistry.setStats(stats);
@@ -128,7 +118,6 @@ contract Deploy is Script {
         ISetRegistry(staking).setRegistry(address(antseedRegistry));
         ISetRegistry(emissions).setRegistry(address(antseedRegistry));
         ISetRegistry(antsToken).setRegistry(address(antseedRegistry));
-        ISetRegistry(subPool).setRegistry(address(antseedRegistry));
 
         // ---- Authorize Channels as Stats writer ----
         ISetWriter(stats).setWriter(channels, true);

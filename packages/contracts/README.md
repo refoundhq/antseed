@@ -1,6 +1,6 @@
 # AntSeed Smart Contracts
 
-Solidity contracts implementing the streaming payment, staking, stats, emission, and subscription system.
+Solidity contracts implementing the streaming payment, staking, stats, and emission system.
 
 ## Contract Architecture
 
@@ -11,7 +11,6 @@ AntseedChannels             ── Reserve→Settle/Close lifecycle, EIP-712 (sw
 AntseedStaking              ── seller stake bound to ERC-8004 agentId
 AntseedStats                ── optional external metadata sink (buyer/agent token + request stats)
 AntseedEmissions            ── USDC volume-based epoch emissions
-AntseedSubPool              ── subscription tiers, daily budgets, revenue distribution
 MockERC8004Registry         ── mock ERC-8004 IdentityRegistry (local testing only)
 ```
 
@@ -113,20 +112,6 @@ Seller USDC staking bound to ERC-8004 agentId.
 - `stake(uint256 agentId, uint256 amount)` — locks USDC, binds to agentId
 - `unstake(uint256 agentId)` — returns stake
 
-### AntseedSubPool.sol
-
-Subscription management with daily budgets and epoch-based revenue distribution.
-
-- `subscribe(uint256 tier)` — pay monthly fee in USDC
-- `cancelSubscription()` — stops at end of current period
-- `setTier(uint256 tierId, uint256 monthlyFee, uint256 dailyTokenBudget)` — owner
-- `optIn(uint256 agentId)` — peer opts in (requires ERC-8004 agentId)
-- `optOut(uint256 agentId)` — peer opts out
-- `claimRevenue(uint256 agentId)` — claim share proportional to stats
-- `distributionEpoch()` — callable by anyone, distributes current epoch revenue
-
-Reads from AntseedChannels on-chain session stats. `AntseedStats` is optional and not required for SubPool operation.
-
 ### AntseedEmissions.sol
 
 ANTS emission controller using the Synthetix reward-per-point pattern. O(1) gas per interaction.
@@ -156,7 +141,6 @@ ANTS emission controller using the Synthetix reward-per-point pattern. O(1) gas 
 5. **AntseedStats** — optional: deploy, set in `AntseedRegistry`, and grant `WRITER_ROLE` to Channels
 6. **AntseedChannels** — deploy with `(registryAddress)`
 7. **AntseedEmissions** — deploy with `(antsTokenAddress, channelsAddress)`, then call `antsToken.setEmissionsContract(emissions)`
-8. **AntseedSubPool** — deploy with `(usdcAddress, registryAddress)`
 
 ## Configuration
 
