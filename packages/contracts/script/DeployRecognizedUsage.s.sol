@@ -10,7 +10,6 @@ import { AntseedSellerOperatorUsageRewards } from "../emissions/AntseedSellerOpe
 import { AntseedSellerUsageRewards } from "../emissions/AntseedSellerUsageRewards.sol";
 import { AntseedUsageAccounting } from "../emissions/AntseedUsageAccounting.sol";
 import { IAntseedRegistry } from "../interfaces/IAntseedRegistry.sol";
-import { AntseedBootstrapCommitmentClaimPolicy } from "../policies/AntseedBootstrapCommitmentClaimPolicy.sol";
 import { AntseedSellerPools } from "../sellers/AntseedSellerPools.sol";
 import { AntseedSellerRegistry } from "../sellers/AntseedSellerRegistry.sol";
 
@@ -27,10 +26,6 @@ interface IANTSTokenMintAuthorityAdmin {
 interface IAntseedLegacyEmissionsClock {
     function genesis() external view returns (uint256);
     function EPOCH_DURATION() external view returns (uint256);
-}
-
-interface IAntseedSellerRewardsPoolPolicyAdmin {
-    function setSellerClaimPolicy(address policy) external;
 }
 
 /**
@@ -56,15 +51,12 @@ interface IAntseedSellerRewardsPoolPolicyAdmin {
  *                                     paid to VERIFICATION_WALLET until a
  *                                     verifier-rewards contract replaces it
  *                                     under a successor program id.
- *   SELLER_REWARDS_POOL               Optional existing locked seller rewards pool for bootstrap commitments.
  *   POOL_APY_START_BPS                Initial APY cap, immutable at deploy. Defaults to 10000 (100%).
  *   POOL_APY_FLOOR_BPS                Terminal APY cap after decay, immutable. Defaults to 2000 (20%).
  *   POOL_APY_DECAY_PER_EPOCH_BPS      Linear decay per epoch, immutable. Defaults to 500 (5 points).
  *   POOL_APY_DECAY_START_EPOCH        Epoch the decay begins. Defaults to 0 =
  *                                     not started; fire it later with the
  *                                     one-time startApyDecay(futureEpoch).
- *   BOOTSTRAP_COMMITMENT_CAP          Max locked seller rewards usable as bootstrap. Defaults to 1,000,000 ANTS.
- *   BOOTSTRAP_WEIGHT_BPS              Bootstrap effective weight. Defaults to 5000 (50%).
  *
  * Usage:
  *   cd packages/contracts
@@ -126,13 +118,10 @@ contract DeployRecognizedUsage is Script {
         uint16 teamShareBps = uint16(teamShare);
         uint16 reserveShareBps = uint16(reserveShare);
         uint16 verificationShareBps = uint16(verificationShare);
-        address sellerRewardsPool = vm.envOr("SELLER_REWARDS_POOL", address(0));
         uint256 poolApyStartBps = vm.envOr("POOL_APY_START_BPS", uint256(10_000));
         uint256 poolApyFloorBps = vm.envOr("POOL_APY_FLOOR_BPS", uint256(2_000));
         uint256 poolApyDecayPerEpochBps = vm.envOr("POOL_APY_DECAY_PER_EPOCH_BPS", uint256(500));
         uint256 poolApyDecayStartEpoch = vm.envOr("POOL_APY_DECAY_START_EPOCH", uint256(0));
-        uint256 bootstrapCommitmentCap = vm.envOr("BOOTSTRAP_COMMITMENT_CAP", uint256(1_000_000e18));
-        uint256 bootstrapWeightBps = vm.envOr("BOOTSTRAP_WEIGHT_BPS", uint256(5_000));
         address teamWallet = registry.teamWallet();
         address protocolReserve = registry.protocolReserve();
         require(teamWallet != address(0), "team wallet not set");
@@ -165,7 +154,6 @@ contract DeployRecognizedUsage is Script {
         console.log("Existing Staking:       ", existingStaking);
         console.log("Team Wallet:            ", teamWallet);
         console.log("Protocol Reserve:       ", protocolReserve);
-        console.log("Seller Rewards Pool:    ", sellerRewardsPool);
         console.log("Genesis:                ", genesis);
         console.log("Epoch Duration:         ", epochDuration);
         console.log("Current Epoch:          ", currentEpoch);
@@ -182,13 +170,10 @@ contract DeployRecognizedUsage is Script {
         if (poolApyDecayStartEpoch != 0) {
             sellerPools.startApyDecay(poolApyDecayStartEpoch);
         }
-        sellerPools.setBootstrapConfig(bootstrapCommitmentCap, bootstrapWeightBps);
         console.log("Pool APY start (bps):   ", poolApyStartBps);
         console.log("Pool APY floor (bps):   ", poolApyFloorBps);
         console.log("Pool APY decay (bps/ep):", poolApyDecayPerEpochBps);
         console.log("Pool APY decay epoch:   ", poolApyDecayStartEpoch);
-        console.log("Bootstrap cap:          ", bootstrapCommitmentCap);
-        console.log("Bootstrap weight (bps): ", bootstrapWeightBps);
 
         AntseedSellerRegistry sellerRegistry =
             new AntseedSellerRegistry(registryAddress, address(sellerPools), existingStaking);
@@ -222,13 +207,6 @@ contract DeployRecognizedUsage is Script {
         // address even while ANTS transfers are globally disabled.
         IANTSTokenMintAuthorityAdmin(antsToken).setTransferWhitelist(address(sellerPools), true);
         buyerUsageRewards.setUsageAccounting(address(usageAccounting));
-        if (sellerRewardsPool != address(0)) {
-            sellerPools.setSellerRewardsPool(sellerRewardsPool);
-            AntseedBootstrapCommitmentClaimPolicy bootstrapClaimPolicy =
-                new AntseedBootstrapCommitmentClaimPolicy(address(sellerPools));
-            IAntseedSellerRewardsPoolPolicyAdmin(sellerRewardsPool).setSellerClaimPolicy(address(bootstrapClaimPolicy));
-            console.log("BootstrapClaimPolicy:   ", address(bootstrapClaimPolicy));
-        }
         sellerPools.setRewardStaker(address(sellerPoolUsageRewards), true);
         programs.setRewardProgram(
             SELLER_POOL_USAGE_PROGRAM,

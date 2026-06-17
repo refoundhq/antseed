@@ -1,11 +1,10 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-import {IAntseedRegistry} from "./IAntseedRegistry.sol";
+import { IAntseedRegistry } from "./IAntseedRegistry.sol";
 
 interface IAntseedSellerPools {
     event RegistrySet(address indexed registry);
-    event SellerRewardsPoolSet(address indexed sellerRewardsPool);
     event StakeCreated(
         uint256 indexed positionId,
         address indexed staker,
@@ -26,12 +25,6 @@ interface IAntseedSellerPools {
         uint256 indexed positionId, address indexed staker, uint256 returnedAmount, uint256 slashedAmount
     );
     event RewardStakerSet(address indexed rewardStaker, bool allowed);
-    event BootstrapCommitmentRecorded(
-        address indexed seller, uint256 indexed agentId, uint256 amount, uint256 startEpoch, uint256 stakeEndEpoch
-    );
-    event BootstrapCommitmentMatched(
-        address indexed seller, uint256 indexed agentId, uint256 amount, uint256 totalMatchedAmount
-    );
     event StakerRewardsRestaked(
         address indexed staker,
         uint256 indexed sourcePositionId,
@@ -57,17 +50,11 @@ interface IAntseedSellerPools {
     );
     event ApyDecayScheduled(uint256 indexed startEpoch);
     event ApyCapOverrideScheduled(uint256 indexed fromEpoch, uint256 capBps);
-    event BootstrapConfigSet(uint256 cap, uint256 weightBps);
     event RestakedRewardWeightBonusSet(uint256 bonusBps);
     event MoveWeightPenaltySet(uint256 penaltyBps);
     event StakerActiveStakeUpdated(
         address indexed staker, uint256 indexed agentId, uint256 totalActiveStake, uint256 agentActiveStake
     );
-
-    enum PositionKind {
-        Normal,
-        Bootstrap
-    }
 
     error InvalidAddress();
     error InvalidValue();
@@ -77,13 +64,6 @@ interface IAntseedSellerPools {
     error PositionClosed();
     error AlreadyWithdrawn();
     error NotRewardStaker();
-    error BootstrapUnavailable();
-    error BootstrapNotFound();
-    error BootstrapMatchExceeded();
-    error BootstrapAlreadyActive();
-    error BootstrapClosed();
-    error NotAgentOwner();
-    error NonTransferablePosition();
 
     function stake(uint256 agentId, uint256 amount, uint256 stakeEpochs) external returns (uint256 positionId);
     function stakeFor(address staker, uint256 agentId, uint256 amount, uint256 stakeEpochs)
@@ -104,8 +84,6 @@ interface IAntseedSellerPools {
         external
         returns (uint256 newPositionId);
     function ownerOf(uint256 positionId) external view returns (address owner);
-    function matchBootstrapCommitment(uint256 amount) external returns (uint256 positionId);
-    function activateBootstrapCommitment(uint256 agentId) external returns (uint256 positionId);
     function setRestakedRewardWeightBonus(uint256 bonusBps) external;
     function setMoveWeightPenalty(uint256 penaltyBps) external;
     function setRewardStaker(address rewardStaker, bool allowed) external;
@@ -132,9 +110,6 @@ interface IAntseedSellerPools {
         returns (uint256 normalEndEpoch, uint256 maxLockPower, uint256 nextChangeEpoch);
     function positionRewardCapAtEpoch(uint256 positionId, uint256 epoch) external view returns (uint256 cap);
     function apyCapBpsAtEpoch(uint256 epoch) external view returns (uint256 capBps);
-    function bootstrapWeightAtEpoch(uint256 agentId, uint256 epoch) external view returns (uint256 weight);
-    function bootstrapWeightAtEpoch(address seller, uint256 epoch) external view returns (uint256 weight);
-    function bootstrapRewardCapAtEpoch(address seller, uint256 epoch) external view returns (uint256 cap);
     function poolPowerWeightAtEpoch(uint256 agentId, uint256 epoch) external view returns (uint256 weight);
     function poolPowerWeightAtEpoch(address seller, uint256 epoch) external view returns (uint256 weight);
     function totalPowerWeightAtEpoch(uint256 epoch) external view returns (uint256 weight);
@@ -144,9 +119,6 @@ interface IAntseedSellerPools {
     function currentPoolSecurityShareBps(uint256 agentId) external returns (uint256 shareBps);
     function currentPoolSecurityShareBps(address seller) external returns (uint256 shareBps);
 
-    function sellerBootstrapCommitment(address seller) external view returns (uint256);
-    function sellerBootstrapMatchedCommitment(address seller) external view returns (uint256);
-    function positionKind(uint256 positionId) external view returns (PositionKind);
     function stakerTotalActiveStake(address staker) external view returns (uint256);
     function stakerAgentActiveStake(address staker, uint256 agentId) external view returns (uint256);
     function stakerPositionCount(address staker) external view returns (uint256);
@@ -169,17 +141,5 @@ interface IAntseedSellerPools {
             uint64 stakeEndEpoch,
             uint64 closedAtEpoch,
             bool withdrawn
-        );
-    function bootstrapCommitments(address seller)
-        external
-        view
-        returns (
-            uint256 agentId,
-            uint256 amount,
-            uint256 matchedAmount,
-            uint256 positionId,
-            uint64 startEpoch,
-            uint64 stakeEndEpoch,
-            uint64 weightBps
         );
 }

@@ -16,7 +16,7 @@ import { IAntseedSellerUnlockPolicy } from "../interfaces/IAntseedSellerUnlockPo
  *
  *         Important behavior:
  *           - This policy is for legacy emissions unlock routing only.
- *           - It does not inspect seller-pool stake, usage, or bootstrap state.
+ *           - It does not inspect seller-pool stake or usage state.
  *           - A false value means legacy seller emissions should remain locked
  *             in AntseedSellerRewardsPool.
  */

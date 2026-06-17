@@ -9,9 +9,9 @@ import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/utils/math/Math.sol";
 import "@openzeppelin/contracts/utils/structs/Checkpoints.sol";
 
-import {IAntseedEmissionsAuthority} from "../interfaces/IAntseedEmissionsAuthority.sol";
-import {IAntseedSellerPools} from "../interfaces/IAntseedSellerPools.sol";
-import {IAntseedUsageAccounting} from "../interfaces/IAntseedUsageAccounting.sol";
+import { IAntseedEmissionsAuthority } from "../interfaces/IAntseedEmissionsAuthority.sol";
+import { IAntseedSellerPools } from "../interfaces/IAntseedSellerPools.sol";
+import { IAntseedUsageAccounting } from "../interfaces/IAntseedUsageAccounting.sol";
 
 /**
  * @title AntseedSellerUsageRewards
@@ -39,8 +39,8 @@ import {IAntseedUsageAccounting} from "../interfaces/IAntseedUsageAccounting.sol
  *           - Restaking rewards creates a new locked position in the source
  *             agent pool and may receive a configured weight bonus based on lock
  *             length.
- *           - Bootstrap commitments mint non-transferable position NFTs in
- *             seller pools and claim through the same indexed position path.
+ *           - Position reward claims use indexed pool accounting and do not
+ *             loop over every epoch since the position started.
  */
 contract AntseedSellerUsageRewards is Ownable2Step, Pausable, ReentrancyGuard {
     using Math for uint256;

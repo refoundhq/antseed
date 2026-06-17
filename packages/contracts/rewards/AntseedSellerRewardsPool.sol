@@ -21,13 +21,13 @@ import { IAntseedSellerClaimPolicy } from "../interfaces/IAntseedSellerClaimPoli
  *
  *         Important behavior:
  *           - This is custody for locked seller rewards only. It does not
- *             calculate usage points, pool rewards, APY caps, or bootstrap
- *             security weight.
+ *             calculate usage points, pool rewards, APY caps, or security
+ *             weight.
  *           - `recordLockedReward` is accounting-only and can only be called by
  *             the configured emissions contract. The corresponding ANTS must
  *             already have been minted/transferred to this pool.
  *           - Claim eligibility is intentionally delegated to a policy contract
- *             so launch/bootstrap rules can change without changing custody.
+ *             so launch claim rules can change without changing custody.
  */
 contract AntseedSellerRewardsPool is Ownable, ReentrancyGuard {
     using SafeERC20 for IERC20;
