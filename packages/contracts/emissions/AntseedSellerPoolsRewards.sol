@@ -9,12 +9,12 @@ import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/utils/math/Math.sol";
 import "@openzeppelin/contracts/utils/structs/Checkpoints.sol";
 
-import { IAntseedEmissionsAuthority } from "../interfaces/IAntseedEmissionsAuthority.sol";
+import { IAntseedEmissionsGate } from "../interfaces/IAntseedEmissionsGate.sol";
 import { IAntseedSellerPools } from "../interfaces/IAntseedSellerPools.sol";
 import { IAntseedUsageAccounting } from "../interfaces/IAntseedUsageAccounting.sol";
 
 /**
- * @title AntseedSellerUsageRewards
+ * @title AntseedSellerPoolsRewards
  * @notice Lazy seller-pool reward controller for recognized usage.
  *
  *         Usage accounting records raw seller usage and weighted pool points
@@ -22,7 +22,7 @@ import { IAntseedUsageAccounting } from "../interfaces/IAntseedUsageAccounting.s
  *         burn/reserve routing are applied at the pool budget level, and
  *         staker positions split the settled claimable budget:
  *
- *         poolReward = programBudget(epoch) * poolWeightedPoints / totalWeightedPoints
+ *         poolReward = sellerPoolsBudget(epoch) * poolWeightedPoints / totalWeightedPoints
  *         poolClaimable = min(poolReward, poolApyCap)
  *         positionReward = poolClaimable * positionWeight / poolWeight
  *
@@ -30,8 +30,8 @@ import { IAntseedUsageAccounting } from "../interfaces/IAntseedUsageAccounting.s
  *         emissions; excess over that cap is routed to the protocol reserve.
  *
  *         Important behavior:
- *           - This is the staker pool-reward program, not the direct seller
- *             operator reward program.
+ *           - This is the staker pool-reward controller, separate from the
+ *             direct seller/operator usage rewards.
  *           - Pool epochs are indexed before staker claim/restake. Settlement
  *             mints pool-level claimable ANTS to this contract, mints capped
  *             pool over-cap amounts to the dead address, and routes the
@@ -42,7 +42,7 @@ import { IAntseedUsageAccounting } from "../interfaces/IAntseedUsageAccounting.s
  *           - Position reward claims use indexed pool accounting and do not
  *             loop over every epoch since the position started.
  */
-contract AntseedSellerUsageRewards is Ownable2Step, Pausable, ReentrancyGuard {
+contract AntseedSellerPoolsRewards is Ownable2Step, Pausable, ReentrancyGuard {
     using Math for uint256;
     using SafeERC20 for IERC20;
     using Checkpoints for Checkpoints.Trace256;
@@ -54,10 +54,9 @@ contract AntseedSellerUsageRewards is Ownable2Step, Pausable, ReentrancyGuard {
     uint256 public constant INDEX_SCALE = 1e30;
 
     // ─── External Contracts ──────────────────────────────────────────
-    IAntseedEmissionsAuthority public emissionsAuthority;
-    IAntseedSellerPools public sellerPools;
-    IAntseedUsageAccounting public usageAccounting;
-    bytes32 public immutable programId;
+    IAntseedEmissionsGate public immutable emissionsGate;
+    IAntseedSellerPools public immutable sellerPools;
+    IAntseedUsageAccounting public immutable usageAccounting;
 
     // ─── Claim State ─────────────────────────────────────────────────
     mapping(uint256 => uint256) public epochBurnedAmount;
@@ -83,9 +82,6 @@ contract AntseedSellerUsageRewards is Ownable2Step, Pausable, ReentrancyGuard {
     }
 
     // ─── Events ──────────────────────────────────────────────────────
-    event EmissionsAuthoritySet(address indexed emissionsAuthority);
-    event SellerPoolsSet(address indexed sellerPools);
-    event UsageAccountingSet(address indexed usageAccounting);
     event StakerUsageRewardRestaked(
         uint256 indexed sourcePositionId,
         uint256 indexed newPositionId,
@@ -125,17 +121,13 @@ contract AntseedSellerUsageRewards is Ownable2Step, Pausable, ReentrancyGuard {
     error NotPositionOwner();
 
     // ─── Constructor ─────────────────────────────────────────────────
-    constructor(address _emissionsAuthority, address _sellerPools, address _usageAccounting, bytes32 _programId)
-        Ownable(msg.sender)
-    {
-        if (_emissionsAuthority == address(0) || _sellerPools == address(0) || _usageAccounting == address(0)) {
+    constructor(address _emissionsGate, address _sellerPools, address _usageAccounting) Ownable(msg.sender) {
+        if (_emissionsGate == address(0) || _sellerPools == address(0) || _usageAccounting == address(0)) {
             revert InvalidAddress();
         }
-        if (_programId == bytes32(0)) revert InvalidAddress();
-        emissionsAuthority = IAntseedEmissionsAuthority(_emissionsAuthority);
+        emissionsGate = IAntseedEmissionsGate(_emissionsGate);
         sellerPools = IAntseedSellerPools(_sellerPools);
         usageAccounting = IAntseedUsageAccounting(_usageAccounting);
-        programId = _programId;
         initialIndexEpoch = IAntseedUsageAccounting(_usageAccounting).currentEpoch();
     }
 
@@ -267,24 +259,6 @@ contract AntseedSellerUsageRewards is Ownable2Step, Pausable, ReentrancyGuard {
     // ═══════════════════════════════════════════════════════════════════
     //                        ADMIN FUNCTIONS
     // ═══════════════════════════════════════════════════════════════════
-
-    function setEmissionsAuthority(address _emissionsAuthority) external onlyOwner {
-        if (_emissionsAuthority == address(0)) revert InvalidAddress();
-        emissionsAuthority = IAntseedEmissionsAuthority(_emissionsAuthority);
-        emit EmissionsAuthoritySet(_emissionsAuthority);
-    }
-
-    function setSellerPools(address _sellerPools) external onlyOwner {
-        if (_sellerPools == address(0)) revert InvalidAddress();
-        sellerPools = IAntseedSellerPools(_sellerPools);
-        emit SellerPoolsSet(_sellerPools);
-    }
-
-    function setUsageAccounting(address _usageAccounting) external onlyOwner {
-        if (_usageAccounting == address(0)) revert InvalidAddress();
-        usageAccounting = IAntseedUsageAccounting(_usageAccounting);
-        emit UsageAccountingSet(_usageAccounting);
-    }
 
     function pause() external onlyOwner {
         _pause();
@@ -469,14 +443,14 @@ contract AntseedSellerUsageRewards is Ownable2Step, Pausable, ReentrancyGuard {
         uint256 totalPoints = accounting.totalWeightedPoolPointsByEpoch(epoch);
         if (poolPoints == 0 || totalPoints == 0) return 0;
 
-        uint256 budget = emissionsAuthority.programEpochBudget(programId, epoch);
+        uint256 budget = emissionsGate.minterEpochBudget(address(this), epoch);
         if (budget == 0) return 0;
         return Math.mulDiv(budget, poolPoints, totalPoints);
     }
 
     function _mint(uint256 epoch, address recipient, uint256 amount) internal {
         if (amount == 0) return;
-        emissionsAuthority.mintProgramEmission(programId, epoch, recipient, amount);
+        emissionsGate.mint(epoch, recipient, amount);
     }
 
     function _transferReward(address recipient, uint256 amount) internal {
@@ -485,7 +459,7 @@ contract AntseedSellerUsageRewards is Ownable2Step, Pausable, ReentrancyGuard {
     }
 
     function burnCapForEpoch(uint256 epoch) public view returns (uint256) {
-        return Math.mulDiv(emissionsAuthority.schedule().getEpochEmission(epoch), BURN_CAP_BPS, BPS_DENOMINATOR);
+        return Math.mulDiv(emissionsGate.getEpochEmission(epoch), BURN_CAP_BPS, BPS_DENOMINATOR);
     }
 
     function _previewBurnedAmount(uint256 epoch, uint256 excessAmount) internal view returns (uint256) {

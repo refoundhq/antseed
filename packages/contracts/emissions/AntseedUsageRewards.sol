@@ -5,49 +5,57 @@ import "@openzeppelin/contracts/access/Ownable2Step.sol";
 import "@openzeppelin/contracts/utils/Pausable.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
-import { IAntseedEmissionsAuthority } from "../interfaces/IAntseedEmissionsAuthority.sol";
+import { IAntseedDeposits } from "../interfaces/IAntseedDeposits.sol";
+import { IAntseedEmissionsGate } from "../interfaces/IAntseedEmissionsGate.sol";
 import { IAntseedRegistry } from "../interfaces/IAntseedRegistry.sol";
 import { IAntseedUsageAccounting } from "../interfaces/IAntseedUsageAccounting.sol";
 import { IERC8004Registry } from "../interfaces/IERC8004Registry.sol";
 
 /**
- * @title AntseedSellerOperatorUsageRewards
- * @notice Program controller for direct seller operator rewards.
+ * @title AntseedUsageRewards
+ * @notice Controller for direct seller/operator and buyer recognized usage
+ *         rewards.
  *
- *         This pays sellers directly for verified usage backed by their seller
- *         pool power. Staker rewards remain in AntseedSellerUsageRewards.
+ *         AntseedEmissionsGate owns one 10% usage budget. This controller
+ *         reads weighted usage points from AntseedUsageAccounting, splits the
+ *         usage budget 50/50 between seller/operator and buyer rewards, and
+ *         mints through that explicit usage bucket.
  *
  *         Important behavior:
- *           - This is the direct seller/operator program, intended for the
- *             separate seller share such as the extra 5% usage program.
- *           - It does not split with stakers and does not inspect positions.
- *             It reads direct seller weighted points from AntseedUsageAccounting
- *             and mints through the configured emission program.
- *           - The program share is configured on AntseedEmissionPrograms, so the
- *             same controller can be reused if the share changes by epoch.
- *           - Rewards are minted lazily on claim for finalized epochs only.
+ *           - Seller/operator rewards pay the current ERC-8004 agent owner.
+ *           - Buyer rewards pay the buyer's Deposits operator; the buyer hot
+ *             wallet itself never receives rewards.
+ *           - Both sides are capped per account/agent at 5% of that side's
+ *             epoch budget; overflow routes to protocol reserve.
  */
-contract AntseedSellerOperatorUsageRewards is Ownable2Step, Pausable, ReentrancyGuard {
+contract AntseedUsageRewards is Ownable2Step, Pausable, ReentrancyGuard {
     // ─── Constants ───────────────────────────────────────────────────
     uint256 public constant BPS_DENOMINATOR = 10_000;
     uint256 public constant MAX_REWARD_SHARE_BPS = 500;
 
     // ─── External Contracts ──────────────────────────────────────────
-    IAntseedEmissionsAuthority public emissionsAuthority;
-    IAntseedRegistry public registry;
-    IAntseedUsageAccounting public usageAccounting;
-    bytes32 public immutable programId;
+    IAntseedEmissionsGate public immutable emissionsGate;
+    IAntseedRegistry public immutable registry;
+    IAntseedUsageAccounting public immutable usageAccounting;
 
     // ─── Claim State ─────────────────────────────────────────────────
     mapping(uint256 => mapping(uint256 => bool)) public agentEpochClaimed;
+    mapping(address => mapping(uint256 => bool)) public buyerEpochClaimed;
 
     // ─── Events ──────────────────────────────────────────────────────
-    event EmissionsAuthoritySet(address indexed emissionsAuthority);
-    event RegistrySet(address indexed registry);
-    event UsageAccountingSet(address indexed usageAccounting);
     event SellerOperatorRewardClaimed(
         address indexed seller,
         uint256 indexed agentId,
+        uint256 indexed epoch,
+        uint256 weightedPoints,
+        uint256 totalWeightedPoints,
+        uint256 grossAmount,
+        uint256 claimableAmount,
+        uint256 reserveAmount
+    );
+    event BuyerUsageRewardClaimed(
+        address indexed buyer,
+        address indexed recipient,
         uint256 indexed epoch,
         uint256 weightedPoints,
         uint256 totalWeightedPoints,
@@ -60,19 +68,17 @@ contract AntseedSellerOperatorUsageRewards is Ownable2Step, Pausable, Reentrancy
     error InvalidAddress();
     error AlreadyClaimed();
     error NothingToClaim();
+    error RewardRecipientUnavailable();
 
     // ─── Constructor ─────────────────────────────────────────────────
-    constructor(address _emissionsAuthority, address _registry, address _usageAccounting, bytes32 _programId)
-        Ownable(msg.sender)
-    {
-        if (
-            _emissionsAuthority == address(0) || _registry == address(0) || _usageAccounting == address(0)
-                || _programId == bytes32(0)
-        ) revert InvalidAddress();
-        emissionsAuthority = IAntseedEmissionsAuthority(_emissionsAuthority);
+    constructor(address _emissionsGate, address _registry, address _usageAccounting) Ownable(msg.sender) {
+        if (_emissionsGate == address(0) || _registry == address(0) || _usageAccounting == address(0)) {
+            revert InvalidAddress();
+        }
+
+        emissionsGate = IAntseedEmissionsGate(_emissionsGate);
         registry = IAntseedRegistry(_registry);
         usageAccounting = IAntseedUsageAccounting(_usageAccounting);
-        programId = _programId;
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -88,6 +94,14 @@ contract AntseedSellerOperatorUsageRewards is Ownable2Step, Pausable, Reentrancy
     }
 
     // ═══════════════════════════════════════════════════════════════════
+    //                        CORE — CLAIM BUYER REWARDS
+    // ═══════════════════════════════════════════════════════════════════
+
+    function claimBuyerReward(address buyer, uint256 epoch) external nonReentrant whenNotPaused {
+        _claimBuyerReward(buyer, epoch);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
     //                        VIEWS
     // ═══════════════════════════════════════════════════════════════════
 
@@ -99,14 +113,27 @@ contract AntseedSellerOperatorUsageRewards is Ownable2Step, Pausable, Reentrancy
         return _pendingAgentReward(agentId, epoch);
     }
 
+    function pendingBuyerReward(address buyer, uint256 epoch) external view returns (uint256 amount) {
+        (uint256 weightedPoints, uint256 totalWeightedPoints) = _buyerShare(buyer, epoch);
+        return _pendingReward(epoch, weightedPoints, totalWeightedPoints);
+    }
+
     function rewardRecipient(uint256 agentId) external view returns (address) {
         return _agentOwner(agentId);
     }
 
     function _pendingAgentReward(uint256 agentId, uint256 epoch) internal view returns (uint256 amount) {
         (uint256 weightedPoints, uint256 totalWeightedPoints) = _agentShare(agentId, epoch);
+        return _pendingReward(epoch, weightedPoints, totalWeightedPoints);
+    }
+
+    function _pendingReward(uint256 epoch, uint256 weightedPoints, uint256 totalWeightedPoints)
+        internal
+        view
+        returns (uint256)
+    {
         if (weightedPoints == 0 || totalWeightedPoints == 0) return 0;
-        uint256 epochBudget = emissionsAuthority.programEpochBudget(programId, epoch);
+        uint256 epochBudget = usageSideEpochBudget(epoch);
         uint256 grossAmount = (epochBudget * weightedPoints) / totalWeightedPoints;
         uint256 cap = (epochBudget * MAX_REWARD_SHARE_BPS) / BPS_DENOMINATOR;
         return grossAmount < cap ? grossAmount : cap;
@@ -115,24 +142,6 @@ contract AntseedSellerOperatorUsageRewards is Ownable2Step, Pausable, Reentrancy
     // ═══════════════════════════════════════════════════════════════════
     //                        ADMIN FUNCTIONS
     // ═══════════════════════════════════════════════════════════════════
-
-    function setEmissionsAuthority(address _emissionsAuthority) external onlyOwner {
-        if (_emissionsAuthority == address(0)) revert InvalidAddress();
-        emissionsAuthority = IAntseedEmissionsAuthority(_emissionsAuthority);
-        emit EmissionsAuthoritySet(_emissionsAuthority);
-    }
-
-    function setRegistry(address _registry) external onlyOwner {
-        if (_registry == address(0)) revert InvalidAddress();
-        registry = IAntseedRegistry(_registry);
-        emit RegistrySet(_registry);
-    }
-
-    function setUsageAccounting(address _usageAccounting) external onlyOwner {
-        if (_usageAccounting == address(0)) revert InvalidAddress();
-        usageAccounting = IAntseedUsageAccounting(_usageAccounting);
-        emit UsageAccountingSet(_usageAccounting);
-    }
 
     function pause() external onlyOwner {
         _pause();
@@ -151,31 +160,76 @@ contract AntseedSellerOperatorUsageRewards is Ownable2Step, Pausable, Reentrancy
         if (agentEpochClaimed[agentId][epoch]) revert AlreadyClaimed();
 
         (uint256 weightedPoints, uint256 totalWeightedPoints) = _agentShare(agentId, epoch);
-        if (weightedPoints == 0 || totalWeightedPoints == 0) revert NothingToClaim();
-
-        uint256 epochBudget = emissionsAuthority.programEpochBudget(programId, epoch);
-        uint256 grossAmount = (epochBudget * weightedPoints) / totalWeightedPoints;
-        if (grossAmount == 0) revert NothingToClaim();
-
-        uint256 cap = (epochBudget * MAX_REWARD_SHARE_BPS) / BPS_DENOMINATOR;
-        uint256 claimableAmount = grossAmount < cap ? grossAmount : cap;
-        uint256 reserveAmount = grossAmount - claimableAmount;
-        if (claimableAmount == 0 && reserveAmount == 0) revert NothingToClaim();
+        (uint256 grossAmount, uint256 claimableAmount, uint256 reserveAmount) =
+            _rewardAmounts(epoch, weightedPoints, totalWeightedPoints);
 
         agentEpochClaimed[agentId][epoch] = true;
         address seller = _agentOwner(agentId);
-        if (claimableAmount != 0) {
-            emissionsAuthority.mintProgramEmission(programId, epoch, seller, claimableAmount);
-        }
-        if (reserveAmount != 0) {
-            address reserve = registry.protocolReserve();
-            if (reserve == address(0)) revert InvalidAddress();
-            emissionsAuthority.mintProgramEmission(programId, epoch, reserve, reserveAmount);
-        }
+        _mintReward(epoch, seller, claimableAmount, reserveAmount);
 
         emit SellerOperatorRewardClaimed(
             seller, agentId, epoch, weightedPoints, totalWeightedPoints, grossAmount, claimableAmount, reserveAmount
         );
+    }
+
+    function _claimBuyerReward(address buyer, uint256 epoch) internal {
+        if (buyer == address(0)) revert InvalidAddress();
+        if (buyerEpochClaimed[buyer][epoch]) revert AlreadyClaimed();
+
+        (uint256 weightedPoints, uint256 totalWeightedPoints) = _buyerShare(buyer, epoch);
+        (uint256 grossAmount, uint256 claimableAmount, uint256 reserveAmount) =
+            _rewardAmounts(epoch, weightedPoints, totalWeightedPoints);
+
+        buyerEpochClaimed[buyer][epoch] = true;
+        address recipient = _buyerRewardRecipient(buyer);
+        _mintReward(epoch, recipient, claimableAmount, reserveAmount);
+
+        emit BuyerUsageRewardClaimed(
+            buyer, recipient, epoch, weightedPoints, totalWeightedPoints, grossAmount, claimableAmount, reserveAmount
+        );
+    }
+
+    function usageSideEpochBudget(uint256 epoch) public view returns (uint256) {
+        return emissionsGate.minterEpochBudget(address(this), epoch) / 2;
+    }
+
+    function _rewardAmounts(uint256 epoch, uint256 weightedPoints, uint256 totalWeightedPoints)
+        internal
+        view
+        returns (uint256 grossAmount, uint256 claimableAmount, uint256 reserveAmount)
+    {
+        if (weightedPoints == 0 || totalWeightedPoints == 0) revert NothingToClaim();
+
+        uint256 epochBudget = usageSideEpochBudget(epoch);
+        grossAmount = (epochBudget * weightedPoints) / totalWeightedPoints;
+        if (grossAmount == 0) revert NothingToClaim();
+
+        uint256 cap = (epochBudget * MAX_REWARD_SHARE_BPS) / BPS_DENOMINATOR;
+        claimableAmount = grossAmount < cap ? grossAmount : cap;
+        reserveAmount = grossAmount - claimableAmount;
+        if (claimableAmount == 0 && reserveAmount == 0) revert NothingToClaim();
+    }
+
+    function _mintReward(uint256 epoch, address recipient, uint256 claimableAmount, uint256 reserveAmount) internal {
+        if (claimableAmount != 0) {
+            emissionsGate.mint(epoch, recipient, claimableAmount);
+        }
+        if (reserveAmount != 0) {
+            address reserve = registry.protocolReserve();
+            if (reserve == address(0)) revert InvalidAddress();
+            emissionsGate.mint(epoch, reserve, reserveAmount);
+        }
+    }
+
+    function _buyerShare(address buyer, uint256 epoch)
+        internal
+        view
+        returns (uint256 weightedPoints, uint256 totalWeightedPoints)
+    {
+        IAntseedUsageAccounting accounting = usageAccounting;
+        if (address(accounting) == address(0)) revert InvalidAddress();
+        weightedPoints = accounting.weightedBuyerPointsByEpoch(epoch, buyer);
+        totalWeightedPoints = accounting.totalWeightedBuyerPointsByEpoch(epoch);
     }
 
     function _agentShare(uint256 agentId, uint256 epoch)
@@ -200,5 +254,22 @@ contract AntseedSellerOperatorUsageRewards is Ownable2Step, Pausable, Reentrancy
         if (identityRegistry == address(0)) revert InvalidAddress();
         owner = IERC8004Registry(identityRegistry).ownerOf(agentId);
         if (owner == address(0)) revert InvalidAddress();
+    }
+
+    function _buyerRewardRecipient(address buyer) internal view returns (address) {
+        // Iron rule: the buyer hot wallet never receives funds. If the
+        // operator cannot be resolved, revert (rolling back the claimed flag)
+        // so the claim can be retried once an operator is available.
+        address depositsAddress = registry.deposits();
+        if (depositsAddress == address(0)) revert RewardRecipientUnavailable();
+
+        address operator;
+        try IAntseedDeposits(depositsAddress).getOperator(buyer) returns (address resolvedOperator) {
+            operator = resolvedOperator;
+        } catch {
+            revert RewardRecipientUnavailable();
+        }
+        if (operator == address(0)) revert RewardRecipientUnavailable();
+        return operator;
     }
 }

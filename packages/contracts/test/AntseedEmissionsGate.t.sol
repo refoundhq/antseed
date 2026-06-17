@@ -5,13 +5,11 @@ import "forge-std/Test.sol";
 
 import { ANTSToken } from "../core/ANTSToken.sol";
 import { AntseedEmissions } from "../legacy/AntseedEmissions.sol";
-import { AntseedBuyerUsageRewards } from "../emissions/AntseedBuyerUsageRewards.sol";
-import { AntseedEmissionPrograms } from "../emissions/AntseedEmissionPrograms.sol";
+import { AntseedUsageRewards } from "../emissions/AntseedUsageRewards.sol";
 import { AntseedEmissionsGate } from "../emissions/AntseedEmissionsGate.sol";
 import { AntseedEmissionsV2 } from "../legacy/AntseedEmissionsV2.sol";
-import { AntseedSellerOperatorUsageRewards } from "../emissions/AntseedSellerOperatorUsageRewards.sol";
 import { AntseedSellerPools } from "../sellers/AntseedSellerPools.sol";
-import { AntseedSellerUsageRewards } from "../emissions/AntseedSellerUsageRewards.sol";
+import { AntseedSellerPoolsRewards } from "../emissions/AntseedSellerPoolsRewards.sol";
 import { AntseedUsageAccounting } from "../emissions/AntseedUsageAccounting.sol";
 import { AntseedRegistry } from "../core/AntseedRegistry.sol";
 import { IAntseedUsageAccounting } from "../interfaces/IAntseedUsageAccounting.sol";
@@ -53,6 +51,12 @@ contract MockUsagePointsPolicy is IAntseedPointsPolicy {
     }
 }
 
+contract MockAllowAllSellerUnlockPolicy {
+    function canClaimSellerUnlocked(address) external pure returns (bool) {
+        return true;
+    }
+}
+
 contract MockSellerAgentLookup {
     mapping(address => uint256) public agentIdBySeller;
 
@@ -82,11 +86,9 @@ contract AntseedEmissionsGateTest is Test {
     AntseedEmissions legacyV1;
     AntseedEmissionsV2 legacyV2;
     AntseedEmissionsGate gate;
-    AntseedEmissionPrograms programs;
     AntseedSellerPools sellerPools;
-    AntseedSellerOperatorUsageRewards sellerOperatorUsageRewards;
-    AntseedSellerUsageRewards sellerUsageRewards;
-    AntseedBuyerUsageRewards buyerUsageRewards;
+    AntseedUsageRewards usageRewards;
+    AntseedSellerPoolsRewards sellerPoolsRewards;
     AntseedUsageAccounting usageAccounting;
     MockSellerAgentLookup sellerAgentLookup;
     MockERC8004Registry identityRegistry;
@@ -96,15 +98,20 @@ contract AntseedEmissionsGateTest is Test {
     address operator = address(0x30);
     address otherSeller = address(0x40);
     address staker = address(0x50);
-    address claimController = address(0x60);
     address reserveDest = address(0x70);
     address teamWallet = address(0x80);
+    address verificationWallet = address(0x90);
 
     address constant KNOWN_ANTS_TOKEN = 0xa87EE81b2C0Bc659307ca2D9ffdC38514DD85263;
     uint256 constant GATE_GENESIS = 1_775_728_461;
     uint256 constant GATE_EPOCH_DURATION = 7 days;
     uint256 constant INITIAL_EMISSION = 1_000 ether;
     uint256 constant EPOCH_DURATION = 1 weeks;
+    uint32 constant SELLER_POOLS_SHARE_BPS = 45_000;
+    uint32 constant USAGE_SHARE_BPS = 10_000;
+    uint32 constant TEAM_SHARE_BPS = 15_000;
+    uint32 constant RESERVE_SHARE_BPS = 15_000;
+    uint32 constant VERIFICATION_SHARE_BPS = 15_000;
 
     function setUp() public {
         vm.warp(1_700_000_000);
@@ -147,8 +154,8 @@ contract AntseedEmissionsGateTest is Test {
         vm.warp(GATE_GENESIS + GATE_EPOCH_DURATION * (warpEpoch - 1) + 1);
         gate = new AntseedEmissionsGate();
         _warpGateEpoch(warpEpoch);
-        programs = new AntseedEmissionPrograms(address(gate));
-        gate.setEmissionController(address(programs));
+        _setFixedRecipients(teamWallet, reserveDest, verificationWallet);
+        gate.setLegacyClaimsConfig(address(legacyV2), address(deposits));
         token.setRegistry(address(gate));
 
         usageAccounting = new AntseedUsageAccounting(address(0), address(this), address(gate));
@@ -159,8 +166,36 @@ contract AntseedEmissionsGateTest is Test {
         vm.warp(gate.genesis() + gate.epochDuration() * epoch + 1);
     }
 
-    function _programBudget(uint16 shareBps, uint256 epoch) internal view returns (uint256) {
-        return (gate.getEpochEmission(epoch) * shareBps) / 10_000;
+    function _shareBudget(uint16 shareBps, uint256 epoch) internal view returns (uint256) {
+        return (gate.getEpochEmission(epoch) * shareBps) / 100_000;
+    }
+
+    function _setFixedRecipients(address team, address reserve, address verification) internal {
+        gate.setMinter(team, TEAM_SHARE_BPS, true);
+        gate.setMinter(reserve, RESERVE_SHARE_BPS, true);
+        gate.setMinter(verification, VERIFICATION_SHARE_BPS, true);
+    }
+
+    function _setEmissionMinters(address sellerPoolsMinter, address usageMinter) internal {
+        _setSellerPoolsMinter(sellerPoolsMinter);
+        _setUsageMinter(usageMinter);
+    }
+
+    function _setSellerPoolsMinter(address minter) internal {
+        gate.setMinter(minter, SELLER_POOLS_SHARE_BPS, true);
+    }
+
+    function _setUsageMinter(address minter) internal {
+        gate.setMinter(minter, USAGE_SHARE_BPS, true);
+    }
+
+    function _configuredMinter(address controller) internal view returns (address minter) {
+        (minter,,) = gate.minters(gate.minterId(controller));
+    }
+
+    function _claim(address caller, uint256 epoch) internal {
+        vm.prank(caller);
+        gate.claim(epoch);
     }
 
     function _epochList(uint256 epoch) internal pure returns (uint256[] memory epochs) {
@@ -193,31 +228,27 @@ contract AntseedEmissionsGateTest is Test {
         vm.stopPrank();
     }
 
-    function test_legacyEpochProgramCanMintBeforeLegacyEpochsAreDisabled() public {
-        bytes32 legacyProgramId = keccak256("legacy-v2-claims");
+    function test_legacyEpochSellerPoolsBucketCanMintBeforeLegacyEpochsAreDisabled() public {
         _deployGate(4);
 
-        programs.setRewardProgram(legacyProgramId, address(this), address(0), 10_000, 0, 4, true);
-        programs.mintProgramEmission(legacyProgramId, 2, buyer, 10 ether);
+        _setSellerPoolsMinter(address(this));
+        gate.mint(2, buyer, 10 ether);
 
         assertEq(token.balanceOf(buyer), 10 ether);
-        assertEq(gate.epochScheduleMinted(2), 10 ether);
+        assertEq(gate.epochMinted(2), 10 ether);
     }
 
     function test_disableLegacyEpochMintsBlocksEpochsBeforeEffectiveEpochOnly() public {
-        bytes32 legacyProgramId = keccak256("legacy-v2-claims");
-        bytes32 currentProgramId = keccak256("current-program");
         _deployGate(5);
 
-        programs.setRewardProgram(legacyProgramId, address(this), address(0), 10_000, 0, 4, true);
-        programs.setRewardProgram(currentProgramId, address(this), address(0), 10_000, 5, 0, true);
+        _setSellerPoolsMinter(address(this));
 
         gate.disableLegacyEpochMints();
         vm.expectRevert(AntseedEmissionsGate.LegacyEpochMintingDisabled.selector);
-        programs.mintProgramEmission(legacyProgramId, 2, buyer, 1 ether);
+        gate.mint(2, buyer, 1 ether);
 
         _warpGateEpoch(6);
-        programs.mintProgramEmission(currentProgramId, 5, buyer, 1 ether);
+        gate.mint(5, buyer, 1 ether);
         assertEq(token.balanceOf(buyer), 1 ether);
     }
 
@@ -243,16 +274,32 @@ contract AntseedEmissionsGateTest is Test {
         assertEq(buyerPendingBuyer, 0);
     }
 
-    function test_sellerUsageRewardsUsePostMigrationProgramAndPools() public {
-        bytes32 programId = keccak256("recognized-seller-usage-v1");
+    function test_legacyV2CanMintPreCutoverClaimsThroughGateRegistryFacade() public {
+        _deployGate(4);
+        legacyV2.setRegistry(address(gate));
+        legacyV2.setSellerUnlockPolicy(address(new MockAllowAllSellerUnlockPolicy()));
+
+        uint256[] memory epochs = _epochList(2);
+        (uint256 sellerPending,) = legacyV2.pendingEmissions(seller, epochs);
+        assertGt(sellerPending, 0);
+
+        vm.prank(seller);
+        legacyV2.claimSellerEmissions(epochs);
+        assertEq(token.balanceOf(seller), sellerPending);
+
+        vm.expectRevert(AntseedEmissionsGate.NotLegacyEmissionsMinter.selector);
+        gate.mint(buyer, 1 ether);
+    }
+
+    function test_sellerPoolsRewardsUsePostMigrationBucketAndPools() public {
         _deployGate(4);
 
         sellerPools = new AntseedSellerPools(address(realRegistry), 0, 0, 0);
         usageAccounting.setSellerPools(address(sellerPools));
-        sellerUsageRewards =
-            new AntseedSellerUsageRewards(address(programs), address(sellerPools), address(usageAccounting), programId);
-        sellerPools.setRewardStaker(address(sellerUsageRewards), true);
-        programs.setRewardProgram(programId, address(sellerUsageRewards), address(0), 7_000, 4, 0, true);
+        sellerPoolsRewards =
+            new AntseedSellerPoolsRewards(address(gate), address(sellerPools), address(usageAccounting));
+        sellerPools.setRewardStaker(address(sellerPoolsRewards), true);
+        _setSellerPoolsMinter(address(sellerPoolsRewards));
 
         address poolSeller = _createSellerPool(sellerPools, seller, 5_000, keccak256("terms"));
 
@@ -266,28 +313,27 @@ contract AntseedEmissionsGateTest is Test {
         usageAccounting.accrueBuyerPoints(buyer, 100);
 
         _warpGateEpoch(6);
-        uint256 expectedStakerClaim = (_programBudget(7_000, 5) * 400 ether) / 404 ether;
+        uint256 expectedStakerClaim = (_shareBudget(45_000, 5) * 400 ether) / 404 ether;
         (uint256 grossReward, uint256 claimableReward, uint256 burnedReward) =
-            sellerUsageRewards.pendingStakerReward(positionId, 5);
+            sellerPoolsRewards.pendingStakerReward(positionId, 5);
         assertEq(grossReward, expectedStakerClaim);
         assertEq(claimableReward, expectedStakerClaim);
         assertEq(burnedReward, 0);
 
-        sellerUsageRewards.indexPoolRewards(_agentId(poolSeller), 10);
+        sellerPoolsRewards.indexPoolRewards(_agentId(poolSeller), 10);
         vm.prank(staker);
-        sellerUsageRewards.claimStakerRewards(positionId, staker);
+        sellerPoolsRewards.claimStakerRewards(positionId, staker);
         assertEq(token.balanceOf(staker), 900 ether + expectedStakerClaim);
     }
 
     function test_lantsTransferCarriesUnclaimedStakerRewards() public {
-        bytes32 programId = keccak256("recognized-seller-usage-v1");
         _deployGate(4);
 
         sellerPools = new AntseedSellerPools(address(realRegistry), 0, 0, 0);
         usageAccounting.setSellerPools(address(sellerPools));
-        sellerUsageRewards =
-            new AntseedSellerUsageRewards(address(programs), address(sellerPools), address(usageAccounting), programId);
-        programs.setRewardProgram(programId, address(sellerUsageRewards), address(0), 7_000, 4, 0, true);
+        sellerPoolsRewards =
+            new AntseedSellerPoolsRewards(address(gate), address(sellerPools), address(usageAccounting));
+        _setSellerPoolsMinter(address(sellerPoolsRewards));
 
         address poolSeller = _createSellerPool(sellerPools, seller, 5_000, keccak256("terms"));
 
@@ -302,27 +348,26 @@ contract AntseedEmissionsGateTest is Test {
         usageAccounting.accrueBuyerPoints(buyer, 100);
 
         _warpGateEpoch(6);
-        uint256 expectedStakerClaim = (_programBudget(7_000, 5) * 400 ether) / 404 ether;
+        uint256 expectedStakerClaim = (_shareBudget(45_000, 5) * 400 ether) / 404 ether;
 
-        sellerUsageRewards.indexPoolRewards(_agentId(poolSeller), 10);
+        sellerPoolsRewards.indexPoolRewards(_agentId(poolSeller), 10);
         vm.prank(staker);
-        vm.expectRevert(AntseedSellerUsageRewards.NotPositionOwner.selector);
-        sellerUsageRewards.claimStakerRewards(positionId, staker);
+        vm.expectRevert(AntseedSellerPoolsRewards.NotPositionOwner.selector);
+        sellerPoolsRewards.claimStakerRewards(positionId, staker);
 
         vm.prank(operator);
-        sellerUsageRewards.claimStakerRewards(positionId, operator);
+        sellerPoolsRewards.claimStakerRewards(positionId, operator);
         assertEq(token.balanceOf(operator), expectedStakerClaim);
     }
 
     function test_burnedLantsPositionKeepsPastRewardClaimRightsAfterWithdraw() public {
-        bytes32 programId = keccak256("recognized-seller-usage-v1");
         _deployGate(4);
 
         sellerPools = new AntseedSellerPools(address(realRegistry), 0, 0, 0);
         usageAccounting.setSellerPools(address(sellerPools));
-        sellerUsageRewards =
-            new AntseedSellerUsageRewards(address(programs), address(sellerPools), address(usageAccounting), programId);
-        programs.setRewardProgram(programId, address(sellerUsageRewards), address(0), 7_000, 4, 0, true);
+        sellerPoolsRewards =
+            new AntseedSellerPoolsRewards(address(gate), address(sellerPools), address(usageAccounting));
+        _setSellerPoolsMinter(address(sellerPoolsRewards));
 
         address poolSeller = _createSellerPool(sellerPools, seller, 5_000, keccak256("terms"));
 
@@ -336,26 +381,25 @@ contract AntseedEmissionsGateTest is Test {
         usageAccounting.accrueBuyerPoints(buyer, 100);
 
         _warpGateEpoch(6);
-        uint256 expectedStakerClaim = (_programBudget(7_000, 5) * 400 ether) / 404 ether;
+        uint256 expectedStakerClaim = (_shareBudget(45_000, 5) * 400 ether) / 404 ether;
 
         vm.prank(staker);
         sellerPools.withdrawStake(positionId);
 
-        sellerUsageRewards.indexPoolRewards(_agentId(poolSeller), 10);
+        sellerPoolsRewards.indexPoolRewards(_agentId(poolSeller), 10);
         vm.prank(staker);
-        sellerUsageRewards.claimStakerRewards(positionId, staker);
+        sellerPoolsRewards.claimStakerRewards(positionId, staker);
         assertEq(token.balanceOf(staker), 900 ether + 75 ether + expectedStakerClaim);
     }
 
     function test_burnedLantsPositionKeepsPastRewardClaimRightsAfterMove() public {
-        bytes32 programId = keccak256("recognized-seller-usage-v1");
         _deployGate(4);
 
         sellerPools = new AntseedSellerPools(address(realRegistry), 0, 0, 0);
         usageAccounting.setSellerPools(address(sellerPools));
-        sellerUsageRewards =
-            new AntseedSellerUsageRewards(address(programs), address(sellerPools), address(usageAccounting), programId);
-        programs.setRewardProgram(programId, address(sellerUsageRewards), address(0), 7_000, 4, 0, true);
+        sellerPoolsRewards =
+            new AntseedSellerPoolsRewards(address(gate), address(sellerPools), address(usageAccounting));
+        _setSellerPoolsMinter(address(sellerPoolsRewards));
 
         address poolSeller = _createSellerPool(sellerPools, seller, 5_000, keccak256("terms"));
         sellerAgentLookup.setAgent(otherSeller, _agentId(otherSeller));
@@ -371,14 +415,14 @@ contract AntseedEmissionsGateTest is Test {
         usageAccounting.accrueBuyerPoints(buyer, 100);
 
         _warpGateEpoch(6);
-        uint256 expectedStakerClaim = (_programBudget(7_000, 5) * 400 ether) / 404 ether;
+        uint256 expectedStakerClaim = (_shareBudget(45_000, 5) * 400 ether) / 404 ether;
 
         vm.prank(staker);
         sellerPools.moveStake(positionId, _agentId(otherSeller));
 
-        sellerUsageRewards.indexPoolRewards(_agentId(poolSeller), 10);
+        sellerPoolsRewards.indexPoolRewards(_agentId(poolSeller), 10);
         vm.prank(staker);
-        sellerUsageRewards.claimStakerRewards(positionId, staker);
+        sellerPoolsRewards.claimStakerRewards(positionId, staker);
         assertEq(token.balanceOf(staker), 900 ether + expectedStakerClaim);
     }
 
@@ -418,15 +462,14 @@ contract AntseedEmissionsGateTest is Test {
         assertEq(sellerPools.poolWeightAtEpoch(agentId, 9), 5_100 ether);
     }
 
-    function test_sellerUsageRewardsUseMaxLockPowerForEpochShare() public {
-        bytes32 programId = keccak256("recognized-seller-usage-v1");
+    function test_sellerPoolsRewardsUseMaxLockPowerForEpochShare() public {
         _deployGate(4);
 
         sellerPools = new AntseedSellerPools(address(realRegistry), 0, 0, 0);
         usageAccounting.setSellerPools(address(sellerPools));
-        sellerUsageRewards =
-            new AntseedSellerUsageRewards(address(programs), address(sellerPools), address(usageAccounting), programId);
-        programs.setRewardProgram(programId, address(sellerUsageRewards), address(0), 7_000, 4, 0, true);
+        sellerPoolsRewards =
+            new AntseedSellerPoolsRewards(address(gate), address(sellerPools), address(usageAccounting));
+        _setSellerPoolsMinter(address(sellerPoolsRewards));
 
         uint256 agentId = _agentId(seller);
         sellerAgentLookup.setAgent(seller, agentId);
@@ -446,25 +489,24 @@ contract AntseedEmissionsGateTest is Test {
         usageAccounting.accrueBuyerPoints(buyer, 100);
 
         _warpGateEpoch(7);
-        uint256 expectedBudget = _programBudget(7_000, 6);
+        uint256 expectedBudget = _shareBudget(45_000, 6);
         uint256 maxLockPower = 5_200 ether;
         uint256 normalPower = 300 ether;
-        (uint256 maxLockedGross,,) = sellerUsageRewards.pendingStakerReward(maxLockedPositionId, 6);
-        (uint256 normalGross,,) = sellerUsageRewards.pendingStakerReward(normalPositionId, 6);
+        (uint256 maxLockedGross,,) = sellerPoolsRewards.pendingStakerReward(maxLockedPositionId, 6);
+        (uint256 normalGross,,) = sellerPoolsRewards.pendingStakerReward(normalPositionId, 6);
 
         assertEq(maxLockedGross, (expectedBudget * maxLockPower) / (maxLockPower + normalPower));
         assertEq(normalGross, (expectedBudget * normalPower) / (maxLockPower + normalPower));
     }
 
-    function test_sellerUsageRewardsIndexedClaimUsesCursor() public {
-        bytes32 programId = keccak256("recognized-seller-usage-v1");
+    function test_sellerPoolsRewardsIndexedClaimUsesCursor() public {
         _deployGate(4);
 
         sellerPools = new AntseedSellerPools(address(realRegistry), 0, 0, 0);
         usageAccounting.setSellerPools(address(sellerPools));
-        sellerUsageRewards =
-            new AntseedSellerUsageRewards(address(programs), address(sellerPools), address(usageAccounting), programId);
-        programs.setRewardProgram(programId, address(sellerUsageRewards), address(0), 7_000, 4, 0, true);
+        sellerPoolsRewards =
+            new AntseedSellerPoolsRewards(address(gate), address(sellerPools), address(usageAccounting));
+        _setSellerPoolsMinter(address(sellerPoolsRewards));
 
         address poolSeller = _createSellerPool(sellerPools, seller, 5_000, keccak256("terms"));
 
@@ -478,32 +520,31 @@ contract AntseedEmissionsGateTest is Test {
         usageAccounting.accrueBuyerPoints(buyer, 100);
 
         _warpGateEpoch(6);
-        uint256 expectedClaim = (_programBudget(7_000, 5) * 400 ether) / 404 ether;
+        uint256 expectedClaim = (_shareBudget(45_000, 5) * 400 ether) / 404 ether;
 
-        sellerUsageRewards.indexPoolRewards(_agentId(poolSeller), 10);
-        assertEq(sellerUsageRewards.poolRewardIndexNextEpoch(_agentId(poolSeller)), 6);
-        assertEq(sellerUsageRewards.pendingIndexedStakerReward(positionId), expectedClaim);
+        sellerPoolsRewards.indexPoolRewards(_agentId(poolSeller), 10);
+        assertEq(sellerPoolsRewards.poolRewardIndexNextEpoch(_agentId(poolSeller)), 6);
+        assertEq(sellerPoolsRewards.pendingIndexedStakerReward(positionId), expectedClaim);
 
         vm.prank(staker);
-        sellerUsageRewards.claimStakerRewards(positionId, staker);
+        sellerPoolsRewards.claimStakerRewards(positionId, staker);
 
         assertEq(token.balanceOf(staker), 900 ether + expectedClaim);
-        assertEq(sellerUsageRewards.positionClaimCursor(positionId), 6);
+        assertEq(sellerPoolsRewards.positionClaimCursor(positionId), 6);
 
-        vm.expectRevert(AntseedSellerUsageRewards.NothingToClaim.selector);
+        vm.expectRevert(AntseedSellerPoolsRewards.NothingToClaim.selector);
         vm.prank(staker);
-        sellerUsageRewards.claimStakerRewards(positionId, staker);
+        sellerPoolsRewards.claimStakerRewards(positionId, staker);
     }
 
-    function test_sellerUsageRewardsIndexedClaimUsesExtendedLockSegments() public {
-        bytes32 programId = keccak256("recognized-seller-usage-v1");
+    function test_sellerPoolsRewardsIndexedClaimUsesExtendedLockSegments() public {
         _deployGate(4);
 
         sellerPools = new AntseedSellerPools(address(realRegistry), 0, 0, 0);
         usageAccounting.setSellerPools(address(sellerPools));
-        sellerUsageRewards =
-            new AntseedSellerUsageRewards(address(programs), address(sellerPools), address(usageAccounting), programId);
-        programs.setRewardProgram(programId, address(sellerUsageRewards), address(0), 7_000, 4, 0, true);
+        sellerPoolsRewards =
+            new AntseedSellerPoolsRewards(address(gate), address(sellerPools), address(usageAccounting));
+        _setSellerPoolsMinter(address(sellerPoolsRewards));
 
         uint256 agentId = _agentId(seller);
         sellerAgentLookup.setAgent(seller, agentId);
@@ -526,96 +567,87 @@ contract AntseedEmissionsGateTest is Test {
         usageAccounting.accrueBuyerPoints(buyer, 100);
 
         _warpGateEpoch(7);
-        sellerUsageRewards.indexPoolRewards(agentId, 10);
+        sellerPoolsRewards.indexPoolRewards(agentId, 10);
 
-        uint256 epoch5Budget = _programBudget(7_000, 5);
-        uint256 epoch6Budget = _programBudget(7_000, 6);
+        uint256 epoch5Budget = _shareBudget(45_000, 5);
+        uint256 epoch6Budget = _shareBudget(45_000, 6);
         uint256 expectedClaim = (epoch5Budget * 400 ether) / 800 ether + (epoch6Budget * 600 ether) / 900 ether;
 
-        assertEq(sellerUsageRewards.pendingIndexedStakerReward(extendedPositionId), expectedClaim);
+        assertEq(sellerPoolsRewards.pendingIndexedStakerReward(extendedPositionId), expectedClaim);
 
         vm.prank(staker);
-        sellerUsageRewards.claimStakerRewards(extendedPositionId, staker);
+        sellerPoolsRewards.claimStakerRewards(extendedPositionId, staker);
 
         assertEq(token.balanceOf(staker), 800 ether + expectedClaim);
-        assertEq(sellerUsageRewards.positionClaimCursor(extendedPositionId), 7);
+        assertEq(sellerPoolsRewards.positionClaimCursor(extendedPositionId), 7);
 
-        (uint256 normalEpoch5Gross,,) = sellerUsageRewards.pendingStakerReward(normalPositionId, 5);
-        (uint256 normalEpoch6Gross,,) = sellerUsageRewards.pendingStakerReward(normalPositionId, 6);
+        (uint256 normalEpoch5Gross,,) = sellerPoolsRewards.pendingStakerReward(normalPositionId, 5);
+        (uint256 normalEpoch6Gross,,) = sellerPoolsRewards.pendingStakerReward(normalPositionId, 6);
         assertEq(normalEpoch5Gross, (epoch5Budget * 400 ether) / 800 ether);
         assertEq(normalEpoch6Gross, (epoch6Budget * 300 ether) / 900 ether);
     }
 
-    function test_sellerUsageProgramDoesNotClaimWithoutWeightedPoints() public {
-        bytes32 programId = keccak256("recognized-seller-usage-v1");
+    function test_sellerPoolsRewardsDoNotClaimWithoutWeightedPoints() public {
         _deployGate(5);
 
         sellerPools = new AntseedSellerPools(address(realRegistry), 0, 0, 0);
         usageAccounting.setSellerPools(address(sellerPools));
-        sellerUsageRewards =
-            new AntseedSellerUsageRewards(address(programs), address(sellerPools), address(usageAccounting), programId);
-        programs.setRewardProgram(programId, address(sellerUsageRewards), address(0), 7_000, 4, 0, true);
+        sellerPoolsRewards =
+            new AntseedSellerPoolsRewards(address(gate), address(sellerPools), address(usageAccounting));
+        _setSellerPoolsMinter(address(sellerPoolsRewards));
 
         _createSellerPool(sellerPools, seller, 5_000, keccak256("terms"));
         uint256 positionId = sellerPools.nextPositionId() - 1;
 
-        vm.expectRevert(AntseedSellerUsageRewards.NothingToClaim.selector);
+        vm.expectRevert(AntseedSellerPoolsRewards.NothingToClaim.selector);
         vm.prank(seller);
-        sellerUsageRewards.claimStakerRewards(positionId, seller);
+        sellerPoolsRewards.claimStakerRewards(positionId, seller);
     }
 
-    function test_gateFixedScheduleAndAdminValidation() public {
+    function test_gateFixedCurveAndAdminValidation() public {
         _deployGate(4);
-        assertEq(address(gate.antsToken()), KNOWN_ANTS_TOKEN);
+        assertEq(gate.antsToken(), address(gate));
+        assertEq(gate.actualAntsToken(), KNOWN_ANTS_TOKEN);
+        assertEq(gate.deposits(), address(deposits));
+        assertEq(_configuredMinter(reserveDest), reserveDest);
+        assertEq(gate.channels(), address(0));
         assertEq(gate.genesis(), 1_775_728_461);
         assertEq(gate.epochDuration(), 7 days);
         assertEq(gate.halvingInterval(), 104);
         assertEq(gate.initialEmission(), 5_000_000 ether);
         assertEq(gate.effectiveEpoch(), 4);
         assertEq(gate.currentEmissionRate(), gate.initialEmission() / gate.epochDuration());
-        assertEq(programs.rewardProgramCount(), 0);
+        assertEq(gate.BPS_DENOMINATOR(), 100_000);
+        _setEmissionMinters(address(this), address(0xBEEF));
+        assertEq(gate.minterEpochBudget(address(this), 4), _shareBudget(45_000, 4));
+        assertEq(gate.minterEpochBudget(address(0xBEEF), 4), _shareBudget(10_000, 4));
+        assertEq(gate.minterEpochBudget(teamWallet, 4), _shareBudget(15_000, 4));
+        assertEq(gate.minterEpochBudget(reserveDest, 4), _shareBudget(15_000, 4));
+        assertEq(gate.minterEpochBudget(verificationWallet, 4), _shareBudget(15_000, 4));
 
         vm.expectRevert(AntseedEmissionsGate.InvalidAddress.selector);
-        gate.setEmissionController(address(0));
+        _setFixedRecipients(address(0), reserveDest, verificationWallet);
 
-        vm.expectRevert(AntseedEmissionsGate.EmissionControllerAlreadySet.selector);
-        gate.setEmissionController(address(this));
+        vm.expectRevert(AntseedEmissionsGate.InvalidAddress.selector);
+        _setSellerPoolsMinter(address(0));
 
-        vm.expectRevert(AntseedEmissionPrograms.InvalidAddress.selector);
-        new AntseedEmissionPrograms(address(0));
+        _setSellerPoolsMinter(address(this));
+        assertEq(_configuredMinter(address(this)), address(this));
 
-        bytes32 programId = keccak256("program");
-        vm.expectRevert(AntseedEmissionPrograms.InvalidProgram.selector);
-        programs.setRewardProgram(bytes32(0), address(this), address(0), 1, 0, 0, true);
+        address newMinter = address(0xCAFE);
+        gate.removeMinter(address(this));
+        _setSellerPoolsMinter(newMinter);
+        assertEq(_configuredMinter(newMinter), newMinter);
 
-        vm.expectRevert(AntseedEmissionPrograms.InvalidAddress.selector);
-        programs.setRewardProgram(programId, address(0), address(0), 1, 0, 0, true);
-
-        vm.expectRevert(AntseedEmissionPrograms.InvalidValue.selector);
-        programs.setRewardProgram(programId, address(this), address(0), 10_001, 0, 0, true);
-
-        vm.expectRevert(AntseedEmissionPrograms.InvalidValue.selector);
-        programs.setRewardProgram(programId, address(this), address(0), 1, 2, 2, true);
-
-        programs.setRewardProgram(programId, address(this), address(0), 1_000, 4, 0, true);
-        assertEq(programs.rewardProgramCount(), 1);
-        programs.setRewardProgram(programId, address(this), address(0), 1_000, 4, 0, true);
-        assertEq(programs.rewardProgramCount(), 1);
-
-        vm.expectRevert(AntseedEmissionPrograms.InvalidValue.selector);
-        programs.setRewardProgram(programId, address(this), address(0x1234), 1_000, 4, 0, true);
-
-        bytes32 fixedProgramId = keccak256("fixed-program");
-        programs.setRewardProgram(fixedProgramId, address(this), address(0x1234), 1_000, 4, 0, true);
-        (, address fixedRecipient,,,,) = programs.rewardPrograms(fixedProgramId);
-        assertEq(fixedRecipient, address(0x1234));
+        assertEq(_configuredMinter(teamWallet), teamWallet);
+        assertEq(_configuredMinter(reserveDest), reserveDest);
+        assertEq(_configuredMinter(verificationWallet), verificationWallet);
     }
 
-    function test_gateAndProgramsCanRenounceEmissionAdminControl() public {
-        bytes32 programId = keccak256("program");
+    function test_gateCanRenounceEmissionAdminControl() public {
         _deployGate(4);
-        programs.setRewardProgram(programId, address(this), address(0), 1_000, 4, 0, true);
-        assertEq(programs.programEpochBudget(programId, 4), _programBudget(1_000, 4));
+        _setEmissionMinters(address(this), address(0xBEEF));
+        assertEq(gate.minterEpochBudget(address(this), 4), _shareBudget(45_000, 4));
 
         // Renouncing the gate is blocked while the legacy-epoch mint window is
         // still open; it must be closed first.
@@ -624,20 +656,15 @@ contract AntseedEmissionsGateTest is Test {
 
         gate.disableLegacyEpochMints();
         gate.renounceOwnership();
-        programs.renounceOwnership();
         assertEq(gate.owner(), address(0));
-        assertEq(programs.owner(), address(0));
-        assertEq(programs.programEpochBudget(programId, 4), _programBudget(1_000, 4));
+        assertEq(gate.minterEpochBudget(address(this), 4), _shareBudget(45_000, 4));
         assertEq(gate.currentEmissionRate(), gate.initialEmission() / gate.epochDuration());
 
         vm.expectRevert();
-        programs.setRewardProgram(programId, address(this), address(0), 500, 5, 0, true);
-
-        vm.expectRevert();
-        gate.setEmissionController(address(this));
+        _setSellerPoolsMinter(address(this));
 
         _warpGateEpoch(5);
-        programs.mintProgramEmission(programId, 4, address(this), 1 ether);
+        gate.mint(4, address(this), 1 ether);
         assertEq(token.balanceOf(address(this)), 1 ether);
     }
 
@@ -817,16 +844,15 @@ contract AntseedEmissionsGateTest is Test {
         assertGt(newAgentGas, repeatedGas);
     }
 
-    function test_sellerUsageRewardsRecordsWeightedPoolPoints() public {
-        bytes32 programId = keccak256("recognized-seller-usage-v1");
+    function test_sellerPoolsRewardsRecordsWeightedPoolPoints() public {
         _deployGate(4);
 
         sellerPools = new AntseedSellerPools(address(realRegistry), 0, 0, 0);
         usageAccounting.setSellerPools(address(sellerPools));
-        sellerUsageRewards =
-            new AntseedSellerUsageRewards(address(programs), address(sellerPools), address(usageAccounting), programId);
-        sellerPools.setRewardStaker(address(sellerUsageRewards), true);
-        programs.setRewardProgram(programId, address(sellerUsageRewards), address(0), 7_000, 4, 0, true);
+        sellerPoolsRewards =
+            new AntseedSellerPoolsRewards(address(gate), address(sellerPools), address(usageAccounting));
+        sellerPools.setRewardStaker(address(sellerPoolsRewards), true);
+        _setSellerPoolsMinter(address(sellerPoolsRewards));
 
         address poolSeller = _createSellerPool(sellerPools, seller, 5_000, keccak256("terms"));
         _warpGateEpoch(5);
@@ -838,9 +864,9 @@ contract AntseedEmissionsGateTest is Test {
         _warpGateEpoch(6);
         uint256 positionId = sellerPools.nextPositionId() - 1;
         (uint256 grossReward, uint256 claimableReward, uint256 burnedReward) =
-            sellerUsageRewards.pendingStakerReward(positionId, 5);
-        assertEq(grossReward, _programBudget(7_000, 5));
-        assertEq(claimableReward, _programBudget(7_000, 5));
+            sellerPoolsRewards.pendingStakerReward(positionId, 5);
+        assertEq(grossReward, _shareBudget(45_000, 5));
+        assertEq(claimableReward, _shareBudget(45_000, 5));
         assertEq(burnedReward, 0);
 
         assertEq(token.balanceOf(seller), 0);
@@ -916,16 +942,15 @@ contract AntseedEmissionsGateTest is Test {
     }
 
     function test_positionApyCapBurnsTinyPoolHighVolumeReward() public {
-        bytes32 programId = keccak256("recognized-seller-usage-v1");
-        uint16 sellerProgramShareBps = 1;
+        uint16 sellerPoolsShareBps = 45_000;
         _deployGate(4);
 
         sellerPools = new AntseedSellerPools(address(realRegistry), 10_000, 2_000, 500);
         usageAccounting.setSellerPools(address(sellerPools));
-        sellerUsageRewards =
-            new AntseedSellerUsageRewards(address(programs), address(sellerPools), address(usageAccounting), programId);
-        sellerPools.setRewardStaker(address(sellerUsageRewards), true);
-        programs.setRewardProgram(programId, address(sellerUsageRewards), address(0), sellerProgramShareBps, 4, 0, true);
+        sellerPoolsRewards =
+            new AntseedSellerPoolsRewards(address(gate), address(sellerPools), address(usageAccounting));
+        sellerPools.setRewardStaker(address(sellerPoolsRewards), true);
+        _setSellerPoolsMinter(address(sellerPoolsRewards));
 
         deal(address(token), seller, 1_000_000 ether);
         deal(address(token), otherSeller, 100 ether);
@@ -956,28 +981,29 @@ contract AntseedEmissionsGateTest is Test {
         uint256 totalPoints = usageAccounting.totalWeightedPoolPointsByEpoch(5);
 
         _warpGateEpoch(6);
-        uint256 expectedHonestReward = (_programBudget(sellerProgramShareBps, 5) * honestPoints) / totalPoints;
-        uint256 expectedWashReward = (_programBudget(sellerProgramShareBps, 5) * washPoints) / totalPoints;
-        (uint256 honestGross,, uint256 honestBurned) = sellerUsageRewards.pendingStakerReward(honestPositionId, 5);
+        uint256 expectedHonestReward = (_shareBudget(sellerPoolsShareBps, 5) * honestPoints) / totalPoints;
+        uint256 expectedWashReward = (_shareBudget(sellerPoolsShareBps, 5) * washPoints) / totalPoints;
+        (uint256 honestGross, uint256 honestClaimable, uint256 honestBurned) =
+            sellerPoolsRewards.pendingStakerReward(honestPositionId, 5);
         (uint256 washGross, uint256 washClaimable, uint256 washBurned) =
-            sellerUsageRewards.pendingStakerReward(washPositionId, 5);
+            sellerPoolsRewards.pendingStakerReward(washPositionId, 5);
         assertEq(honestGross, expectedHonestReward);
         assertEq(washGross, expectedWashReward);
-        assertEq(honestBurned, 0);
+        assertGt(honestBurned, 0);
+        assertLe(honestBurned, honestGross - honestClaimable);
         assertLt(washClaimable, washGross);
         assertEq(washBurned, washGross - washClaimable);
     }
 
     function test_sellerUsageRewardBurnCapRoutesOverflowToReserve() public {
-        bytes32 programId = keccak256("recognized-seller-usage-v1");
         _deployGate(4);
 
         sellerPools = new AntseedSellerPools(address(realRegistry), 10_000, 2_000, 500);
         usageAccounting.setSellerPools(address(sellerPools));
-        sellerUsageRewards =
-            new AntseedSellerUsageRewards(address(programs), address(sellerPools), address(usageAccounting), programId);
-        sellerPools.setRewardStaker(address(sellerUsageRewards), true);
-        programs.setRewardProgram(programId, address(sellerUsageRewards), address(0), 7_000, 4, 0, true);
+        sellerPoolsRewards =
+            new AntseedSellerPoolsRewards(address(gate), address(sellerPools), address(usageAccounting));
+        sellerPools.setRewardStaker(address(sellerPoolsRewards), true);
+        _setSellerPoolsMinter(address(sellerPoolsRewards));
 
         deal(address(token), otherSeller, 100 ether);
         uint256 positionId = _stakeAgentPool(sellerPools, otherSeller, 100 ether, 52);
@@ -987,24 +1013,24 @@ contract AntseedEmissionsGateTest is Test {
 
         _warpGateEpoch(6);
         (uint256 grossReward, uint256 claimableReward, uint256 burnedReward) =
-            sellerUsageRewards.pendingStakerReward(positionId, 5);
-        uint256 burnCap = sellerUsageRewards.burnCapForEpoch(5);
+            sellerPoolsRewards.pendingStakerReward(positionId, 5);
+        uint256 burnCap = sellerPoolsRewards.burnCapForEpoch(5);
         uint256 overCapReward = grossReward - claimableReward;
 
         assertGt(overCapReward, burnCap);
         assertEq(burnedReward, burnCap);
 
-        sellerUsageRewards.indexPoolRewards(_agentId(otherSeller), 10);
-        uint256 indexedClaimableReward = sellerUsageRewards.pendingIndexedStakerReward(positionId);
+        sellerPoolsRewards.indexPoolRewards(_agentId(otherSeller), 10);
+        uint256 indexedClaimableReward = sellerPoolsRewards.pendingIndexedStakerReward(positionId);
         vm.prank(otherSeller);
-        sellerUsageRewards.claimStakerRewards(positionId, otherSeller);
+        sellerPoolsRewards.claimStakerRewards(positionId, otherSeller);
 
         assertEq(token.balanceOf(otherSeller), indexedClaimableReward);
-        assertEq(token.balanceOf(sellerUsageRewards.DEAD_ADDRESS()), burnCap);
+        assertEq(token.balanceOf(sellerPoolsRewards.DEAD_ADDRESS()), burnCap);
         assertEq(token.balanceOf(reserveDest), overCapReward - burnCap);
-        assertEq(sellerUsageRewards.epochBurnedAmount(5), burnCap);
+        assertEq(sellerPoolsRewards.epochBurnedAmount(5), burnCap);
         (bool settled, uint256 settledGross, uint256 settledClaimable, uint256 settledBurned, uint256 settledReserved) =
-            sellerUsageRewards.poolEpochEmissions(5, _agentId(otherSeller));
+            sellerPoolsRewards.poolEpochEmissions(5, _agentId(otherSeller));
         assertTrue(settled);
         assertEq(settledGross, grossReward);
         assertEq(settledClaimable, claimableReward);
@@ -1012,9 +1038,7 @@ contract AntseedEmissionsGateTest is Test {
         assertEq(settledReserved, overCapReward - burnCap);
     }
 
-    function test_stressWashTradingCannotDominateSellerOrBuyerPrograms() public {
-        bytes32 sellerPoolProgramId = keccak256("recognized-seller-usage-v1");
-        bytes32 buyerProgramId = keccak256("recognized-buyer-usage-v1");
+    function test_stressWashTradingCannotDominateSellerPoolsOrBuyerRewards() public {
         address washBuyer = address(0x9999);
         StressRun memory run;
 
@@ -1022,14 +1046,12 @@ contract AntseedEmissionsGateTest is Test {
 
         sellerPools = new AntseedSellerPools(address(realRegistry), 10_000, 2_000, 500);
         usageAccounting.setSellerPools(address(sellerPools));
-        sellerUsageRewards = new AntseedSellerUsageRewards(
-            address(programs), address(sellerPools), address(usageAccounting), sellerPoolProgramId
-        );
-        buyerUsageRewards = new AntseedBuyerUsageRewards(address(programs), address(realRegistry), buyerProgramId);
-        buyerUsageRewards.setUsageAccounting(address(usageAccounting));
-        sellerPools.setRewardStaker(address(sellerUsageRewards), true);
-        programs.setRewardProgram(sellerPoolProgramId, address(sellerUsageRewards), address(0), 7_000, 4, 0, true);
-        programs.setRewardProgram(buyerProgramId, address(buyerUsageRewards), address(0), 500, 4, 0, true);
+        sellerPoolsRewards =
+            new AntseedSellerPoolsRewards(address(gate), address(sellerPools), address(usageAccounting));
+        usageRewards = new AntseedUsageRewards(address(gate), address(realRegistry), address(usageAccounting));
+        sellerPools.setRewardStaker(address(sellerPoolsRewards), true);
+        _setSellerPoolsMinter(address(sellerPoolsRewards));
+        _setUsageMinter(address(usageRewards));
 
         deal(address(token), seller, 1_000_000 ether);
         deal(address(token), otherSeller, 100 ether);
@@ -1084,16 +1106,16 @@ contract AntseedEmissionsGateTest is Test {
 
         _warpGateEpoch(6);
         {
-            uint256 sellerProgramBudget = programs.programEpochBudget(sellerPoolProgramId, 5);
+            uint256 sellerPoolsBudget = gate.minterEpochBudget(address(sellerPoolsRewards), 5);
             (uint256 honestGross, uint256 honestClaimable, uint256 honestBurned) =
-                sellerUsageRewards.pendingStakerReward(run.firstPositionId, 5);
+                sellerPoolsRewards.pendingStakerReward(run.firstPositionId, 5);
             (uint256 washGross, uint256 washClaimable, uint256 washBurned) =
-                sellerUsageRewards.pendingStakerReward(run.washPositionId, 5);
+                sellerPoolsRewards.pendingStakerReward(run.washPositionId, 5);
             run.firstClaimable = honestClaimable;
             run.washClaimable = washClaimable;
-            assertEq(honestGross, (sellerProgramBudget * run.firstWeightedPoints) / run.expectedTotalWeightedPoints);
-            assertEq(washGross, (sellerProgramBudget * run.washWeightedPoints) / run.expectedTotalWeightedPoints);
-            uint256 burnCap = sellerUsageRewards.burnCapForEpoch(5);
+            assertEq(honestGross, (sellerPoolsBudget * run.firstWeightedPoints) / run.expectedTotalWeightedPoints);
+            assertEq(washGross, (sellerPoolsBudget * run.washWeightedPoints) / run.expectedTotalWeightedPoints);
+            uint256 burnCap = sellerPoolsRewards.burnCapForEpoch(5);
             uint256 washExcess = washGross - washClaimable;
             uint256 honestExcess = honestGross - honestClaimable;
             assertEq(washBurned, washExcess < burnCap ? washExcess : burnCap);
@@ -1101,15 +1123,15 @@ contract AntseedEmissionsGateTest is Test {
         }
 
         {
-            uint256 buyerProgramBudget = programs.programEpochBudget(buyerProgramId, 5);
+            uint256 buyerSideBudget = usageRewards.usageSideEpochBudget(5);
             uint256 expectedWashBuyerReward =
-                (buyerProgramBudget * run.washWeightedPoints) / run.expectedTotalWeightedPoints;
+                (buyerSideBudget * run.washWeightedPoints) / run.expectedTotalWeightedPoints;
             uint256 washBuyerCap =
-                (buyerProgramBudget * buyerUsageRewards.MAX_REWARD_SHARE_BPS()) / buyerUsageRewards.BPS_DENOMINATOR();
+                (buyerSideBudget * usageRewards.MAX_REWARD_SHARE_BPS()) / usageRewards.BPS_DENOMINATOR();
             uint256 cappedWashBuyerReward =
                 expectedWashBuyerReward < washBuyerCap ? expectedWashBuyerReward : washBuyerCap;
-            assertEq(buyerUsageRewards.pendingBuyerReward(washBuyer, 5), cappedWashBuyerReward);
-            assertLt(buyerUsageRewards.pendingBuyerReward(washBuyer, 5), expectedWashBuyerReward);
+            assertEq(usageRewards.pendingBuyerReward(washBuyer, 5), cappedWashBuyerReward);
+            assertLt(usageRewards.pendingBuyerReward(washBuyer, 5), expectedWashBuyerReward);
         }
 
         assertGt(run.washWeightedPoints, run.firstWeightedPoints);
@@ -1117,8 +1139,6 @@ contract AntseedEmissionsGateTest is Test {
     }
 
     function test_stressThousandAgentsAndBuyersClaimFromSavedTotals() public {
-        bytes32 sellerPoolProgramId = keccak256("recognized-seller-usage-v1");
-        bytes32 buyerProgramId = keccak256("recognized-buyer-usage-v1");
         uint256 agentCount = 1_000;
         uint256 honestVolume = 1_000;
         uint256 washVolume = 1_000_000_000;
@@ -1132,14 +1152,12 @@ contract AntseedEmissionsGateTest is Test {
 
         sellerPools = new AntseedSellerPools(address(realRegistry), 10_000, 2_000, 500);
         usageAccounting.setSellerPools(address(sellerPools));
-        sellerUsageRewards = new AntseedSellerUsageRewards(
-            address(programs), address(sellerPools), address(usageAccounting), sellerPoolProgramId
-        );
-        buyerUsageRewards = new AntseedBuyerUsageRewards(address(programs), address(realRegistry), buyerProgramId);
-        buyerUsageRewards.setUsageAccounting(address(usageAccounting));
-        sellerPools.setRewardStaker(address(sellerUsageRewards), true);
-        programs.setRewardProgram(sellerPoolProgramId, address(sellerUsageRewards), address(0), 7_000, 4, 0, true);
-        programs.setRewardProgram(buyerProgramId, address(buyerUsageRewards), address(0), 500, 4, 0, true);
+        sellerPoolsRewards =
+            new AntseedSellerPoolsRewards(address(gate), address(sellerPools), address(usageAccounting));
+        usageRewards = new AntseedUsageRewards(address(gate), address(realRegistry), address(usageAccounting));
+        sellerPools.setRewardStaker(address(sellerPoolsRewards), true);
+        _setSellerPoolsMinter(address(sellerPoolsRewards));
+        _setUsageMinter(address(usageRewards));
 
         vm.pauseGasMetering();
         for (uint256 i = 0; i < agentCount; i++) {
@@ -1177,20 +1195,19 @@ contract AntseedEmissionsGateTest is Test {
 
         _warpGateEpoch(6);
         {
-            uint256 sellerProgramBudget = programs.programEpochBudget(sellerPoolProgramId, 5);
-            uint256 expectedFirstGross =
-                (sellerProgramBudget * run.firstWeightedPoints) / run.expectedTotalWeightedPoints;
-            uint256 expectedWashGross = (sellerProgramBudget * run.washWeightedPoints) / run.expectedTotalWeightedPoints;
+            uint256 sellerPoolsBudget = gate.minterEpochBudget(address(sellerPoolsRewards), 5);
+            uint256 expectedFirstGross = (sellerPoolsBudget * run.firstWeightedPoints) / run.expectedTotalWeightedPoints;
+            uint256 expectedWashGross = (sellerPoolsBudget * run.washWeightedPoints) / run.expectedTotalWeightedPoints;
 
             (uint256 firstGross, uint256 firstClaimable, uint256 firstBurned) =
-                sellerUsageRewards.pendingStakerReward(run.firstPositionId, 5);
+                sellerPoolsRewards.pendingStakerReward(run.firstPositionId, 5);
             (uint256 washGross, uint256 washClaimable, uint256 washBurned) =
-                sellerUsageRewards.pendingStakerReward(run.washPositionId, 5);
+                sellerPoolsRewards.pendingStakerReward(run.washPositionId, 5);
             run.firstClaimable = firstClaimable;
             run.washClaimable = washClaimable;
             assertEq(firstGross, expectedFirstGross);
             assertEq(washGross, expectedWashGross);
-            uint256 burnCap = sellerUsageRewards.burnCapForEpoch(5);
+            uint256 burnCap = sellerPoolsRewards.burnCapForEpoch(5);
             uint256 firstExcess = firstGross - firstClaimable;
             uint256 washExcess = washGross - washClaimable;
             assertEq(firstBurned, firstExcess < burnCap ? firstExcess : burnCap);
@@ -1198,31 +1215,31 @@ contract AntseedEmissionsGateTest is Test {
             assertLt(washClaimable, washGross);
         }
 
-        sellerUsageRewards.indexPoolRewards(firstAgentId, 10);
-        run.firstClaimable = sellerUsageRewards.pendingIndexedStakerReward(run.firstPositionId);
+        sellerPoolsRewards.indexPoolRewards(firstAgentId, 10);
+        run.firstClaimable = sellerPoolsRewards.pendingIndexedStakerReward(run.firstPositionId);
         vm.prank(firstSeller);
-        sellerUsageRewards.claimStakerRewards(run.firstPositionId, firstSeller);
-        sellerUsageRewards.indexPoolRewards(washAgentId, 10);
-        run.washClaimable = sellerUsageRewards.pendingIndexedStakerReward(run.washPositionId);
+        sellerPoolsRewards.claimStakerRewards(run.firstPositionId, firstSeller);
+        sellerPoolsRewards.indexPoolRewards(washAgentId, 10);
+        run.washClaimable = sellerPoolsRewards.pendingIndexedStakerReward(run.washPositionId);
         vm.prank(washSeller);
-        sellerUsageRewards.claimStakerRewards(run.washPositionId, washSeller);
+        sellerPoolsRewards.claimStakerRewards(run.washPositionId, washSeller);
         assertEq(token.balanceOf(firstSeller), run.firstClaimable);
         assertEq(token.balanceOf(washSeller), run.washClaimable);
-        assertLe(token.balanceOf(sellerUsageRewards.DEAD_ADDRESS()), sellerUsageRewards.burnCapForEpoch(5));
-        assertEq(token.balanceOf(sellerUsageRewards.DEAD_ADDRESS()), sellerUsageRewards.epochBurnedAmount(5));
+        assertLe(token.balanceOf(sellerPoolsRewards.DEAD_ADDRESS()), sellerPoolsRewards.burnCapForEpoch(5));
+        assertEq(token.balanceOf(sellerPoolsRewards.DEAD_ADDRESS()), sellerPoolsRewards.epochBurnedAmount(5));
         assertGt(token.balanceOf(reserveDest), 0);
 
         {
-            uint256 buyerProgramBudget = programs.programEpochBudget(buyerProgramId, 5);
-            uint256 washBuyerGross = (buyerProgramBudget * run.washWeightedPoints) / run.expectedTotalWeightedPoints;
+            uint256 buyerSideBudget = usageRewards.usageSideEpochBudget(5);
+            uint256 washBuyerGross = (buyerSideBudget * run.washWeightedPoints) / run.expectedTotalWeightedPoints;
             uint256 washBuyerCap =
-                (buyerProgramBudget * buyerUsageRewards.MAX_REWARD_SHARE_BPS()) / buyerUsageRewards.BPS_DENOMINATOR();
+                (buyerSideBudget * usageRewards.MAX_REWARD_SHARE_BPS()) / usageRewards.BPS_DENOMINATOR();
             uint256 washBuyerClaimable = washBuyerGross < washBuyerCap ? washBuyerGross : washBuyerCap;
-            assertEq(buyerUsageRewards.pendingBuyerReward(washBuyer, 5), washBuyerClaimable);
+            assertEq(usageRewards.pendingBuyerReward(washBuyer, 5), washBuyerClaimable);
 
             address washOperator = address(0x50000);
             deposits.setOperator(washBuyer, washOperator);
-            buyerUsageRewards.claimBuyerReward(washBuyer, 5);
+            usageRewards.claimBuyerReward(washBuyer, 5);
             assertEq(token.balanceOf(washBuyer), 0);
             assertEq(token.balanceOf(washOperator), washBuyerClaimable);
         }
@@ -1247,7 +1264,6 @@ contract AntseedEmissionsGateTest is Test {
     }
 
     function test_buyerRewardsRequirePoolWeightedBuyerPoints() public {
-        bytes32 programId = keccak256("recognized-buyer-usage-v1");
         address secondBuyer = address(0x21);
         _deployGate(4);
 
@@ -1260,9 +1276,8 @@ contract AntseedEmissionsGateTest is Test {
         policy.setBuyerWeightBps(0);
         usageAccounting.setPointsPolicy(address(policy));
 
-        buyerUsageRewards = new AntseedBuyerUsageRewards(address(programs), address(realRegistry), programId);
-        buyerUsageRewards.setUsageAccounting(address(usageAccounting));
-        programs.setRewardProgram(programId, address(buyerUsageRewards), address(0), 500, 4, 0, true);
+        usageRewards = new AntseedUsageRewards(address(gate), address(realRegistry), address(usageAccounting));
+        _setUsageMinter(address(usageRewards));
 
         _warpGateEpoch(5);
         usageAccounting.accruePoints(keccak256("buyer-one"), buyer, seller, 10);
@@ -1276,22 +1291,20 @@ contract AntseedEmissionsGateTest is Test {
         assertEq(usageAccounting.totalWeightedBuyerPointsByEpoch(5), 0);
 
         _warpGateEpoch(6);
-        assertEq(buyerUsageRewards.pendingBuyerReward(buyer, 5), 0);
-        assertEq(buyerUsageRewards.pendingBuyerReward(secondBuyer, 5), 0);
+        assertEq(usageRewards.pendingBuyerReward(buyer, 5), 0);
+        assertEq(usageRewards.pendingBuyerReward(secondBuyer, 5), 0);
     }
 
-    function test_buyerUsageRewardsUsePoolWeightedShareAndOperatorRecipient() public {
-        bytes32 programId = keccak256("recognized-buyer-usage-v1");
+    function test_usageRewardsUsePoolWeightedShareAndOperatorRecipient() public {
         address secondBuyer = address(0x21);
         _deployGate(3);
 
         sellerPools = new AntseedSellerPools(address(realRegistry), 0, 0, 0);
         usageAccounting.setSellerPools(address(sellerPools));
 
-        buyerUsageRewards = new AntseedBuyerUsageRewards(address(programs), address(realRegistry), programId);
-        buyerUsageRewards.setUsageAccounting(address(usageAccounting));
-        programs.setRewardProgram(programId, address(buyerUsageRewards), address(0), 500, 4, 0, true);
-        assertEq(programs.programEpochBudget(programId, 4), _programBudget(500, 4));
+        usageRewards = new AntseedUsageRewards(address(gate), address(realRegistry), address(usageAccounting));
+        _setUsageMinter(address(usageRewards));
+        assertEq(usageRewards.usageSideEpochBudget(4), _shareBudget(5_000, 4));
 
         deal(address(token), seller, 100 ether);
         deal(address(token), otherSeller, 10 ether);
@@ -1326,29 +1339,29 @@ contract AntseedEmissionsGateTest is Test {
 
         _warpGateEpoch(5);
 
-        uint256 grossBuyerReward = (_programBudget(500, 4) * buyerWeightedPoints) / totalWeightedPoints;
-        uint256 grossSecondBuyerReward = (_programBudget(500, 4) * secondBuyerWeightedPoints) / totalWeightedPoints;
-        uint256 buyerReward = buyerUsageRewards.pendingBuyerReward(buyer, 4);
-        uint256 secondBuyerReward = buyerUsageRewards.pendingBuyerReward(secondBuyer, 4);
+        uint256 grossBuyerReward = (_shareBudget(5_000, 4) * buyerWeightedPoints) / totalWeightedPoints;
+        uint256 grossSecondBuyerReward = (_shareBudget(5_000, 4) * secondBuyerWeightedPoints) / totalWeightedPoints;
+        uint256 buyerReward = usageRewards.pendingBuyerReward(buyer, 4);
+        uint256 secondBuyerReward = usageRewards.pendingBuyerReward(secondBuyer, 4);
         uint256 buyerCap =
-            (_programBudget(500, 4) * buyerUsageRewards.MAX_REWARD_SHARE_BPS()) / buyerUsageRewards.BPS_DENOMINATOR();
+            (_shareBudget(5_000, 4) * usageRewards.MAX_REWARD_SHARE_BPS()) / usageRewards.BPS_DENOMINATOR();
         assertEq(buyerReward, buyerCap);
         assertEq(secondBuyerReward, grossSecondBuyerReward < buyerCap ? grossSecondBuyerReward : buyerCap);
 
-        buyerUsageRewards.claimBuyerReward(buyer, 4);
+        usageRewards.claimBuyerReward(buyer, 4);
         assertEq(token.balanceOf(operator), buyerReward);
         assertEq(token.balanceOf(reserveDest), grossBuyerReward - buyerReward);
 
         // A buyer without a resolvable Deposits operator can never be paid
         // directly: the claim reverts (and stays claimable) until an operator
         // is registered.
-        vm.expectRevert(AntseedBuyerUsageRewards.RewardRecipientUnavailable.selector);
-        buyerUsageRewards.claimBuyerReward(secondBuyer, 4);
+        vm.expectRevert(AntseedUsageRewards.RewardRecipientUnavailable.selector);
+        usageRewards.claimBuyerReward(secondBuyer, 4);
         assertEq(token.balanceOf(secondBuyer), 0);
 
         address secondOperator = address(0x22);
         deposits.setOperator(secondBuyer, secondOperator);
-        buyerUsageRewards.claimBuyerReward(secondBuyer, 4);
+        usageRewards.claimBuyerReward(secondBuyer, 4);
         assertEq(token.balanceOf(secondBuyer), 0);
         assertEq(token.balanceOf(secondOperator), secondBuyerReward);
         assertEq(
@@ -1356,93 +1369,73 @@ contract AntseedEmissionsGateTest is Test {
             (grossBuyerReward - buyerReward) + (grossSecondBuyerReward - secondBuyerReward)
         );
 
-        vm.expectRevert(AntseedBuyerUsageRewards.AlreadyClaimed.selector);
-        buyerUsageRewards.claimBuyerReward(buyer, 4);
+        vm.expectRevert(AntseedUsageRewards.AlreadyClaimed.selector);
+        usageRewards.claimBuyerReward(buyer, 4);
     }
 
-    function test_buyerUsageRewardsValidationAndPause() public {
-        bytes32 programId = keccak256("recognized-buyer-usage-v1");
+    function test_usageRewardsValidationAndPause() public {
         _deployGate(4);
 
-        vm.expectRevert(AntseedBuyerUsageRewards.InvalidAddress.selector);
-        new AntseedBuyerUsageRewards(address(0), address(realRegistry), programId);
+        vm.expectRevert(AntseedUsageRewards.InvalidAddress.selector);
+        new AntseedUsageRewards(address(0), address(realRegistry), address(usageAccounting));
 
-        vm.expectRevert(AntseedBuyerUsageRewards.InvalidAddress.selector);
-        new AntseedBuyerUsageRewards(address(programs), address(0), programId);
+        vm.expectRevert(AntseedUsageRewards.InvalidAddress.selector);
+        new AntseedUsageRewards(address(gate), address(0), address(usageAccounting));
 
-        vm.expectRevert(AntseedBuyerUsageRewards.InvalidAddress.selector);
-        new AntseedBuyerUsageRewards(address(programs), address(realRegistry), bytes32(0));
+        vm.expectRevert(AntseedUsageRewards.InvalidAddress.selector);
+        new AntseedUsageRewards(address(gate), address(realRegistry), address(0));
 
-        buyerUsageRewards = new AntseedBuyerUsageRewards(address(programs), address(realRegistry), programId);
-        programs.setRewardProgram(programId, address(buyerUsageRewards), address(0), 500, 4, 0, true);
+        usageRewards = new AntseedUsageRewards(address(gate), address(realRegistry), address(usageAccounting));
+        _setUsageMinter(address(usageRewards));
 
-        vm.expectRevert(AntseedBuyerUsageRewards.InvalidAddress.selector);
-        buyerUsageRewards.setEmissionsAuthority(address(0));
-        buyerUsageRewards.setEmissionsAuthority(address(programs));
+        vm.expectRevert(AntseedUsageRewards.InvalidAddress.selector);
+        usageRewards.claimBuyerReward(address(0), 4);
 
-        vm.expectRevert(AntseedBuyerUsageRewards.InvalidAddress.selector);
-        buyerUsageRewards.setRegistry(address(0));
-        buyerUsageRewards.setRegistry(address(realRegistry));
+        vm.expectRevert(AntseedUsageRewards.NothingToClaim.selector);
+        usageRewards.claimBuyerReward(buyer, 4);
 
-        vm.expectRevert(AntseedBuyerUsageRewards.InvalidAddress.selector);
-        buyerUsageRewards.setUsageAccounting(address(0));
-        buyerUsageRewards.setUsageAccounting(address(usageAccounting));
-
-        vm.expectRevert(AntseedBuyerUsageRewards.InvalidAddress.selector);
-        buyerUsageRewards.claimBuyerReward(address(0), 4);
-
-        vm.expectRevert(AntseedBuyerUsageRewards.NothingToClaim.selector);
-        buyerUsageRewards.claimBuyerReward(buyer, 4);
-
-        buyerUsageRewards.pause();
-        assertTrue(buyerUsageRewards.paused());
+        usageRewards.pause();
+        assertTrue(usageRewards.paused());
         vm.expectRevert();
-        buyerUsageRewards.claimBuyerReward(buyer, 4);
-        buyerUsageRewards.unpause();
-        assertFalse(buyerUsageRewards.paused());
+        usageRewards.claimBuyerReward(buyer, 4);
+        usageRewards.unpause();
+        assertFalse(usageRewards.paused());
     }
 
     function test_sellerOperatorRewardsPaySellerDirectly() public {
-        bytes32 programId = keccak256("recognized-seller-operator-v1");
         _deployGate(4);
 
         sellerPools = new AntseedSellerPools(address(realRegistry), 0, 0, 0);
         usageAccounting.setSellerPools(address(sellerPools));
-        sellerOperatorUsageRewards = new AntseedSellerOperatorUsageRewards(
-            address(programs), address(realRegistry), address(usageAccounting), programId
-        );
-        programs.setRewardProgram(programId, address(sellerOperatorUsageRewards), address(0), 500, 4, 0, true);
+        usageRewards = new AntseedUsageRewards(address(gate), address(realRegistry), address(usageAccounting));
+        _setUsageMinter(address(usageRewards));
 
         _createSellerPool(sellerPools, seller, 5_000, keccak256("terms"));
 
         _warpGateEpoch(5);
         usageAccounting.accruePoints(keccak256("seller-direct"), buyer, seller, 100);
 
-        uint256 grossReward = _programBudget(500, 5);
-        uint256 expectedReward = (grossReward * sellerOperatorUsageRewards.MAX_REWARD_SHARE_BPS())
-            / sellerOperatorUsageRewards.BPS_DENOMINATOR();
+        uint256 grossReward = _shareBudget(5_000, 5);
+        uint256 expectedReward = (grossReward * usageRewards.MAX_REWARD_SHARE_BPS()) / usageRewards.BPS_DENOMINATOR();
         _warpGateEpoch(6);
-        assertEq(sellerOperatorUsageRewards.pendingSellerReward(seller, 5), expectedReward);
+        assertEq(usageRewards.pendingSellerReward(seller, 5), expectedReward);
 
-        sellerOperatorUsageRewards.claimSellerReward(seller, 5);
+        usageRewards.claimSellerReward(seller, 5);
         assertEq(token.balanceOf(seller), expectedReward);
         assertEq(token.balanceOf(reserveDest), grossReward - expectedReward);
 
-        vm.expectRevert(AntseedSellerOperatorUsageRewards.AlreadyClaimed.selector);
-        sellerOperatorUsageRewards.claimSellerReward(seller, 5);
+        vm.expectRevert(AntseedUsageRewards.AlreadyClaimed.selector);
+        usageRewards.claimSellerReward(seller, 5);
     }
 
     function test_sellerOperatorRewardsPayCurrentAgentOwner() public {
-        bytes32 programId = keccak256("recognized-seller-operator-v1");
         address newOwner = address(0x1111);
         _deployGate(4);
 
         sellerPools = new AntseedSellerPools(address(realRegistry), 0, 0, 0);
         usageAccounting.setSellerPools(address(sellerPools));
-        sellerOperatorUsageRewards = new AntseedSellerOperatorUsageRewards(
-            address(programs), address(realRegistry), address(usageAccounting), programId
-        );
-        programs.setRewardProgram(programId, address(sellerOperatorUsageRewards), address(0), 500, 4, 0, true);
+        usageRewards = new AntseedUsageRewards(address(gate), address(realRegistry), address(usageAccounting));
+        _setUsageMinter(address(usageRewards));
 
         _createSellerPool(sellerPools, seller, 5_000, keccak256("terms"));
 
@@ -1453,35 +1446,29 @@ contract AntseedEmissionsGateTest is Test {
         vm.prank(seller);
         identityRegistry.transferAgent(agentId, newOwner);
 
-        uint256 grossReward = _programBudget(500, 5);
-        uint256 expectedReward = (grossReward * sellerOperatorUsageRewards.MAX_REWARD_SHARE_BPS())
-            / sellerOperatorUsageRewards.BPS_DENOMINATOR();
+        uint256 grossReward = _shareBudget(5_000, 5);
+        uint256 expectedReward = (grossReward * usageRewards.MAX_REWARD_SHARE_BPS()) / usageRewards.BPS_DENOMINATOR();
         _warpGateEpoch(6);
-        assertEq(sellerOperatorUsageRewards.rewardRecipient(agentId), newOwner);
-        assertEq(sellerOperatorUsageRewards.pendingAgentReward(agentId, 5), expectedReward);
+        assertEq(usageRewards.rewardRecipient(agentId), newOwner);
+        assertEq(usageRewards.pendingAgentReward(agentId, 5), expectedReward);
 
-        sellerOperatorUsageRewards.claimAgentReward(agentId, 5);
+        usageRewards.claimAgentReward(agentId, 5);
         assertEq(token.balanceOf(newOwner), expectedReward);
         assertEq(token.balanceOf(seller), 0);
         assertEq(token.balanceOf(reserveDest), grossReward - expectedReward);
     }
 
     function test_sellerOperatorRewardsAreSeparateFromPoolRewards() public {
-        bytes32 operatorProgramId = keccak256("recognized-seller-operator-v1");
-        bytes32 poolProgramId = keccak256("recognized-seller-pool-v1");
         _deployGate(4);
 
         sellerPools = new AntseedSellerPools(address(realRegistry), 0, 0, 0);
         usageAccounting.setSellerPools(address(sellerPools));
-        sellerOperatorUsageRewards = new AntseedSellerOperatorUsageRewards(
-            address(programs), address(realRegistry), address(usageAccounting), operatorProgramId
-        );
-        sellerUsageRewards = new AntseedSellerUsageRewards(
-            address(programs), address(sellerPools), address(usageAccounting), poolProgramId
-        );
-        sellerPools.setRewardStaker(address(sellerUsageRewards), true);
-        programs.setRewardProgram(operatorProgramId, address(sellerOperatorUsageRewards), address(0), 500, 4, 0, true);
-        programs.setRewardProgram(poolProgramId, address(sellerUsageRewards), address(0), 6_000, 4, 0, true);
+        usageRewards = new AntseedUsageRewards(address(gate), address(realRegistry), address(usageAccounting));
+        sellerPoolsRewards =
+            new AntseedSellerPoolsRewards(address(gate), address(sellerPools), address(usageAccounting));
+        sellerPools.setRewardStaker(address(sellerPoolsRewards), true);
+        _setUsageMinter(address(usageRewards));
+        _setSellerPoolsMinter(address(sellerPoolsRewards));
 
         _createSellerPool(sellerPools, seller, 5_000, keccak256("terms"));
         uint256 positionId = sellerPools.nextPositionId() - 1;
@@ -1490,188 +1477,250 @@ contract AntseedEmissionsGateTest is Test {
         usageAccounting.accruePoints(keccak256("seller-direct-and-pool"), buyer, seller, 100);
 
         _warpGateEpoch(6);
-        sellerOperatorUsageRewards.claimSellerReward(seller, 5);
-        sellerUsageRewards.indexPoolRewards(_agentId(seller), 10);
+        usageRewards.claimSellerReward(seller, 5);
+        sellerPoolsRewards.indexPoolRewards(_agentId(seller), 10);
         vm.prank(seller);
-        sellerUsageRewards.claimStakerRewards(positionId, seller);
+        sellerPoolsRewards.claimStakerRewards(positionId, seller);
 
-        uint256 expectedOperatorReward = (_programBudget(500, 5) * sellerOperatorUsageRewards.MAX_REWARD_SHARE_BPS())
-            / sellerOperatorUsageRewards.BPS_DENOMINATOR();
-        assertEq(token.balanceOf(seller), expectedOperatorReward + _programBudget(6_000, 5));
-        assertEq(token.balanceOf(reserveDest), _programBudget(500, 5) - expectedOperatorReward);
+        uint256 expectedOperatorReward =
+            (_shareBudget(5_000, 5) * usageRewards.MAX_REWARD_SHARE_BPS()) / usageRewards.BPS_DENOMINATOR();
+        assertEq(token.balanceOf(seller), expectedOperatorReward + _shareBudget(45_000, 5));
+        assertEq(token.balanceOf(reserveDest), _shareBudget(5_000, 5) - expectedOperatorReward);
     }
 
     function test_gateMintValidationAndPause() public {
-        bytes32 programId = keccak256("program");
         _deployGate(4);
-        programs.setRewardProgram(programId, address(this), address(0), 1_000, 4, 0, true);
+        _setSellerPoolsMinter(address(this));
 
-        vm.expectRevert(AntseedEmissionPrograms.InvalidAddress.selector);
-        programs.mintProgramEmission(programId, 4, address(0), 1 ether);
+        vm.expectRevert(AntseedEmissionsGate.InvalidAddress.selector);
+        gate.mint(4, address(0), 1 ether);
 
-        vm.expectRevert(AntseedEmissionPrograms.InvalidValue.selector);
-        programs.mintProgramEmission(programId, 4, address(this), 0);
+        vm.expectRevert(AntseedEmissionsGate.InvalidValue.selector);
+        gate.mint(4, address(this), 0);
 
         vm.expectRevert(AntseedEmissionsGate.EpochNotFinalized.selector);
-        programs.mintProgramEmission(programId, 5, address(this), 1 ether);
-
-        vm.expectRevert(AntseedEmissionPrograms.InvalidProgram.selector);
-        programs.mintProgramEmission(keccak256("missing"), 3, address(this), 1 ether);
+        gate.mint(5, address(this), 1 ether);
 
         _warpGateEpoch(5);
         vm.prank(seller);
-        vm.expectRevert(AntseedEmissionPrograms.NotProgramController.selector);
-        programs.mintProgramEmission(programId, 4, seller, 1 ether);
+        vm.expectRevert(AntseedEmissionsGate.NotEmissionMinter.selector);
+        gate.mint(4, seller, 1 ether);
 
-        uint256 programBudget = _programBudget(1_000, 4);
-        vm.expectRevert(AntseedEmissionPrograms.ProgramBudgetExceeded.selector);
-        programs.mintProgramEmission(programId, 4, address(this), programBudget + 1);
+        uint256 bucketBudget = _shareBudget(45_000, 4);
+        vm.expectRevert(AntseedEmissionsGate.BucketBudgetExceeded.selector);
+        gate.mint(4, address(this), bucketBudget + 1);
 
-        programs.mintProgramEmission(programId, 4, address(this), 1 ether);
+        gate.mint(4, address(this), 1 ether);
     }
 
-    function test_rewardProgramSharesCannotExceedPostMigrationEpochBudget() public {
-        bytes32 sellerPoolProgramId = keccak256("recognized-seller-pool-v1");
-        bytes32 sellerOperatorProgramId = keccak256("recognized-seller-operator-v1");
-        bytes32 buyerProgramId = keccak256("recognized-buyer-usage-v1");
-        bytes32 teamProgramId = keccak256("antseed-team-v1");
-        bytes32 reserveProgramId = keccak256("antseed-reserve-v1");
+    function test_fixedBucketSharesSumToPostMigrationEpochBudget() public {
         _deployGate(5);
+        _setEmissionMinters(address(this), address(0xBEEF));
 
-        programs.setRewardProgram(sellerPoolProgramId, address(this), address(0), 6_000, 4, 0, true);
-        programs.setRewardProgram(sellerOperatorProgramId, address(this), address(0), 500, 4, 0, true);
-        programs.setRewardProgram(buyerProgramId, address(this), address(0), 500, 4, 0, true);
-        programs.setRewardProgram(teamProgramId, teamWallet, teamWallet, 1_500, 4, 0, true);
-        programs.setRewardProgram(reserveProgramId, reserveDest, reserveDest, 1_500, 4, 0, true);
+        uint256 totalBudget = gate.minterEpochBudget(address(this), 5) + gate.minterEpochBudget(address(0xBEEF), 5)
+            + gate.minterEpochBudget(teamWallet, 5) + gate.minterEpochBudget(reserveDest, 5)
+            + gate.minterEpochBudget(verificationWallet, 5);
+        assertEq(totalBudget, gate.getEpochEmission(5));
 
-        vm.expectRevert(AntseedEmissionPrograms.ProgramShareExceeded.selector);
-        programs.setRewardProgram(keccak256("too-much"), address(this), address(0), 1, 4, 0, true);
-
-        programs.setRewardProgram(keccak256("inactive-overage"), address(this), address(0), 1, 4, 0, false);
-        programs.setRewardProgram(keccak256("legacy-window"), address(this), address(0), 10_000, 0, 4, true);
+        assertEq(gate.minterEpochBudget(address(0xBEEF), 5), _shareBudget(5_000, 5) * 2);
     }
 
-    function test_gateCapsTotalScheduledMintsByEpochEmission() public {
+    function test_gateCapsTotalBucketMintsByEpochEmission() public {
         vm.warp(GATE_GENESIS + GATE_EPOCH_DURATION * 4 + 1);
         gate = new AntseedEmissionsGate();
         _warpGateEpoch(5);
-        gate.setEmissionController(address(this));
+        _setFixedRecipients(teamWallet, reserveDest, verificationWallet);
+        address usageMinter = address(0xBEEF);
+        _setEmissionMinters(address(this), usageMinter);
         token.setRegistry(address(gate));
 
         uint256 epochEmission = gate.getEpochEmission(4);
-        gate.mintScheduleEmission(4, address(this), epochEmission / 2);
-        gate.mintScheduleEmission(4, address(this), epochEmission - (epochEmission / 2));
-        assertEq(gate.epochScheduleMinted(4), epochEmission);
+        uint256 sellerPoolsBudget = _shareBudget(45_000, 4);
+        uint256 usageBudget = _shareBudget(10_000, 4);
+        gate.mint(4, address(this), sellerPoolsBudget);
+        vm.prank(usageMinter);
+        gate.mint(4, address(this), usageBudget);
+        _claim(teamWallet, 4);
+        _claim(reserveDest, 4);
+        _claim(verificationWallet, 4);
+        assertEq(gate.epochMinted(4), epochEmission);
 
-        vm.expectRevert(AntseedEmissionsGate.EpochEmissionExceeded.selector);
-        gate.mintScheduleEmission(4, address(this), 1);
+        vm.prank(usageMinter);
+        vm.expectRevert(AntseedEmissionsGate.BucketBudgetExceeded.selector);
+        gate.mint(4, address(this), 1);
     }
 
-    function test_rewardProgramShareCanChangeForFutureEpochsWithSameController() public {
-        bytes32 programId = keccak256("recognized-buyer-usage-v1");
+    function test_ownerCanUpdateUsageMinterDirectly() public {
         _deployGate(4);
 
-        programs.setRewardProgram(programId, address(this), address(0), 500, 4, 0, true);
-        assertEq(programs.rewardProgramConfigCount(programId), 1);
-        assertEq(programs.programEpochBudget(programId, 4), _programBudget(500, 4));
-        assertEq(programs.programEpochBudget(programId, 7), _programBudget(500, 7));
-
-        programs.setRewardProgram(programId, address(this), address(0), 1_000, 8, 0, true);
-        assertEq(programs.rewardProgramConfigCount(programId), 2);
-        assertEq(programs.programEpochBudget(programId, 4), _programBudget(500, 4));
-        assertEq(programs.programEpochBudget(programId, 7), _programBudget(500, 7));
-        assertEq(programs.programEpochBudget(programId, 8), _programBudget(1_000, 8));
+        _setUsageMinter(address(this));
+        assertEq(_configuredMinter(address(this)), address(this));
+        assertEq(gate.minterEpochBudget(address(this), 4), _shareBudget(10_000, 4));
+        assertEq(gate.minterEpochBudget(address(this), 7), _shareBudget(10_000, 7));
 
         _warpGateEpoch(5);
-        programs.mintProgramEmission(programId, 4, address(this), _programBudget(500, 4));
-        assertEq(token.balanceOf(address(this)), _programBudget(500, 4));
+        gate.mint(4, address(this), _shareBudget(10_000, 4));
+        assertEq(token.balanceOf(address(this)), _shareBudget(10_000, 4));
 
-        vm.expectRevert(AntseedEmissionPrograms.InvalidValue.selector);
-        programs.setRewardProgram(programId, address(this), address(0), 1_000, 4, 0, true);
+        address newMinter = address(0xBEEF);
+        gate.removeMinter(address(this));
+        _setUsageMinter(newMinter);
+        assertEq(_configuredMinter(newMinter), newMinter);
 
-        _warpGateEpoch(9);
-        programs.mintProgramEmission(programId, 8, address(this), _programBudget(1_000, 8));
-        assertEq(token.balanceOf(address(this)), _programBudget(500, 4) + _programBudget(1_000, 8));
+        _warpGateEpoch(6);
+        uint256 epoch5Budget = _shareBudget(10_000, 5);
+        vm.expectRevert(AntseedEmissionsGate.NotEmissionMinter.selector);
+        gate.mint(5, address(this), epoch5Budget);
+
+        vm.prank(newMinter);
+        gate.mint(5, newMinter, epoch5Budget);
+        assertEq(token.balanceOf(newMinter), epoch5Budget);
     }
 
-    function test_teamAndReserveProgramsAreCalledByTheirRecipients() public {
-        bytes32 teamProgramId = keccak256("antseed-team-v1");
-        bytes32 reserveProgramId = keccak256("antseed-reserve-v1");
+    function test_ownerCanUpdateControllerMinterShare() public {
+        _deployGate(4);
+
+        _setSellerPoolsMinter(address(this));
+        assertEq(gate.totalMinterShareBps(), 90_000);
+
+        gate.setMinter(address(this), 10_000, true);
+        assertEq(gate.totalMinterShareBps(), 55_000);
+        assertEq(gate.minterEpochBudget(address(this), 4), _shareBudget(10_000, 4));
+    }
+
+    function test_ownerCanConfigureCustomMinterShare() public {
+        _deployGate(4);
+
+        address customMinter = address(0xCAFE);
+        bytes32 customMinterId = gate.minterId(customMinter);
+        gate.setMinter(customMinter, 7_000, true);
+
+        (address configuredMinter, uint32 shareBps, bool editable) = gate.minters(customMinterId);
+        assertEq(configuredMinter, customMinter);
+        assertEq(shareBps, 7_000);
+        assertTrue(editable);
+        assertEq(gate.totalMinterShareBps(), 52_000);
+        assertEq(gate.minterEpochBudget(customMinter, 4), _shareBudget(7_000, 4));
+
+        _warpGateEpoch(5);
+        uint256 budget = _shareBudget(7_000, 4);
+        vm.prank(customMinter);
+        gate.mint(4, customMinter, budget);
+        assertEq(gate.minterEpochMinted(customMinterId, 4), budget);
+        assertEq(token.balanceOf(customMinter), budget);
+
+        vm.prank(customMinter);
+        vm.expectRevert(AntseedEmissionsGate.BucketBudgetExceeded.selector);
+        gate.mint(4, customMinter, 1);
+
+        gate.removeMinter(customMinter);
+        assertEq(gate.totalMinterShareBps(), 45_000);
+        assertEq(gate.minterEpochBudget(customMinter, 4), 0);
+
+        vm.prank(customMinter);
+        vm.expectRevert(AntseedEmissionsGate.NotEmissionMinter.selector);
+        gate.mint(4, customMinter, 1);
+    }
+
+    function test_ownerCanChangeNamedMinterShare() public {
+        _deployGate(4);
+
+        _setSellerPoolsMinter(address(this));
+        bytes32 sellerPoolsMinterId = gate.minterId(address(this));
+        gate.setMinter(address(this), 30_000, true);
+
+        assertEq(gate.totalMinterShareBps(), 75_000);
+        assertEq(gate.minterEpochBudget(address(this), 4), _shareBudget(30_000, 4));
+
+        _warpGateEpoch(5);
+        uint256 budget = _shareBudget(30_000, 4);
+        gate.mint(4, address(this), budget);
+        assertEq(gate.minterEpochMinted(sellerPoolsMinterId, 4), budget);
+    }
+
+    function test_lockedMinterCannotBeEditedOrRemoved() public {
+        _deployGate(4);
+
+        address lockedMinter = address(0xCAFE);
+        gate.setMinter(lockedMinter, 7_000, false);
+
+        vm.expectRevert(AntseedEmissionsGate.MinterNotEditable.selector);
+        gate.setMinter(lockedMinter, 6_000, true);
+
+        vm.expectRevert(AntseedEmissionsGate.MinterNotEditable.selector);
+        gate.removeMinter(lockedMinter);
+    }
+
+    function test_gateRejectsOverAllocatedMinterShares() public {
+        _deployGate(4);
+
+        _setEmissionMinters(address(this), address(0xBEEF));
+        assertEq(gate.totalMinterShareBps(), 100_000);
+
+        vm.expectRevert(AntseedEmissionsGate.InvalidValue.selector);
+        gate.setMinter(address(0xCAFE), 1, true);
+
+        vm.expectRevert(AntseedEmissionsGate.InvalidValue.selector);
+        gate.setMinter(address(this), 45_001, true);
+    }
+
+    function test_teamAndReserveBucketsAreFixedRecipientClaims() public {
         _deployGate(5);
 
-        programs.setRewardProgram(teamProgramId, teamWallet, teamWallet, 1_500, 4, 0, true);
-        programs.setRewardProgram(reserveProgramId, reserveDest, reserveDest, 1_500, 4, 0, true);
-        uint256 teamBudget = _programBudget(1_500, 4);
-        uint256 reserveBudget = _programBudget(1_500, 4);
+        uint256 teamBudget = _shareBudget(15_000, 4);
+        uint256 reserveBudget = _shareBudget(15_000, 4);
 
-        vm.prank(seller);
-        vm.expectRevert(AntseedEmissionPrograms.NotProgramController.selector);
-        programs.mintProgramEmission(teamProgramId, 4, teamWallet, 1 ether);
-
-        vm.prank(teamWallet);
-        vm.expectRevert(AntseedEmissionPrograms.InvalidProgramRecipient.selector);
-        programs.mintProgramEmission(teamProgramId, 4, seller, 1 ether);
-
-        vm.prank(teamWallet);
-        programs.mintProgramEmission(teamProgramId, 4, teamWallet, teamBudget);
+        _claim(teamWallet, 4);
         assertEq(token.balanceOf(teamWallet), teamBudget);
 
-        vm.prank(reserveDest);
-        programs.mintProgramEmission(reserveProgramId, 4, reserveDest, reserveBudget);
+        _claim(reserveDest, 4);
         assertEq(token.balanceOf(reserveDest), reserveBudget);
 
+        vm.expectRevert(AntseedEmissionsGate.InvalidValue.selector);
         vm.prank(teamWallet);
-        vm.expectRevert(AntseedEmissionPrograms.ProgramBudgetExceeded.selector);
-        programs.mintProgramEmission(teamProgramId, 4, teamWallet, 1 wei);
+        gate.claim(4);
     }
 
-    function test_verificationProgramFitsDefaultSplitAndPaysItsWallet() public {
-        address verificationWallet = address(0x60);
+    function test_ownerCanUpdateFixedRecipientsDirectly() public {
+        _deployGate(4);
+
+        address newTeamWallet = address(0xB0B);
+        address newReserveWallet = address(0xB0C);
+        address newVerificationWallet = address(0xB0D);
+        _setFixedRecipients(newTeamWallet, newReserveWallet, newVerificationWallet);
+
+        assertEq(_configuredMinter(newTeamWallet), newTeamWallet);
+        assertEq(_configuredMinter(newReserveWallet), newReserveWallet);
+        assertEq(_configuredMinter(newVerificationWallet), newVerificationWallet);
+
+        _warpGateEpoch(5);
+        uint256 teamBudgetEpoch4 = _shareBudget(15_000, 4);
+        _claim(newTeamWallet, 4);
+        assertEq(token.balanceOf(newTeamWallet), teamBudgetEpoch4);
+    }
+
+    function test_verificationBucketFitsDefaultSplitAndPaysItsWallet() public {
         _deployGate(5);
 
-        // Production default split: 45% seller pool, 5% operator, 5% buyer,
-        // 15% team, 15% reserve, 15% verification = 100%.
-        programs.setRewardProgram(keccak256("seller-pool"), address(this), address(0), 4_500, 4, 0, true);
-        programs.setRewardProgram(keccak256("seller-operator"), address(this), address(0), 500, 4, 0, true);
-        programs.setRewardProgram(keccak256("buyer"), address(this), address(0), 500, 4, 0, true);
-        programs.setRewardProgram(keccak256("team"), teamWallet, teamWallet, 1_500, 4, 0, true);
-        programs.setRewardProgram(keccak256("reserve"), reserveDest, reserveDest, 1_500, 4, 0, true);
-        bytes32 verificationProgramId = keccak256("verification");
-        programs.setRewardProgram(verificationProgramId, verificationWallet, verificationWallet, 1_500, 4, 0, true);
+        uint256 verificationBudget = _shareBudget(15_000, 4);
 
-        // No further share fits on top of the full split.
-        vm.expectRevert(AntseedEmissionPrograms.ProgramShareExceeded.selector);
-        programs.setRewardProgram(keccak256("extra"), address(this), address(0), 1, 4, 0, true);
-
-        uint256 verificationBudget = _programBudget(1_500, 4);
-
-        vm.prank(seller);
-        vm.expectRevert(AntseedEmissionPrograms.NotProgramController.selector);
-        programs.mintProgramEmission(verificationProgramId, 4, verificationWallet, 1 ether);
-
-        vm.prank(verificationWallet);
-        vm.expectRevert(AntseedEmissionPrograms.InvalidProgramRecipient.selector);
-        programs.mintProgramEmission(verificationProgramId, 4, seller, 1 ether);
-
-        vm.prank(verificationWallet);
-        programs.mintProgramEmission(verificationProgramId, 4, verificationWallet, verificationBudget);
+        _claim(verificationWallet, 4);
         assertEq(token.balanceOf(verificationWallet), verificationBudget);
 
+        vm.expectRevert(AntseedEmissionsGate.InvalidValue.selector);
         vm.prank(verificationWallet);
-        vm.expectRevert(AntseedEmissionPrograms.ProgramBudgetExceeded.selector);
-        programs.mintProgramEmission(verificationProgramId, 4, verificationWallet, 1 wei);
+        gate.claim(4);
     }
 
-    function test_sellerUsageRewardsDistributionValidation() public {
-        bytes32 programId = keccak256("recognized-seller-usage-v1");
+    function test_sellerPoolsRewardsDistributionValidation() public {
         _deployGate(4);
 
         sellerPools = new AntseedSellerPools(address(realRegistry), 0, 0, 0);
         usageAccounting.setSellerPools(address(sellerPools));
-        sellerUsageRewards =
-            new AntseedSellerUsageRewards(address(programs), address(sellerPools), address(usageAccounting), programId);
-        sellerPools.setRewardStaker(address(sellerUsageRewards), true);
-        programs.setRewardProgram(programId, address(sellerUsageRewards), address(0), 7_000, 4, 0, true);
+        sellerPoolsRewards =
+            new AntseedSellerPoolsRewards(address(gate), address(sellerPools), address(usageAccounting));
+        sellerPools.setRewardStaker(address(sellerPoolsRewards), true);
+        _setSellerPoolsMinter(address(sellerPoolsRewards));
 
         _createSellerPool(sellerPools, seller, 5_000, keccak256("terms"));
         uint256 positionId = sellerPools.nextPositionId() - 1;
@@ -1680,28 +1729,27 @@ contract AntseedEmissionsGateTest is Test {
         usageAccounting.accrueBuyerPoints(buyer, 10);
 
         _warpGateEpoch(6);
-        sellerUsageRewards.indexPoolRewards(_agentId(seller), 10);
+        sellerPoolsRewards.indexPoolRewards(_agentId(seller), 10);
         vm.prank(seller);
-        sellerUsageRewards.claimStakerRewards(positionId, seller);
-        assertEq(token.balanceOf(seller), _programBudget(7_000, 5));
+        sellerPoolsRewards.claimStakerRewards(positionId, seller);
+        assertEq(token.balanceOf(seller), _shareBudget(45_000, 5));
 
-        vm.expectRevert(AntseedSellerUsageRewards.NothingToClaim.selector);
+        vm.expectRevert(AntseedSellerPoolsRewards.NothingToClaim.selector);
         vm.prank(seller);
-        sellerUsageRewards.claimStakerRewards(positionId, seller);
+        sellerPoolsRewards.claimStakerRewards(positionId, seller);
 
-        vm.expectRevert(AntseedSellerUsageRewards.InvalidValue.selector);
-        sellerUsageRewards.pendingStakerReward(0, 5);
+        vm.expectRevert(AntseedSellerPoolsRewards.InvalidValue.selector);
+        sellerPoolsRewards.pendingStakerReward(0, 5);
     }
 
-    function test_sellerUsageRewardsBatchClaimUsesPositionLogic() public {
-        bytes32 programId = keccak256("recognized-seller-usage-v1");
+    function test_sellerPoolsRewardsBatchClaimUsesPositionLogic() public {
         _deployGate(4);
 
         sellerPools = new AntseedSellerPools(address(realRegistry), 0, 0, 0);
         usageAccounting.setSellerPools(address(sellerPools));
-        sellerUsageRewards =
-            new AntseedSellerUsageRewards(address(programs), address(sellerPools), address(usageAccounting), programId);
-        programs.setRewardProgram(programId, address(sellerUsageRewards), address(0), 7_000, 4, 0, true);
+        sellerPoolsRewards =
+            new AntseedSellerPoolsRewards(address(gate), address(sellerPools), address(usageAccounting));
+        _setSellerPoolsMinter(address(sellerPoolsRewards));
 
         address poolSeller = _createSellerPool(sellerPools, seller, 5_000, keccak256("terms"));
         sellerAgentLookup.setAgent(otherSeller, _agentId(otherSeller));
@@ -1724,33 +1772,32 @@ contract AntseedEmissionsGateTest is Test {
         positionIds[1] = secondPositionId;
         positionIds[2] = noRewardPositionId;
 
-        (uint256 firstGross,,) = sellerUsageRewards.pendingStakerReward(firstPositionId, 5);
-        (uint256 secondGross,,) = sellerUsageRewards.pendingStakerReward(secondPositionId, 5);
+        (uint256 firstGross,,) = sellerPoolsRewards.pendingStakerReward(firstPositionId, 5);
+        (uint256 secondGross,,) = sellerPoolsRewards.pendingStakerReward(secondPositionId, 5);
 
-        sellerUsageRewards.indexPoolRewards(_agentId(poolSeller), 10);
+        sellerPoolsRewards.indexPoolRewards(_agentId(poolSeller), 10);
         vm.prank(staker);
-        sellerUsageRewards.claimStakerRewardsBatch(positionIds, staker);
+        sellerPoolsRewards.claimStakerRewardsBatch(positionIds, staker);
 
         assertEq(token.balanceOf(staker), 825 ether + firstGross + secondGross);
-        assertEq(sellerUsageRewards.positionClaimCursor(firstPositionId), 6);
-        assertEq(sellerUsageRewards.positionClaimCursor(secondPositionId), 6);
-        assertEq(sellerUsageRewards.positionClaimCursor(noRewardPositionId), 0);
+        assertEq(sellerPoolsRewards.positionClaimCursor(firstPositionId), 6);
+        assertEq(sellerPoolsRewards.positionClaimCursor(secondPositionId), 6);
+        assertEq(sellerPoolsRewards.positionClaimCursor(noRewardPositionId), 0);
 
-        vm.expectRevert(AntseedSellerUsageRewards.NothingToClaim.selector);
+        vm.expectRevert(AntseedSellerPoolsRewards.NothingToClaim.selector);
         vm.prank(staker);
-        sellerUsageRewards.claimStakerRewardsBatch(positionIds, staker);
+        sellerPoolsRewards.claimStakerRewardsBatch(positionIds, staker);
     }
 
-    function test_sellerUsageRewardsBatchRestakeUsesPositionLogicAndCreatesSeparatePositions() public {
-        bytes32 programId = keccak256("recognized-seller-usage-v1");
+    function test_sellerPoolsRewardsBatchRestakeUsesPositionLogicAndCreatesSeparatePositions() public {
         _deployGate(4);
 
         sellerPools = new AntseedSellerPools(address(realRegistry), 0, 0, 0);
         usageAccounting.setSellerPools(address(sellerPools));
-        sellerUsageRewards =
-            new AntseedSellerUsageRewards(address(programs), address(sellerPools), address(usageAccounting), programId);
-        sellerPools.setRewardStaker(address(sellerUsageRewards), true);
-        programs.setRewardProgram(programId, address(sellerUsageRewards), address(0), 7_000, 4, 0, true);
+        sellerPoolsRewards =
+            new AntseedSellerPoolsRewards(address(gate), address(sellerPools), address(usageAccounting));
+        sellerPools.setRewardStaker(address(sellerPoolsRewards), true);
+        _setSellerPoolsMinter(address(sellerPoolsRewards));
 
         address poolSeller = _createSellerPool(sellerPools, seller, 5_000, keccak256("terms"));
         sellerAgentLookup.setAgent(otherSeller, _agentId(otherSeller));
@@ -1773,12 +1820,12 @@ contract AntseedEmissionsGateTest is Test {
         positionIds[1] = secondPositionId;
         positionIds[2] = noRewardPositionId;
 
-        (uint256 firstGross,,) = sellerUsageRewards.pendingStakerReward(firstPositionId, 5);
-        (uint256 secondGross,,) = sellerUsageRewards.pendingStakerReward(secondPositionId, 5);
+        (uint256 firstGross,,) = sellerPoolsRewards.pendingStakerReward(firstPositionId, 5);
+        (uint256 secondGross,,) = sellerPoolsRewards.pendingStakerReward(secondPositionId, 5);
 
-        sellerUsageRewards.indexPoolRewards(_agentId(poolSeller), 10);
+        sellerPoolsRewards.indexPoolRewards(_agentId(poolSeller), 10);
         vm.prank(staker);
-        uint256[] memory newPositionIds = sellerUsageRewards.restakeStakerRewardsBatch(positionIds, 2);
+        uint256[] memory newPositionIds = sellerPoolsRewards.restakeStakerRewardsBatch(positionIds, 2);
 
         assertEq(newPositionIds.length, 3);
         assertNotEq(newPositionIds[0], newPositionIds[1]);
@@ -1803,43 +1850,28 @@ contract AntseedEmissionsGateTest is Test {
         assertEq(stakeEndEpoch, 9);
     }
 
-    function test_sellerUsageRewardsAdminAndPause() public {
-        bytes32 programId = keccak256("recognized-seller-usage-v1");
+    function test_sellerPoolsRewardsAdminAndPause() public {
         _deployGate(5);
         sellerPools = new AntseedSellerPools(address(realRegistry), 0, 0, 0);
-        sellerUsageRewards =
-            new AntseedSellerUsageRewards(address(programs), address(sellerPools), address(usageAccounting), programId);
+        sellerPoolsRewards =
+            new AntseedSellerPoolsRewards(address(gate), address(sellerPools), address(usageAccounting));
 
-        vm.expectRevert(AntseedSellerUsageRewards.InvalidAddress.selector);
-        new AntseedSellerUsageRewards(address(0), address(sellerPools), address(usageAccounting), programId);
+        vm.expectRevert(AntseedSellerPoolsRewards.InvalidAddress.selector);
+        new AntseedSellerPoolsRewards(address(0), address(sellerPools), address(usageAccounting));
 
-        vm.expectRevert(AntseedSellerUsageRewards.InvalidAddress.selector);
-        new AntseedSellerUsageRewards(address(programs), address(0), address(usageAccounting), programId);
+        vm.expectRevert(AntseedSellerPoolsRewards.InvalidAddress.selector);
+        new AntseedSellerPoolsRewards(address(gate), address(0), address(usageAccounting));
 
-        vm.expectRevert(AntseedSellerUsageRewards.InvalidAddress.selector);
-        new AntseedSellerUsageRewards(address(programs), address(sellerPools), address(0), programId);
+        vm.expectRevert(AntseedSellerPoolsRewards.InvalidAddress.selector);
+        new AntseedSellerPoolsRewards(address(gate), address(sellerPools), address(0));
 
-        vm.expectRevert(AntseedSellerUsageRewards.InvalidAddress.selector);
-        new AntseedSellerUsageRewards(address(programs), address(sellerPools), address(usageAccounting), bytes32(0));
-
-        vm.expectRevert(AntseedSellerUsageRewards.InvalidAddress.selector);
-        sellerUsageRewards.setEmissionsAuthority(address(0));
-        sellerUsageRewards.setEmissionsAuthority(address(programs));
-
-        sellerUsageRewards.setSellerPools(address(sellerPools));
-        assertEq(address(sellerUsageRewards.sellerPools()), address(sellerPools));
-
-        vm.expectRevert(AntseedSellerUsageRewards.InvalidAddress.selector);
-        sellerUsageRewards.setUsageAccounting(address(0));
-        sellerUsageRewards.setUsageAccounting(address(usageAccounting));
-
-        programs.setRewardProgram(programId, address(sellerUsageRewards), address(0), 7_000, 4, 0, true);
-        sellerUsageRewards.pause();
-        assertTrue(sellerUsageRewards.paused());
+        _setSellerPoolsMinter(address(sellerPoolsRewards));
+        sellerPoolsRewards.pause();
+        assertTrue(sellerPoolsRewards.paused());
         vm.expectRevert();
-        sellerUsageRewards.claimStakerRewards(1, seller);
-        sellerUsageRewards.unpause();
-        assertFalse(sellerUsageRewards.paused());
+        sellerPoolsRewards.claimStakerRewards(1, seller);
+        sellerPoolsRewards.unpause();
+        assertFalse(sellerPoolsRewards.paused());
     }
 
     function test_gateEffectiveEpochIsCurrentEpochPlusOneAtDeployment() public {

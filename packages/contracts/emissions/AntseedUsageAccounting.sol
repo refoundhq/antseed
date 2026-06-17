@@ -5,7 +5,7 @@ import "@openzeppelin/contracts/access/Ownable2Step.sol";
 import "@openzeppelin/contracts/utils/Pausable.sol";
 
 import { IAntseedPointsPolicy } from "../interfaces/IAntseedPointsPolicy.sol";
-import { IAntseedEmissionSchedule } from "../interfaces/IAntseedEmissionSchedule.sol";
+import { IAntseedEmissionsGate } from "../interfaces/IAntseedEmissionsGate.sol";
 import { IAntseedSellerPools } from "../interfaces/IAntseedSellerPools.sol";
 import { IAntseedUsageAccounting } from "../interfaces/IAntseedUsageAccounting.sol";
 
@@ -33,7 +33,7 @@ import { IAntseedUsageAccounting } from "../interfaces/IAntseedUsageAccounting.s
  *           - Usage against pools below `minimumAccountedPoolPower` is ignored.
  *             Pool points are not capped here. Reputation, verification, and
  *             wash-trading point shaping belongs in `pointsPolicy`; reward caps
- *             are applied by reward programs when claims mint.
+ *             are applied by reward controllers when claims mint.
  *           - Buyer rewards are weighted by the seller pool the buyer used, so
  *             buyer points from stronger pools carry more reward weight. Buyer
  *             points are not capped by that seller pool's total epoch volume.
@@ -46,7 +46,7 @@ import { IAntseedUsageAccounting } from "../interfaces/IAntseedUsageAccounting.s
  */
 contract AntseedUsageAccounting is IAntseedUsageAccounting, Ownable2Step, Pausable {
     // ─── External Contracts ──────────────────────────────────────────
-    IAntseedEmissionSchedule public immutable schedule;
+    IAntseedEmissionsGate public immutable emissionsGate;
     IAntseedSellerPools public sellerPools;
     IAntseedPointsPolicy public pointsPolicy;
     uint256 public minimumAccountedPoolPower = 1;
@@ -79,10 +79,10 @@ contract AntseedUsageAccounting is IAntseedUsageAccounting, Ownable2Step, Pausab
     }
 
     // ─── Constructor ─────────────────────────────────────────────────
-    constructor(address _sellerPools, address _initialRecorder, address _schedule) Ownable(msg.sender) {
-        if (_initialRecorder == address(0) || _schedule == address(0)) revert InvalidAddress();
+    constructor(address _sellerPools, address _initialRecorder, address _emissionsGate) Ownable(msg.sender) {
+        if (_initialRecorder == address(0) || _emissionsGate == address(0)) revert InvalidAddress();
 
-        schedule = IAntseedEmissionSchedule(_schedule);
+        emissionsGate = IAntseedEmissionsGate(_emissionsGate);
         sellerPools = IAntseedSellerPools(_sellerPools);
         usageRecorders[_initialRecorder] = true;
 
@@ -91,7 +91,7 @@ contract AntseedUsageAccounting is IAntseedUsageAccounting, Ownable2Step, Pausab
 
     // ─── Epoch Helpers ────────────────────────────────────────────────
     function currentEpoch() public view returns (uint256) {
-        return schedule.currentEpoch();
+        return emissionsGate.currentEpoch();
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -379,7 +379,9 @@ contract AntseedUsageAccounting is IAntseedUsageAccounting, Ownable2Step, Pausab
         // A broken or reverting policy must not block settlement. Skip the
         // usage record (no emissions credit) rather than bubbling the revert
         // into AntseedChannels' settle path.
-        try policy.points(channelId, buyer, seller, rawPoints) returns (uint256 policySellerPoints, uint256 policyBuyerPoints) {
+        try policy.points(channelId, buyer, seller, rawPoints) returns (
+            uint256 policySellerPoints, uint256 policyBuyerPoints
+        ) {
             return (policySellerPoints, policyBuyerPoints);
         } catch {
             emit PointsPolicyFailed(channelId, buyer, seller, rawPoints);

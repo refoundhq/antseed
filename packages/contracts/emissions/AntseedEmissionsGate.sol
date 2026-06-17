@@ -5,93 +5,157 @@ import "@openzeppelin/contracts/access/Ownable2Step.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 import { IANTSToken } from "../interfaces/IANTSToken.sol";
+import { IAntseedEmissionsGate } from "../interfaces/IAntseedEmissionsGate.sol";
 
 /**
  * @title AntseedEmissionsGate
- * @notice Canonical ANTS mint authority and immutable emission schedule.
+ * @notice Canonical ANTS mint authority and immutable emission curve.
  *
- *         ANTSToken should point its registry reference at this contract, not
- *         the global AntseedRegistry. This contract exposes `emissions()` as
- *         address(this), so ANTSToken's existing mint authorization resolves to
- *         the gate itself.
- *
- *         Important behavior:
- *           - The weekly emission amount, epoch duration, halving interval,
- *             genesis, and effective epoch are immutable.
- *           - Program shares, program controllers, and program budgets are not
- *             stored here. They live in a separate program controller contract.
- *           - The program controller can be bound once through
- *             `setEmissionController`; after that it cannot be changed.
- *           - Epochs before `effectiveEpoch` are legacy-claim epochs. They can
- *             mint through programs until legacy epoch minting is disabled.
+ *         Each controller address owns one minter id:
+ *         keccak256(abi.encode(controller)). The id controls that controller's
+ *         epoch share and minted amount.
  */
-contract AntseedEmissionsGate is Ownable2Step, ReentrancyGuard {
-    // ─── Fixed Mainnet Configuration ────────────────────────────────
+contract AntseedEmissionsGate is IAntseedEmissionsGate, Ownable2Step, ReentrancyGuard {
     address public constant ANTS_TOKEN = 0xa87EE81b2C0Bc659307ca2D9ffdC38514DD85263;
     uint256 public constant GENESIS = 1_775_728_461;
     uint256 public constant EPOCH_DURATION = 7 days;
     uint256 public constant HALVING_INTERVAL = 104;
     uint256 public constant INITIAL_EMISSION = 5_000_000e18;
+    uint256 public constant BPS_DENOMINATOR = 100_000;
 
-    // ─── External Contracts ──────────────────────────────────────────
-    IANTSToken public immutable antsToken;
+    IANTSToken private immutable _antsToken;
 
-    // ─── Emission Schedule ───────────────────────────────────────────
-    address public emissionController;
     uint256 public immutable effectiveEpoch;
     bool public legacyEpochMintsDisabled;
-    mapping(uint256 => uint256) public epochScheduleMinted;
+    mapping(uint256 epoch => uint256 amount) public epochMinted;
 
-    // ─── Events ──────────────────────────────────────────────────────
-    event EmissionControllerSet(address indexed controller);
+    address public legacyEmissionsMinter;
+    address public legacyDeposits;
+    uint32 public totalMinterShareBps;
+    mapping(bytes32 minterId => Minter config) public minters;
+    mapping(bytes32 minterId => mapping(uint256 epoch => uint256 amount)) public minterEpochMinted;
+
     event LegacyEpochMintsDisabled();
-    event ScheduleEmissionMinted(
-        address indexed controller, address indexed recipient, uint256 indexed epoch, uint256 amount
+    event EmissionMinted(
+        bytes32 indexed minterId, address indexed controller, address indexed recipient, uint256 epoch, uint256 amount
     );
+    event EmissionClaimed(
+        bytes32 indexed minterId, address indexed controller, address indexed recipient, uint256 epoch, uint256 amount
+    );
+    event MinterSet(bytes32 indexed minterId, address indexed controller, uint32 shareBps, bool editable);
+    event MinterRemoved(bytes32 indexed minterId, address indexed controller);
+    event LegacyClaimsConfigSet(address indexed minter, address indexed deposits);
+    event LegacyEmissionMinted(address indexed recipient, uint256 amount);
 
-    // ─── Custom Errors ───────────────────────────────────────────────
     error InvalidAddress();
     error InvalidValue();
     error EpochNotFinalized();
-    error NotEmissionController();
-    error EmissionControllerAlreadySet();
+    error NotEmissionMinter();
+    error NotLegacyEmissionsMinter();
+    error MinterNotEditable();
+    error BucketBudgetExceeded();
     error EpochEmissionExceeded();
     error LegacyEpochMintingDisabled();
     error LegacyEpochMintsStillEnabled();
+    error MintersNotSet();
+    error LegacyClaimsNotConfigured();
 
-    // ─── Constructor ─────────────────────────────────────────────────
     constructor() Ownable(msg.sender) {
-        antsToken = IANTSToken(ANTS_TOKEN);
+        _antsToken = IANTSToken(ANTS_TOKEN);
         uint256 epoch = block.timestamp <= GENESIS ? 0 : (block.timestamp - GENESIS) / EPOCH_DURATION;
         effectiveEpoch = epoch + 1;
     }
 
     // ═══════════════════════════════════════════════════════════════════
-    //                        TOKEN AUTH COMPATIBILITY
+    //                        TOKEN AUTH FACADE
     // ═══════════════════════════════════════════════════════════════════
 
     function emissions() external view returns (address) {
         return address(this);
     }
 
+    function antsToken() external view returns (address) {
+        return address(this);
+    }
+
+    function actualAntsToken() external pure returns (address) {
+        return ANTS_TOKEN;
+    }
+
+    function channels() external pure returns (address) {
+        return address(0);
+    }
+
+    function deposits() external view returns (address) {
+        return legacyDeposits;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //                        OWNER CONFIGURATION
+    // ═══════════════════════════════════════════════════════════════════
+
+    function setMinter(address controller, uint32 shareBps, bool editable) external onlyOwner {
+        _setMinter(controller, shareBps, editable);
+    }
+
+    function removeMinter(address controller) external onlyOwner {
+        _removeMinter(controller);
+    }
+
+    function setLegacyClaimsConfig(address minter, address deposits_) external onlyOwner {
+        if (minter == address(0) || deposits_ == address(0)) revert InvalidAddress();
+        legacyEmissionsMinter = minter;
+        legacyDeposits = deposits_;
+        emit LegacyClaimsConfigSet(minter, deposits_);
+    }
+
     // ═══════════════════════════════════════════════════════════════════
     //                        CORE — MINTING
     // ═══════════════════════════════════════════════════════════════════
 
-    function mintScheduleEmission(uint256 epoch, address recipient, uint256 amount) external nonReentrant {
-        if (msg.sender != emissionController) revert NotEmissionController();
-        if (epoch >= currentEpoch()) revert EpochNotFinalized();
-        if (epoch < effectiveEpoch && legacyEpochMintsDisabled) revert LegacyEpochMintingDisabled();
-        uint256 minted = epochScheduleMinted[epoch] + amount;
-        if (minted > getEpochEmission(epoch)) revert EpochEmissionExceeded();
-        epochScheduleMinted[epoch] = minted;
-        _mint(recipient, amount);
-        emit ScheduleEmissionMinted(msg.sender, recipient, epoch, amount);
+    function mint(uint256 epoch, address recipient, uint256 amount) external nonReentrant {
+        bytes32 id = minterId(msg.sender);
+        _requireConfiguredMinter(id, msg.sender);
+        _mintFromMinter(id, msg.sender, epoch, recipient, amount);
+    }
+
+    function claim(uint256 epoch) external nonReentrant {
+        bytes32 id = minterId(msg.sender);
+        Minter memory minter = _requireConfiguredMinter(id, msg.sender);
+        uint256 amount = minterEpochBudget(msg.sender, epoch) - minterEpochMinted[id][epoch];
+        if (amount == 0) revert InvalidValue();
+
+        _mintFromMinter(id, msg.sender, epoch, minter.controller, amount);
+        emit EmissionClaimed(id, msg.sender, minter.controller, epoch, amount);
+    }
+
+    function mint(address recipient, uint256 amount) external nonReentrant {
+        if (msg.sender != legacyEmissionsMinter) revert NotLegacyEmissionsMinter();
+        if (recipient == address(0)) revert InvalidAddress();
+        if (amount == 0) revert InvalidValue();
+
+        _antsToken.mint(recipient, amount);
+        emit LegacyEmissionMinted(recipient, amount);
     }
 
     // ═══════════════════════════════════════════════════════════════════
     //                        VIEWS
     // ═══════════════════════════════════════════════════════════════════
+
+    function minterId(address controller) public pure returns (bytes32) {
+        if (controller == address(0)) revert InvalidAddress();
+        return keccak256(abi.encode(controller));
+    }
+
+    function minterConfig(address controller) external view returns (Minter memory) {
+        return minters[minterId(controller)];
+    }
+
+    function minterEpochBudget(address controller, uint256 epoch) public view returns (uint256) {
+        Minter memory minter = minters[minterId(controller)];
+        if (minter.controller == address(0)) return 0;
+        return _shareBudget(epoch, minter.shareBps);
+    }
 
     function currentEpoch() public view returns (uint256) {
         if (block.timestamp <= GENESIS) return 0;
@@ -126,23 +190,15 @@ contract AntseedEmissionsGate is Ownable2Step, ReentrancyGuard {
     //                        ONE-TIME WIRING
     // ═══════════════════════════════════════════════════════════════════
 
-    function setEmissionController(address controller) external onlyOwner {
-        if (controller == address(0)) revert InvalidAddress();
-        if (emissionController != address(0)) revert EmissionControllerAlreadySet();
-        emissionController = controller;
-        emit EmissionControllerSet(controller);
-    }
-
     function disableLegacyEpochMints() external onlyOwner {
         if (legacyEpochMintsDisabled) revert LegacyEpochMintingDisabled();
         legacyEpochMintsDisabled = true;
         emit LegacyEpochMintsDisabled();
     }
 
-    /// @notice Renouncing with the legacy-epoch window still open would leave
-    ///         pre-effective epochs (already emitted by the legacy contracts)
-    ///         re-mintable forever. Close the window first.
     function renounceOwnership() public override onlyOwner {
+        if (totalMinterShareBps != BPS_DENOMINATOR) revert MintersNotSet();
+        if (legacyEmissionsMinter == address(0) || legacyDeposits == address(0)) revert LegacyClaimsNotConfigured();
         if (!legacyEpochMintsDisabled) revert LegacyEpochMintsStillEnabled();
         super.renounceOwnership();
     }
@@ -151,9 +207,67 @@ contract AntseedEmissionsGate is Ownable2Step, ReentrancyGuard {
     //                        INTERNAL HELPERS
     // ═══════════════════════════════════════════════════════════════════
 
-    function _mint(address to, uint256 amount) internal {
-        if (to == address(0)) revert InvalidAddress();
+    function _setMinter(address controller, uint32 shareBps, bool editable) internal {
+        if (controller == address(0)) revert InvalidAddress();
+        if (shareBps == 0) revert InvalidValue();
+
+        bytes32 id = minterId(controller);
+        Minter memory existing = minters[id];
+        if (existing.controller != address(0) && !existing.editable) revert MinterNotEditable();
+
+        uint32 previousShareBps = existing.controller == address(0) ? 0 : existing.shareBps;
+        uint32 nextTotalMinterShareBps = totalMinterShareBps - previousShareBps + shareBps;
+        if (nextTotalMinterShareBps > BPS_DENOMINATOR) revert InvalidValue();
+
+        totalMinterShareBps = nextTotalMinterShareBps;
+        minters[id] = Minter({ controller: controller, shareBps: shareBps, editable: editable });
+        emit MinterSet(id, controller, shareBps, editable);
+    }
+
+    function _removeMinter(address controller) internal {
+        if (controller == address(0)) revert InvalidAddress();
+
+        bytes32 id = minterId(controller);
+        Minter memory existing = minters[id];
+        if (existing.controller == address(0)) revert NotEmissionMinter();
+        if (!existing.editable) revert MinterNotEditable();
+
+        totalMinterShareBps -= existing.shareBps;
+        delete minters[id];
+        emit MinterRemoved(id, controller);
+    }
+
+    function _requireConfiguredMinter(bytes32 id, address controller) internal view returns (Minter memory minter) {
+        minter = minters[id];
+        if (minter.controller != controller) revert NotEmissionMinter();
+    }
+
+    function _mintFromMinter(bytes32 id, address controller, uint256 epoch, address recipient, uint256 amount) internal {
+        Minter memory minter = minters[id];
+        if (minter.controller == address(0)) revert NotEmissionMinter();
+        if (recipient == address(0)) revert InvalidAddress();
         if (amount == 0) revert InvalidValue();
-        antsToken.mint(to, amount);
+
+        uint256 newMinterMinted = minterEpochMinted[id][epoch] + amount;
+        if (newMinterMinted > _shareBudget(epoch, minter.shareBps)) revert BucketBudgetExceeded();
+        minterEpochMinted[id][epoch] = newMinterMinted;
+
+        _mintEmission(id, controller, epoch, recipient, amount);
+    }
+
+    function _mintEmission(bytes32 id, address controller, uint256 epoch, address recipient, uint256 amount) internal {
+        if (epoch >= currentEpoch()) revert EpochNotFinalized();
+        if (epoch < effectiveEpoch && legacyEpochMintsDisabled) revert LegacyEpochMintingDisabled();
+
+        uint256 minted = epochMinted[epoch] + amount;
+        if (minted > getEpochEmission(epoch)) revert EpochEmissionExceeded();
+        epochMinted[epoch] = minted;
+
+        _antsToken.mint(recipient, amount);
+        emit EmissionMinted(id, controller, recipient, epoch, amount);
+    }
+
+    function _shareBudget(uint256 epoch, uint32 shareBps) internal pure returns (uint256) {
+        return (getEpochEmission(epoch) * shareBps) / BPS_DENOMINATOR;
     }
 }
