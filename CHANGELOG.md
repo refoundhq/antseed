@@ -6,12 +6,17 @@ This project uses selective package publishing. Each release entry lists the pub
 
 ## Unreleased
 
+### Published
+
+- `@antseed/node`
+
 ### Changed
 
 - Reduced the default buyer response-auth evidence sample rate from 20% to 0.5% to limit local `verification_samples` growth during high-request sessions.
 
 ### Fixed
 
+- Fixed buyer response-auth timeout warnings for non-inference probes and sellers that do not advertise response-auth support.
 - Fixed buyer discovery so temporarily unreachable metadata endpoints are probed for recovery before the full exponential cooldown expires, allowing recovered peers to reappear in buyer peer lists sooner.
 
 ## 2026-06-15 — Buyer peer failure accounting and desktop stream responsiveness
