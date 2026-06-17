@@ -17,6 +17,7 @@ import type { VerificationStorage } from "./verification/storage.js";
 import type { VerificationSampler } from "./verification/samples.js";
 import { verifyResponseAuth } from "./verification/response-auth.js";
 import { tryParseJsonObject } from "./utils/json-codec.js";
+import { CONNECTION_CAPABILITY_RESPONSE_AUTH_V1 } from "./types/protocol.js";
 
 export interface RequestStreamResponseMetadata {
   streaming: boolean;
@@ -330,6 +331,10 @@ export class BuyerRequestHandler {
     requestedService: string | undefined,
     verificationMux: VerificationMux,
   ): void {
+    if (!shouldExpectResponseAuth(peer, response, requestedService)) {
+      return;
+    }
+
     const storage = this._deps.verificationStorage;
     const advertisedService = requestedService ?? 'unknown';
     const expectedChannelId = this._deps.negotiator?.bpm?.getActiveSession(peer.peerId)?.sessionId ?? null;
@@ -393,6 +398,16 @@ function stripStreamingHeader(response: SerializedHttpResponse): SerializedHttpR
   const headers = { ...response.headers };
   delete headers[ANTSEED_STREAMING_RESPONSE_HEADER];
   return { ...response, headers };
+}
+
+function shouldExpectResponseAuth(
+  peer: PeerInfo,
+  response: SerializedHttpResponse,
+  requestedService: string | undefined,
+): boolean {
+  if (!requestedService) return false;
+  if (response.statusCode === 402) return false;
+  return peer.capabilities?.includes(CONNECTION_CAPABILITY_RESPONSE_AUTH_V1) === true;
 }
 
 function concatChunks(chunks: Uint8Array[]): Uint8Array {

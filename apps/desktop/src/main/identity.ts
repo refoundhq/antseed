@@ -4,7 +4,7 @@
 
 import { safeStorage } from 'electron';
 import { randomBytes } from 'node:crypto';
-import { readFile, writeFile, mkdir, unlink, rename } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, unlink, rename, copyFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import type { Identity } from '@antseed/node';
@@ -32,13 +32,42 @@ function identityFromHex(hex: string): Identity {
   return identityFromPrivateKeyHex(hex);
 }
 
-async function loadEncryptedIdentity(): Promise<string | null> {
+// Returned when identity.enc exists but cannot be decrypted with the current
+// safeStorage key. On macOS, safeStorage's encryption key lives in a keychain
+// entry named after the app's productName ("<productName> Safe Storage"), so a
+// rename of the app rotates the key and makes a previously-written identity.enc
+// undecryptable. This MUST be distinguished from "file absent" — treating it as
+// absent and creating a fresh identity would silently destroy the signer key.
+const UNDECRYPTABLE = Symbol('undecryptable-identity');
+
+async function loadEncryptedIdentity(): Promise<string | null | typeof UNDECRYPTABLE> {
+  let encrypted: Buffer;
   try {
-    const encrypted = await readFile(ENCRYPTED_IDENTITY_PATH);
+    encrypted = await readFile(ENCRYPTED_IDENTITY_PATH);
+  } catch {
+    return null; // No file — safe to migrate/create fresh.
+  }
+  try {
     const decrypted = safeStorage.decryptString(encrypted);
     const trimmed = decrypted.trim();
+    // An empty-but-decryptable file holds no key, so it is safe to overwrite.
     return trimmed.length > 0 ? trimmed : null;
   } catch {
+    // File present but undecryptable. Do NOT overwrite blindly.
+    return UNDECRYPTABLE;
+  }
+}
+
+// Preserve an undecryptable identity.enc before it gets overwritten, so the
+// original ciphertext can still be recovered later (e.g. by restoring the
+// original productName, which brings back the matching keychain key).
+async function backupUndecryptableIdentity(): Promise<string | null> {
+  const backupPath = `${ENCRYPTED_IDENTITY_PATH}.bak-${Date.now()}`;
+  try {
+    await copyFile(ENCRYPTED_IDENTITY_PATH, backupPath);
+    return backupPath;
+  } catch (err) {
+    console.error(`[desktop] Failed to back up undecryptable identity: ${err instanceof Error ? err.message : String(err)}`);
     return null;
   }
 }
@@ -77,6 +106,21 @@ export async function ensureSecureIdentity(): Promise<void> {
 
       // 1. Try loading from encrypted store
       const encHex = await loadEncryptedIdentity();
+      if (encHex === UNDECRYPTABLE) {
+        // identity.enc exists but cannot be decrypted with the current key.
+        // Back it up (so the original signer is recoverable) and refuse to
+        // silently rotate the wallet by overwriting it. Leave secureIdentity
+        // null so the failure is surfaced rather than masked by a fresh key.
+        const backup = await backupUndecryptableIdentity();
+        console.error(
+          `[desktop] identity at ${ENCRYPTED_IDENTITY_PATH} could not be decrypted with the current safeStorage key. ` +
+          `This usually means the app's productName changed, which rotates the macOS keychain key. ` +
+          `Refusing to overwrite it to avoid destroying the signer.` +
+          (backup ? ` A copy was saved to ${backup}.` : '') +
+          ` Restore the original productName (or a matching identity.enc) to recover the original signer.`
+        );
+        return;
+      }
       if (encHex) {
         secureIdentity = identityFromHex(encHex);
         console.log(`[desktop] secure identity loaded from encrypted store: ${secureIdentity.peerId.slice(0, 12)}...`);

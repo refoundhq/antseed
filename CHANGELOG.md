@@ -8,11 +8,22 @@ This project uses selective package publishing. Each release entry lists the pub
 
 ### Published
 
+- `@antseed/cli`
 - `@antseed/node`
+
+### Removed
+
+- Removed the legacy subpool/subscription payment surface, including the `antseed buyer subscribe` command, subpool payment client/config exports, and the `AntseedSubPool` contract deployment path.
+
+### Changed
+
+- Reduced the default buyer response-auth evidence sample rate from 20% to 0.5% to limit local `verification_samples` growth during high-request sessions.
 
 ### Fixed
 
 - Fixed buyer payment authorization catch-up so expensive or concurrent paid requests send updated spending authorization promptly instead of surfacing avoidable payment-required responses.
+- Fixed buyer response-auth timeout warnings for non-inference probes and sellers that do not advertise response-auth support.
+- Fixed buyer discovery so temporarily unreachable metadata endpoints are probed for recovery before the full exponential cooldown expires, allowing recovered peers to reappear in buyer peer lists sooner.
 
 ## 2026-06-15 — Buyer peer failure accounting and desktop stream responsiveness
 
