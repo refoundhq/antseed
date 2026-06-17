@@ -247,19 +247,7 @@ Reserve and team shares accumulate in the contract until flushed by owner:
 
 This ensures sellers and buyers do not lose historical points during the upgrade.
 
-## 9. Subscription Pool
-
-Separate contract (`AntseedSubPool`) managing subscription-based access. Evolves independently from the core deposits/channels/proof system.
-
-- `subscribe(tier)` — buyer pays monthly fee in USDC
-- `cancelSubscription()` — stops at end of current period
-- `setTier(tierId, monthlyFee, dailyTokenBudget)` — owner configures tiers
-- `optIn(agentId)` / `optOut(agentId)` — peers opt in/out of serving subscribers (requires ERC-8004 agentId)
-- `claimRevenue(agentId)` — peer claims share proportional to stats
-- `distributionEpoch()` — callable by anyone, distributes current epoch revenue
-- Daily token budget enforcement per subscriber
-
-## 10. Contract Architecture
+## 9. Contract Architecture
 
 ```
 ANTSToken (ERC-20)              ── mint restricted to AntseedEmissionsV2
@@ -270,7 +258,6 @@ AntseedStats                    ── factual per-agent session metrics
 AntseedEmissionsV2              ── USDC volume-based epoch emissions (backward-compatible with V1)
 AntseedSellerRewardsPool        ── holds locked ANTS for sellers pending unlock policy
 AntseedSellerUnlockPolicy       ── on-chain policy determining if seller can claim unlocked
-AntseedSubPool                  ── subscription tiers, daily budgets, revenue distribution
 MockERC8004Registry             ── local testing only (mainnet: deployed ERC-8004)
 ```
 

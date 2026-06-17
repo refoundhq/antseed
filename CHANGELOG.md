@@ -8,7 +8,12 @@ This project uses selective package publishing. Each release entry lists the pub
 
 ### Published
 
+- `@antseed/cli`
 - `@antseed/node`
+
+### Removed
+
+- Removed the legacy subpool/subscription payment surface, including the `antseed buyer subscribe` command, subpool payment client/config exports, and the `AntseedSubPool` contract deployment path.
 
 ### Changed
 
