@@ -633,6 +633,28 @@ contract AntseedSellerPools is IAntseedSellerPools, ERC721, Ownable2Step, Reentr
         return _positionMaxLockPower[positionId].upperLookupRecent(epoch);
     }
 
+    function positionPowerSegmentAt(uint256 positionId, uint256 epoch)
+        public
+        view
+        returns (uint256 normalEndEpoch, uint256 maxLockPower, uint256 nextChangeEpoch)
+    {
+        Position memory position = positions[positionId];
+        if (position.owner == address(0)) revert InvalidPosition();
+        if (position.closedAtEpoch != 0 && epoch >= position.closedAtEpoch) {
+            return (0, 0, position.closedAtEpoch);
+        }
+
+        normalEndEpoch = _positionNormalEndEpoch[positionId].upperLookupRecent(epoch);
+        maxLockPower = _positionMaxLockPower[positionId].upperLookupRecent(epoch);
+
+        uint256 nextNormalChange = _nextCheckpointKeyAfter(_positionNormalEndEpoch[positionId], epoch);
+        uint256 nextMaxLockChange = _nextCheckpointKeyAfter(_positionMaxLockPower[positionId], epoch);
+        nextChangeEpoch = nextNormalChange < nextMaxLockChange ? nextNormalChange : nextMaxLockChange;
+        if (position.closedAtEpoch != 0 && position.closedAtEpoch < nextChangeEpoch) {
+            nextChangeEpoch = position.closedAtEpoch;
+        }
+    }
+
     function positionRewardCapAtEpoch(uint256 positionId, uint256 epoch) public view returns (uint256) {
         Position memory position = positions[positionId];
         if (position.owner == address(0)) revert InvalidPosition();
@@ -1068,6 +1090,25 @@ contract AntseedSellerPools is IAntseedSellerPools, ERC721, Ownable2Step, Reentr
 
     function _totalMaxLockPowerAtEpoch(uint256 epoch) internal view returns (uint256) {
         return _totalMaxLockWeightAmount.upperLookupRecent(epoch) * maxStakeEpochs;
+    }
+
+    function _nextCheckpointKeyAfter(Checkpoints.Trace256 storage trace, uint256 epoch)
+        internal
+        view
+        returns (uint256)
+    {
+        uint256 low;
+        uint256 high = trace.length();
+        while (low < high) {
+            uint256 mid = (low + high) / 2;
+            if (trace.at(uint32(mid))._key <= epoch) {
+                low = mid + 1;
+            } else {
+                high = mid;
+            }
+        }
+        if (low == trace.length()) return type(uint256).max;
+        return trace.at(uint32(low))._key;
     }
 
     function _applyMaxLockWeightAmount(uint256 agentId, uint256 epoch, uint256 amount, bool add) internal {

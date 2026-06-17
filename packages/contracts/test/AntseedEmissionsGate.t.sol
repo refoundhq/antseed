@@ -273,8 +273,9 @@ contract AntseedEmissionsGateTest is Test {
         assertEq(claimableReward, expectedStakerClaim);
         assertEq(burnedReward, 0);
 
+        sellerUsageRewards.indexPoolRewards(_agentId(poolSeller), 10);
         vm.prank(staker);
-        sellerUsageRewards.claimStakerRewards(positionId, _epochList(5), staker);
+        sellerUsageRewards.claimStakerRewards(positionId, staker);
         assertEq(token.balanceOf(staker), 900 ether + expectedStakerClaim);
     }
 
@@ -303,12 +304,13 @@ contract AntseedEmissionsGateTest is Test {
         _warpGateEpoch(6);
         uint256 expectedStakerClaim = (_programBudget(7_000, 5) * 400 ether) / 404 ether;
 
+        sellerUsageRewards.indexPoolRewards(_agentId(poolSeller), 10);
         vm.prank(staker);
         vm.expectRevert(AntseedSellerUsageRewards.NotPositionOwner.selector);
-        sellerUsageRewards.claimStakerRewards(positionId, _epochList(5), staker);
+        sellerUsageRewards.claimStakerRewards(positionId, staker);
 
         vm.prank(operator);
-        sellerUsageRewards.claimStakerRewards(positionId, _epochList(5), operator);
+        sellerUsageRewards.claimStakerRewards(positionId, operator);
         assertEq(token.balanceOf(operator), expectedStakerClaim);
     }
 
@@ -339,8 +341,9 @@ contract AntseedEmissionsGateTest is Test {
         vm.prank(staker);
         sellerPools.withdrawStake(positionId);
 
+        sellerUsageRewards.indexPoolRewards(_agentId(poolSeller), 10);
         vm.prank(staker);
-        sellerUsageRewards.claimStakerRewards(positionId, _epochList(5), staker);
+        sellerUsageRewards.claimStakerRewards(positionId, staker);
         assertEq(token.balanceOf(staker), 900 ether + 75 ether + expectedStakerClaim);
     }
 
@@ -373,8 +376,9 @@ contract AntseedEmissionsGateTest is Test {
         vm.prank(staker);
         sellerPools.moveStake(positionId, _agentId(otherSeller));
 
+        sellerUsageRewards.indexPoolRewards(_agentId(poolSeller), 10);
         vm.prank(staker);
-        sellerUsageRewards.claimStakerRewards(positionId, _epochList(5), staker);
+        sellerUsageRewards.claimStakerRewards(positionId, staker);
         assertEq(token.balanceOf(staker), 900 ether + expectedStakerClaim);
     }
 
@@ -452,6 +456,96 @@ contract AntseedEmissionsGateTest is Test {
         assertEq(normalGross, (expectedBudget * normalPower) / (maxLockPower + normalPower));
     }
 
+    function test_sellerUsageRewardsIndexedClaimUsesCursor() public {
+        bytes32 programId = keccak256("recognized-seller-usage-v1");
+        _deployGate(4);
+
+        sellerPools = new AntseedSellerPools(address(realRegistry), 0, 0, 0);
+        usageAccounting.setSellerPools(address(sellerPools));
+        sellerUsageRewards =
+            new AntseedSellerUsageRewards(address(programs), address(sellerPools), address(usageAccounting), programId);
+        programs.setRewardProgram(programId, address(sellerUsageRewards), address(0), 7_000, 4, 0, true);
+
+        address poolSeller = _createSellerPool(sellerPools, seller, 5_000, keccak256("terms"));
+
+        vm.startPrank(staker);
+        token.approve(address(sellerPools), 100 ether);
+        uint256 positionId = sellerPools.stake(_agentId(poolSeller), 100 ether, 4);
+        vm.stopPrank();
+
+        _warpGateEpoch(5);
+        usageAccounting.accrueSellerPoints(seller, 100);
+        usageAccounting.accrueBuyerPoints(buyer, 100);
+
+        _warpGateEpoch(6);
+        uint256 expectedClaim = (_programBudget(7_000, 5) * 400 ether) / 404 ether;
+
+        sellerUsageRewards.indexPoolRewards(_agentId(poolSeller), 10);
+        assertEq(sellerUsageRewards.poolRewardIndexNextEpoch(_agentId(poolSeller)), 6);
+        assertEq(sellerUsageRewards.pendingIndexedStakerReward(positionId), expectedClaim);
+
+        vm.prank(staker);
+        sellerUsageRewards.claimStakerRewards(positionId, staker);
+
+        assertEq(token.balanceOf(staker), 900 ether + expectedClaim);
+        assertEq(sellerUsageRewards.positionClaimCursor(positionId), 6);
+
+        vm.expectRevert(AntseedSellerUsageRewards.NothingToClaim.selector);
+        vm.prank(staker);
+        sellerUsageRewards.claimStakerRewards(positionId, staker);
+    }
+
+    function test_sellerUsageRewardsIndexedClaimUsesExtendedLockSegments() public {
+        bytes32 programId = keccak256("recognized-seller-usage-v1");
+        _deployGate(4);
+
+        sellerPools = new AntseedSellerPools(address(realRegistry), 0, 0, 0);
+        usageAccounting.setSellerPools(address(sellerPools));
+        sellerUsageRewards =
+            new AntseedSellerUsageRewards(address(programs), address(sellerPools), address(usageAccounting), programId);
+        programs.setRewardProgram(programId, address(sellerUsageRewards), address(0), 7_000, 4, 0, true);
+
+        uint256 agentId = _agentId(seller);
+        sellerAgentLookup.setAgent(seller, agentId);
+
+        vm.startPrank(staker);
+        token.approve(address(sellerPools), 200 ether);
+        uint256 extendedPositionId = sellerPools.stake(agentId, 100 ether, 4);
+        uint256 normalPositionId = sellerPools.stake(agentId, 100 ether, 4);
+        vm.stopPrank();
+
+        _warpGateEpoch(5);
+        usageAccounting.accrueSellerPoints(seller, 100);
+        usageAccounting.accrueBuyerPoints(buyer, 100);
+
+        vm.prank(staker);
+        sellerPools.extendLock(extendedPositionId, 3);
+
+        _warpGateEpoch(6);
+        usageAccounting.accrueSellerPoints(seller, 100);
+        usageAccounting.accrueBuyerPoints(buyer, 100);
+
+        _warpGateEpoch(7);
+        sellerUsageRewards.indexPoolRewards(agentId, 10);
+
+        uint256 epoch5Budget = _programBudget(7_000, 5);
+        uint256 epoch6Budget = _programBudget(7_000, 6);
+        uint256 expectedClaim = (epoch5Budget * 400 ether) / 800 ether + (epoch6Budget * 600 ether) / 900 ether;
+
+        assertEq(sellerUsageRewards.pendingIndexedStakerReward(extendedPositionId), expectedClaim);
+
+        vm.prank(staker);
+        sellerUsageRewards.claimStakerRewards(extendedPositionId, staker);
+
+        assertEq(token.balanceOf(staker), 800 ether + expectedClaim);
+        assertEq(sellerUsageRewards.positionClaimCursor(extendedPositionId), 7);
+
+        (uint256 normalEpoch5Gross,,) = sellerUsageRewards.pendingStakerReward(normalPositionId, 5);
+        (uint256 normalEpoch6Gross,,) = sellerUsageRewards.pendingStakerReward(normalPositionId, 6);
+        assertEq(normalEpoch5Gross, (epoch5Budget * 400 ether) / 800 ether);
+        assertEq(normalEpoch6Gross, (epoch6Budget * 300 ether) / 900 ether);
+    }
+
     function test_sellerUsageProgramDoesNotClaimWithoutWeightedPoints() public {
         bytes32 programId = keccak256("recognized-seller-usage-v1");
         _deployGate(5);
@@ -467,7 +561,7 @@ contract AntseedEmissionsGateTest is Test {
 
         vm.expectRevert(AntseedSellerUsageRewards.NothingToClaim.selector);
         vm.prank(seller);
-        sellerUsageRewards.claimStakerRewards(positionId, _epochList(4), seller);
+        sellerUsageRewards.claimStakerRewards(positionId, seller);
     }
 
     function test_gateFixedScheduleAndAdminValidation() public {
@@ -900,10 +994,12 @@ contract AntseedEmissionsGateTest is Test {
         assertGt(overCapReward, burnCap);
         assertEq(burnedReward, burnCap);
 
+        sellerUsageRewards.indexPoolRewards(_agentId(otherSeller), 10);
+        uint256 indexedClaimableReward = sellerUsageRewards.pendingIndexedStakerReward(positionId);
         vm.prank(otherSeller);
-        sellerUsageRewards.claimStakerRewards(positionId, _epochList(5), otherSeller);
+        sellerUsageRewards.claimStakerRewards(positionId, otherSeller);
 
-        assertEq(token.balanceOf(otherSeller), claimableReward);
+        assertEq(token.balanceOf(otherSeller), indexedClaimableReward);
         assertEq(token.balanceOf(sellerUsageRewards.DEAD_ADDRESS()), burnCap);
         assertEq(token.balanceOf(reserveDest), overCapReward - burnCap);
         assertEq(sellerUsageRewards.epochBurnedAmount(5), burnCap);
@@ -1102,10 +1198,14 @@ contract AntseedEmissionsGateTest is Test {
             assertLt(washClaimable, washGross);
         }
 
+        sellerUsageRewards.indexPoolRewards(firstAgentId, 10);
+        run.firstClaimable = sellerUsageRewards.pendingIndexedStakerReward(run.firstPositionId);
         vm.prank(firstSeller);
-        sellerUsageRewards.claimStakerRewards(run.firstPositionId, _epochList(5), firstSeller);
+        sellerUsageRewards.claimStakerRewards(run.firstPositionId, firstSeller);
+        sellerUsageRewards.indexPoolRewards(washAgentId, 10);
+        run.washClaimable = sellerUsageRewards.pendingIndexedStakerReward(run.washPositionId);
         vm.prank(washSeller);
-        sellerUsageRewards.claimStakerRewards(run.washPositionId, _epochList(5), washSeller);
+        sellerUsageRewards.claimStakerRewards(run.washPositionId, washSeller);
         assertEq(token.balanceOf(firstSeller), run.firstClaimable);
         assertEq(token.balanceOf(washSeller), run.washClaimable);
         assertLe(token.balanceOf(sellerUsageRewards.DEAD_ADDRESS()), sellerUsageRewards.burnCapForEpoch(5));
@@ -1391,8 +1491,9 @@ contract AntseedEmissionsGateTest is Test {
 
         _warpGateEpoch(6);
         sellerOperatorUsageRewards.claimSellerReward(seller, 5);
+        sellerUsageRewards.indexPoolRewards(_agentId(seller), 10);
         vm.prank(seller);
-        sellerUsageRewards.claimStakerRewards(positionId, _epochList(5), seller);
+        sellerUsageRewards.claimStakerRewards(positionId, seller);
 
         uint256 expectedOperatorReward = (_programBudget(500, 5) * sellerOperatorUsageRewards.MAX_REWARD_SHARE_BPS())
             / sellerOperatorUsageRewards.BPS_DENOMINATOR();
@@ -1581,13 +1682,14 @@ contract AntseedEmissionsGateTest is Test {
         usageAccounting.accrueBuyerPoints(buyer, 10);
 
         _warpGateEpoch(6);
+        sellerUsageRewards.indexPoolRewards(_agentId(seller), 10);
         vm.prank(seller);
-        sellerUsageRewards.claimStakerRewards(positionId, _epochList(5), seller);
+        sellerUsageRewards.claimStakerRewards(positionId, seller);
         assertEq(token.balanceOf(seller), _programBudget(7_000, 5));
 
         vm.expectRevert(AntseedSellerUsageRewards.NothingToClaim.selector);
         vm.prank(seller);
-        sellerUsageRewards.claimStakerRewards(positionId, _epochList(5), seller);
+        sellerUsageRewards.claimStakerRewards(positionId, seller);
 
         vm.expectRevert(AntseedSellerUsageRewards.InvalidValue.selector);
         sellerUsageRewards.pendingStakerReward(0, 5);
@@ -1627,17 +1729,18 @@ contract AntseedEmissionsGateTest is Test {
         (uint256 firstGross,,) = sellerUsageRewards.pendingStakerReward(firstPositionId, 5);
         (uint256 secondGross,,) = sellerUsageRewards.pendingStakerReward(secondPositionId, 5);
 
+        sellerUsageRewards.indexPoolRewards(_agentId(poolSeller), 10);
         vm.prank(staker);
-        sellerUsageRewards.claimStakerRewardsBatch(positionIds, _epochList(5), staker);
+        sellerUsageRewards.claimStakerRewardsBatch(positionIds, staker);
 
         assertEq(token.balanceOf(staker), 825 ether + firstGross + secondGross);
-        assertTrue(sellerUsageRewards.positionEpochClaimed(firstPositionId, 5));
-        assertTrue(sellerUsageRewards.positionEpochClaimed(secondPositionId, 5));
-        assertFalse(sellerUsageRewards.positionEpochClaimed(noRewardPositionId, 5));
+        assertEq(sellerUsageRewards.positionClaimCursor(firstPositionId), 6);
+        assertEq(sellerUsageRewards.positionClaimCursor(secondPositionId), 6);
+        assertEq(sellerUsageRewards.positionClaimCursor(noRewardPositionId), 0);
 
         vm.expectRevert(AntseedSellerUsageRewards.NothingToClaim.selector);
         vm.prank(staker);
-        sellerUsageRewards.claimStakerRewardsBatch(positionIds, _epochList(5), staker);
+        sellerUsageRewards.claimStakerRewardsBatch(positionIds, staker);
     }
 
     function test_sellerUsageRewardsBatchRestakeUsesPositionLogicAndCreatesSeparatePositions() public {
@@ -1675,8 +1778,9 @@ contract AntseedEmissionsGateTest is Test {
         (uint256 firstGross,,) = sellerUsageRewards.pendingStakerReward(firstPositionId, 5);
         (uint256 secondGross,,) = sellerUsageRewards.pendingStakerReward(secondPositionId, 5);
 
+        sellerUsageRewards.indexPoolRewards(_agentId(poolSeller), 10);
         vm.prank(staker);
-        uint256[] memory newPositionIds = sellerUsageRewards.restakeStakerRewardsBatch(positionIds, _epochList(5), 2);
+        uint256[] memory newPositionIds = sellerUsageRewards.restakeStakerRewardsBatch(positionIds, 2);
 
         assertEq(newPositionIds.length, 3);
         assertNotEq(newPositionIds[0], newPositionIds[1]);
@@ -1735,7 +1839,7 @@ contract AntseedEmissionsGateTest is Test {
         sellerUsageRewards.pause();
         assertTrue(sellerUsageRewards.paused());
         vm.expectRevert();
-        sellerUsageRewards.claimStakerRewards(1, _epochList(4), seller);
+        sellerUsageRewards.claimStakerRewards(1, seller);
         sellerUsageRewards.unpause();
         assertFalse(sellerUsageRewards.paused());
     }
