@@ -3,8 +3,8 @@ pragma solidity ^0.8.24;
 
 import "forge-std/Script.sol";
 
-import { ISetRegistry, ISetWriter } from "../interfaces/IAntseedWiring.sol";
-import { AntseedRegistry } from "../core/AntseedRegistry.sol";
+import {ISetRegistry, ISetWriter} from "../interfaces/IAntseedWiring.sol";
+import {AntseedRegistry} from "../core/AntseedRegistry.sol";
 
 /**
  * @title Deploy
@@ -32,26 +32,20 @@ contract Deploy is Script {
 
         // 1. MockUSDC
         address usdc;
-        assembly {
-            usdc := create(0, add(usdcBytecode, 0x20), mload(usdcBytecode))
-        }
+        assembly { usdc := create(0, add(usdcBytecode, 0x20), mload(usdcBytecode)) }
         require(usdc != address(0), "MockUSDC deploy failed");
         console.log("MockUSDC:             ", usdc);
 
         // 2. MockERC8004Registry (local testing; on mainnet use 0x8004A169...)
         bytes memory registryBytecode = vm.getCode("MockERC8004Registry.sol:MockERC8004Registry");
         address identityRegistry;
-        assembly {
-            identityRegistry := create(0, add(registryBytecode, 0x20), mload(registryBytecode))
-        }
+        assembly { identityRegistry := create(0, add(registryBytecode, 0x20), mload(registryBytecode)) }
         require(identityRegistry != address(0), "MockERC8004Registry deploy failed");
         console.log("MockERC8004Registry:  ", identityRegistry);
 
         // 3. ANTSToken
         address antsToken;
-        assembly {
-            antsToken := create(0, add(tokenBytecode, 0x20), mload(tokenBytecode))
-        }
+        assembly { antsToken := create(0, add(tokenBytecode, 0x20), mload(tokenBytecode)) }
         require(antsToken != address(0), "ANTSToken deploy failed");
         console.log("ANTSToken:            ", antsToken);
 
@@ -61,41 +55,38 @@ contract Deploy is Script {
 
         // 5. AntseedStaking(usdc, registry)
         bytes memory stakingBytecode = abi.encodePacked(
-            vm.getCode("AntseedStaking.sol:AntseedStaking"), abi.encode(usdc, address(antseedRegistry))
+            vm.getCode("AntseedStaking.sol:AntseedStaking"),
+            abi.encode(usdc, address(antseedRegistry))
         );
         address staking;
-        assembly {
-            staking := create(0, add(stakingBytecode, 0x20), mload(stakingBytecode))
-        }
+        assembly { staking := create(0, add(stakingBytecode, 0x20), mload(stakingBytecode)) }
         require(staking != address(0), "Staking deploy failed");
         console.log("AntseedStaking:       ", staking);
 
         // 6. AntseedDeposits(usdc)
-        bytes memory depositsBytecode =
-            abi.encodePacked(vm.getCode("AntseedDeposits.sol:AntseedDeposits"), abi.encode(usdc));
+        bytes memory depositsBytecode = abi.encodePacked(
+            vm.getCode("AntseedDeposits.sol:AntseedDeposits"),
+            abi.encode(usdc)
+        );
         address deposits;
-        assembly {
-            deposits := create(0, add(depositsBytecode, 0x20), mload(depositsBytecode))
-        }
+        assembly { deposits := create(0, add(depositsBytecode, 0x20), mload(depositsBytecode)) }
         require(deposits != address(0), "Deposits deploy failed");
         console.log("AntseedDeposits:      ", deposits);
 
         // 7. AntseedChannels(registry)
-        bytes memory channelsBytecode =
-            abi.encodePacked(vm.getCode("AntseedChannels.sol:AntseedChannels"), abi.encode(address(antseedRegistry)));
+        bytes memory channelsBytecode = abi.encodePacked(
+            vm.getCode("AntseedChannels.sol:AntseedChannels"),
+            abi.encode(address(antseedRegistry))
+        );
         address channels;
-        assembly {
-            channels := create(0, add(channelsBytecode, 0x20), mload(channelsBytecode))
-        }
+        assembly { channels := create(0, add(channelsBytecode, 0x20), mload(channelsBytecode)) }
         require(channels != address(0), "Channels deploy failed");
         console.log("AntseedChannels:      ", channels);
 
         // 8. AntseedStats
         bytes memory statsBytecode = vm.getCode("AntseedStats.sol:AntseedStats");
         address stats;
-        assembly {
-            stats := create(0, add(statsBytecode, 0x20), mload(statsBytecode))
-        }
+        assembly { stats := create(0, add(statsBytecode, 0x20), mload(statsBytecode)) }
         require(stats != address(0), "Stats deploy failed");
         console.log("AntseedStats:         ", stats);
 
@@ -105,9 +96,7 @@ contract Deploy is Script {
             abi.encode(address(antseedRegistry), uint256(5_000_000e18), uint256(7 days))
         );
         address emissions;
-        assembly {
-            emissions := create(0, add(emissionsBytecode, 0x20), mload(emissionsBytecode))
-        }
+        assembly { emissions := create(0, add(emissionsBytecode, 0x20), mload(emissionsBytecode)) }
         require(emissions != address(0), "Emissions deploy failed");
         console.log("AntseedEmissions:     ", emissions);
 

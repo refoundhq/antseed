@@ -36,7 +36,7 @@ contract AntseedDepositsTest is Test {
         deposits.setRegistry(address(antseedRegistry));
 
         // Fund test addresses
-        usdc.mint(buyer, 1_000_000_000); // 1000 USDC
+        usdc.mint(buyer, 1_000_000_000);   // 1000 USDC
         usdc.mint(buyer2, 1_000_000_000);
         usdc.mint(thirdParty, 1_000_000_000);
         usdc.mint(operator, 1_000_000_000);
@@ -91,7 +91,8 @@ contract AntseedDepositsTest is Test {
         (uint256 before,,) = deposits.getBuyerBalance(buyer);
         _deposit(buyer, MIN_DEPOSIT);
 
-        (uint256 available, uint256 reserved, uint256 lastActivity) = deposits.getBuyerBalance(buyer);
+        (uint256 available, uint256 reserved, uint256 lastActivity) =
+            deposits.getBuyerBalance(buyer);
         assertEq(available, before + MIN_DEPOSIT);
         assertEq(reserved, 0);
         assertGt(lastActivity, 0);
@@ -222,7 +223,8 @@ contract AntseedDepositsTest is Test {
         uint256 lockAmount = before / 2;
         deposits.lockForChannel(buyer, lockAmount);
 
-        (uint256 available, uint256 reserved, uint256 lastActivity) = deposits.getBuyerBalance(buyer);
+        (uint256 available, uint256 reserved, uint256 lastActivity) =
+            deposits.getBuyerBalance(buyer);
 
         assertEq(available, before - lockAmount);
         assertEq(reserved, lockAmount);
@@ -230,7 +232,8 @@ contract AntseedDepositsTest is Test {
     }
 
     function test_getBuyerBalance_zeroForUnknown() public view {
-        (uint256 available, uint256 reserved, uint256 lastActivity) = deposits.getBuyerBalance(address(0x99));
+        (uint256 available, uint256 reserved, uint256 lastActivity) =
+            deposits.getBuyerBalance(address(0x99));
         assertEq(available, 0);
         assertEq(reserved, 0);
         assertEq(lastActivity, 0);
@@ -285,6 +288,7 @@ contract AntseedDepositsTest is Test {
         uint256 expected = BASE_CREDIT + 5_000_000 + 500_000 * 30;
         assertEq(limit, expected);
     }
+
 
     function test_creditLimit_cappedAtMax() public {
         deposits.setCreditLimitOverride(buyer, 0);

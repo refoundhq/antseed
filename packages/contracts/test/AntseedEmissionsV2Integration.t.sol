@@ -4,7 +4,7 @@ pragma solidity ^0.8.24;
 import "forge-std/Test.sol";
 
 import { ANTSToken } from "../core/ANTSToken.sol";
-import { IAntseedChannels } from "../interfaces/IAntseedChannels.sol";
+import { AntseedChannels } from "../payments/AntseedChannels.sol";
 import { AntseedDeposits } from "../payments/AntseedDeposits.sol";
 import { AntseedEmissions } from "../legacy/AntseedEmissions.sol";
 import { AntseedEmissionsV2 } from "../legacy/AntseedEmissionsV2.sol";
@@ -51,7 +51,7 @@ contract AntseedEmissionsV2IntegrationTest is Test {
     AntseedRegistry antseedRegistry;
     AntseedDeposits deposits;
     AntseedStaking staking;
-    IAntseedChannels channels;
+    AntseedChannels channels;
     AntseedEmissions legacyEmissions;
     AntseedEmissionsV2 emissionsV2;
     AntseedSellerRewardsPool rewardsPool;
@@ -72,8 +72,7 @@ contract AntseedEmissionsV2IntegrationTest is Test {
         antseedRegistry = new AntseedRegistry();
         deposits = new AntseedDeposits(address(usdc));
         staking = new AntseedStaking(address(usdc), address(antseedRegistry));
-        channels =
-            IAntseedChannels(deployCode("AntseedChannels.sol:AntseedChannels", abi.encode(address(antseedRegistry))));
+        channels = new AntseedChannels(address(antseedRegistry));
         legacyEmissions = new AntseedEmissions(address(antseedRegistry), INITIAL_EMISSION, EPOCH_DURATION);
 
         antseedRegistry.setChannels(address(channels));
@@ -216,11 +215,7 @@ contract AntseedEmissionsV2IntegrationTest is Test {
         channels.settle(channelId, cumulativeAmount, metadata, sig);
     }
 
-    function _signReserveAuth(bytes32 channelId, uint128 maxAmount, uint256 deadline)
-        internal
-        view
-        returns (bytes memory)
-    {
+    function _signReserveAuth(bytes32 channelId, uint128 maxAmount, uint256 deadline) internal view returns (bytes memory) {
         bytes32 structHash = keccak256(abi.encode(RESERVE_AUTH_TYPEHASH, channelId, maxAmount, deadline));
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(BUYER_PK, _hashTypedDataChannels(structHash));
         return abi.encodePacked(r, s, v);
@@ -231,8 +226,7 @@ contract AntseedEmissionsV2IntegrationTest is Test {
         view
         returns (bytes memory)
     {
-        bytes32 structHash =
-            keccak256(abi.encode(SPENDING_AUTH_TYPEHASH, channelId, cumulativeAmount, keccak256(metadata)));
+        bytes32 structHash = keccak256(abi.encode(SPENDING_AUTH_TYPEHASH, channelId, cumulativeAmount, keccak256(metadata)));
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(BUYER_PK, _hashTypedDataChannels(structHash));
         return abi.encodePacked(r, s, v);
     }

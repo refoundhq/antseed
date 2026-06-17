@@ -5,9 +5,9 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/Pausable.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
-import { IAntseedRegistry } from "../interfaces/IAntseedRegistry.sol";
-import { IAntseedDeposits } from "../interfaces/IAntseedDeposits.sol";
-import { IANTSToken } from "../interfaces/IANTSToken.sol";
+import {IAntseedRegistry} from "../interfaces/IAntseedRegistry.sol";
+import {IAntseedDeposits} from "../interfaces/IAntseedDeposits.sol";
+import {IANTSToken} from "../interfaces/IANTSToken.sol";
 
 /**
  * @title AntseedEmissions
@@ -47,7 +47,6 @@ contract AntseedEmissions is Ownable, Pausable, ReentrancyGuard {
         uint256 maxSellerSharePct;
         bool initialized;
     }
-
     mapping(uint256 => EpochParams) public epochParams;
 
     // ─── Per-Epoch Totals ───
@@ -237,11 +236,10 @@ contract AntseedEmissions is Ownable, Pausable, ReentrancyGuard {
     /**
      * @notice View pending (unclaimed) emissions for an account across specific epochs.
      */
-    function pendingEmissions(address account, uint256[] calldata epochs)
-        external
-        view
-        returns (uint256 totalSeller, uint256 totalBuyer)
-    {
+    function pendingEmissions(
+        address account,
+        uint256[] calldata epochs
+    ) external view returns (uint256 totalSeller, uint256 totalBuyer) {
         uint256 _currentEpoch = currentEpoch();
 
         for (uint256 i = 0; i < epochs.length; i++) {
@@ -314,10 +312,7 @@ contract AntseedEmissions is Ownable, Pausable, ReentrancyGuard {
         registry = IAntseedRegistry(_registry);
     }
 
-    function setSharePercentages(uint256 sellerPct, uint256 buyerPct, uint256 reservePct, uint256 teamPct)
-        external
-        onlyOwner
-    {
+    function setSharePercentages(uint256 sellerPct, uint256 buyerPct, uint256 reservePct, uint256 teamPct) external onlyOwner {
         if (sellerPct + buyerPct + reservePct + teamPct != 100) revert InvalidShareSum();
         SELLER_SHARE_PCT = sellerPct;
         BUYER_SHARE_PCT = buyerPct;

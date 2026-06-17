@@ -31,14 +31,10 @@ contract AntseedStatsTest is Test {
         stats.setWriter(writer, true);
 
         vm.prank(writer);
-        stats.recordMetadata(
-            tokenId, buyer, bytes32("chan-1"), abi.encode(uint256(1), uint256(100), uint256(40), uint256(2))
-        );
+        stats.recordMetadata(tokenId, buyer, bytes32("chan-1"), abi.encode(uint256(1), uint256(100), uint256(40), uint256(2)));
 
         vm.prank(writer);
-        stats.recordMetadata(
-            tokenId, buyer, bytes32("chan-1"), abi.encode(uint256(1), uint256(175), uint256(90), uint256(5))
-        );
+        stats.recordMetadata(tokenId, buyer, bytes32("chan-1"), abi.encode(uint256(1), uint256(175), uint256(90), uint256(5)));
 
         IAntseedStats.BuyerMetadataStats memory buyerStats = stats.getBuyerMetadataStats(tokenId, buyer);
         assertEq(buyerStats.totalInputTokens, 175);
@@ -49,24 +45,18 @@ contract AntseedStatsTest is Test {
 
     function test_recordMetadata_revert_notAuthorized() public {
         vm.expectRevert();
-        stats.recordMetadata(
-            tokenId, buyer, bytes32("chan-1"), abi.encode(uint256(1), uint256(100), uint256(40), uint256(2))
-        );
+        stats.recordMetadata(tokenId, buyer, bytes32("chan-1"), abi.encode(uint256(1), uint256(100), uint256(40), uint256(2)));
     }
 
     function test_recordMetadata_skipsNonMonotonicPerChannel() public {
         stats.setWriter(writer, true);
 
         vm.prank(writer);
-        stats.recordMetadata(
-            tokenId, buyer, bytes32("chan-1"), abi.encode(uint256(1), uint256(100), uint256(40), uint256(2))
-        );
+        stats.recordMetadata(tokenId, buyer, bytes32("chan-1"), abi.encode(uint256(1), uint256(100), uint256(40), uint256(2)));
 
         // Non-monotonic update is silently ignored
         vm.prank(writer);
-        stats.recordMetadata(
-            tokenId, buyer, bytes32("chan-1"), abi.encode(uint256(1), uint256(90), uint256(10), uint256(1))
-        );
+        stats.recordMetadata(tokenId, buyer, bytes32("chan-1"), abi.encode(uint256(1), uint256(90), uint256(10), uint256(1)));
 
         // Stats unchanged from first call
         IAntseedStats.BuyerMetadataStats memory buyerStats = stats.getBuyerMetadataStats(tokenId, buyer);
@@ -79,14 +69,10 @@ contract AntseedStatsTest is Test {
         stats.setWriter(writer, true);
 
         vm.prank(writer);
-        stats.recordMetadata(
-            tokenId, buyer, bytes32("chan-1"), abi.encode(uint256(1), uint256(100), uint256(40), uint256(2))
-        );
+        stats.recordMetadata(tokenId, buyer, bytes32("chan-1"), abi.encode(uint256(1), uint256(100), uint256(40), uint256(2)));
 
         vm.prank(writer);
-        stats.recordMetadata(
-            tokenId, buyer, bytes32("chan-2"), abi.encode(uint256(1), uint256(175), uint256(90), uint256(5))
-        );
+        stats.recordMetadata(tokenId, buyer, bytes32("chan-2"), abi.encode(uint256(1), uint256(175), uint256(90), uint256(5)));
 
         IAntseedStats.BuyerMetadataStats memory buyerStats = stats.getBuyerMetadataStats(tokenId, buyer);
         assertEq(buyerStats.totalInputTokens, 275);

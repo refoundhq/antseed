@@ -3,7 +3,7 @@ pragma solidity ^0.8.24;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
 
-import { IAntseedStats } from "../interfaces/IAntseedStats.sol";
+import {IAntseedStats} from "../interfaces/IAntseedStats.sol";
 
 /**
  * @title AntseedStats
@@ -12,6 +12,7 @@ import { IAntseedStats } from "../interfaces/IAntseedStats.sol";
  *         which is decoded, delta-accounted, and aggregated.
  */
 contract AntseedStats is IAntseedStats, Ownable {
+
     // ─── Structs ────────────────────────────────────────────────────
     struct ChannelMetadataSnapshot {
         uint256 inputTokens;
@@ -41,7 +42,7 @@ contract AntseedStats is IAntseedStats, Ownable {
     error NotAuthorized();
 
     // ─── Constructor ────────────────────────────────────────────────
-    constructor() Ownable(msg.sender) { }
+    constructor() Ownable(msg.sender) {}
 
     // ─── Views ──────────────────────────────────────────────────────
     function getBuyerMetadataStats(uint256 agentId, address buyer) external view returns (BuyerMetadataStats memory) {
@@ -49,16 +50,21 @@ contract AntseedStats is IAntseedStats, Ownable {
     }
 
     // ─── Core ───────────────────────────────────────────────────────
-    function recordMetadata(uint256 agentId, address buyer, bytes32 channelId, bytes calldata metadata) external {
+    function recordMetadata(
+        uint256 agentId,
+        address buyer,
+        bytes32 channelId,
+        bytes calldata metadata
+    ) external {
         if (!writers[msg.sender]) revert NotAuthorized();
         if (buyer == address(0)) revert InvalidAddress();
 
-        (uint256 cumulativeInputTokens, uint256 cumulativeOutputTokens, uint256 cumulativeRequestCount) =
-            _decodeMetadata(metadata);
+        (uint256 cumulativeInputTokens, uint256 cumulativeOutputTokens, uint256 cumulativeRequestCount) = _decodeMetadata(metadata);
 
         ChannelMetadataSnapshot storage snapshot = _channelSnapshots[channelId];
         if (
-            cumulativeInputTokens < snapshot.inputTokens || cumulativeOutputTokens < snapshot.outputTokens
+            cumulativeInputTokens < snapshot.inputTokens
+                || cumulativeOutputTokens < snapshot.outputTokens
                 || cumulativeRequestCount < snapshot.requestCount
         ) {
             return; // non-monotonic metadata — skip silently
@@ -78,7 +84,15 @@ contract AntseedStats is IAntseedStats, Ownable {
         stats.totalRequestCount += requestDelta;
         stats.lastUpdatedAt = uint64(block.timestamp);
 
-        emit MetadataRecorded(agentId, buyer, channelId, keccak256(metadata), inputDelta, outputDelta, requestDelta);
+        emit MetadataRecorded(
+            agentId,
+            buyer,
+            channelId,
+            keccak256(metadata),
+            inputDelta,
+            outputDelta,
+            requestDelta
+        );
     }
 
     // ─── Internal Helpers ───────────────────────────────────────────

@@ -9,7 +9,7 @@ import { ANTSToken } from "../core/ANTSToken.sol";
 import { AntseedRegistry } from "../core/AntseedRegistry.sol";
 import { AntseedDeposits } from "../payments/AntseedDeposits.sol";
 import { AntseedStaking } from "../staking/AntseedStaking.sol";
-import { IAntseedChannels } from "../interfaces/IAntseedChannels.sol";
+import { AntseedChannels } from "../payments/AntseedChannels.sol";
 import { AntseedEmissions } from "../legacy/AntseedEmissions.sol";
 import { DiemStakingProxy } from "../staking/DiemStakingProxy.sol";
 import { AntseedSellerDelegation } from "../staking/AntseedSellerDelegation.sol";
@@ -45,7 +45,7 @@ contract DiemStakingProxyTest is Test {
     AntseedRegistry antseedRegistry;
     AntseedDeposits deposits;
     AntseedStaking staking;
-    IAntseedChannels channels;
+    AntseedChannels channels;
     AntseedEmissions emissions;
 
     DiemStakingProxy proxy;
@@ -74,8 +74,7 @@ contract DiemStakingProxyTest is Test {
         antseedRegistry = new AntseedRegistry();
         deposits = new AntseedDeposits(address(usdc));
         staking = new AntseedStaking(address(usdc), address(antseedRegistry));
-        channels =
-            IAntseedChannels(deployCode("AntseedChannels.sol:AntseedChannels", abi.encode(address(antseedRegistry))));
+        channels = new AntseedChannels(address(antseedRegistry));
         emissions = new AntseedEmissions(address(antseedRegistry), INITIAL_EMISSION, EPOCH_DURATION);
 
         antseedRegistry.setChannels(address(channels));
