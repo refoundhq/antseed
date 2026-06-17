@@ -152,10 +152,10 @@ contract AntseedEmissionsGateTest is Test {
 
     function _deployGate(uint256 warpEpoch) internal {
         vm.warp(GATE_GENESIS + GATE_EPOCH_DURATION * (warpEpoch - 1) + 1);
-        gate = new AntseedEmissionsGate();
+        gate = new AntseedEmissionsGate(address(realRegistry));
         _warpGateEpoch(warpEpoch);
         _setFixedRecipients(teamWallet, reserveDest, verificationWallet);
-        gate.setLegacyClaimsConfig(address(legacyV2), address(deposits));
+        gate.setLegacyClaimsConfig(address(legacyV2));
         token.setRegistry(address(gate));
 
         usageAccounting = new AntseedUsageAccounting(address(0), address(this), address(gate));
@@ -607,10 +607,8 @@ contract AntseedEmissionsGateTest is Test {
     function test_gateFixedCurveAndAdminValidation() public {
         _deployGate(4);
         assertEq(gate.antsToken(), address(gate));
-        assertEq(gate.actualAntsToken(), KNOWN_ANTS_TOKEN);
         assertEq(gate.deposits(), address(deposits));
         assertEq(_configuredMinter(reserveDest), reserveDest);
-        assertEq(gate.channels(), address(0));
         assertEq(gate.genesis(), 1_775_728_461);
         assertEq(gate.epochDuration(), 7 days);
         assertEq(gate.halvingInterval(), 104);
@@ -1527,7 +1525,7 @@ contract AntseedEmissionsGateTest is Test {
 
     function test_gateCapsTotalBucketMintsByEpochEmission() public {
         vm.warp(GATE_GENESIS + GATE_EPOCH_DURATION * 4 + 1);
-        gate = new AntseedEmissionsGate();
+        gate = new AntseedEmissionsGate(address(realRegistry));
         _warpGateEpoch(5);
         _setFixedRecipients(teamWallet, reserveDest, verificationWallet);
         address usageMinter = address(0xBEEF);
@@ -1876,7 +1874,7 @@ contract AntseedEmissionsGateTest is Test {
 
     function test_gateEffectiveEpochIsCurrentEpochPlusOneAtDeployment() public {
         vm.warp(GATE_GENESIS + GATE_EPOCH_DURATION * 10 + 1);
-        AntseedEmissionsGate deployedGate = new AntseedEmissionsGate();
+        AntseedEmissionsGate deployedGate = new AntseedEmissionsGate(address(realRegistry));
         assertEq(deployedGate.currentEpoch(), 10);
         assertEq(deployedGate.effectiveEpoch(), 11);
     }

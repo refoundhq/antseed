@@ -77,7 +77,7 @@ contract AntseedUsageAccountingGasTest is Test {
         token.setRegistry(address(registry));
         token.enableTransfers();
 
-        gate = new AntseedEmissionsGate();
+        gate = new AntseedEmissionsGate(address(registry));
         usageAccounting = new AntseedUsageAccounting(address(0), address(this), address(gate));
         registry.setEmissions(address(usageAccounting));
 

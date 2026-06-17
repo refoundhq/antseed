@@ -93,7 +93,7 @@ contract DeployRecognizedUsage is Script {
 
         vm.startBroadcast(deployerPrivateKey);
 
-        AntseedEmissionsGate gate = new AntseedEmissionsGate();
+        AntseedEmissionsGate gate = new AntseedEmissionsGate(registryAddress);
         uint256 currentEpoch = gate.currentEpoch();
         uint256 effectiveEpoch = gate.effectiveEpoch();
         uint256 genesis = gate.genesis();
@@ -148,7 +148,7 @@ contract DeployRecognizedUsage is Script {
         gate.setMinter(teamWallet, 15_000, true);
         gate.setMinter(protocolReserve, 15_000, true);
         gate.setMinter(verificationWallet, 15_000, true);
-        gate.setLegacyClaimsConfig(existingEmissions, existingDeposits);
+        gate.setLegacyClaimsConfig(existingEmissions);
 
         AntseedUsageAccounting usageAccounting =
             new AntseedUsageAccounting(address(sellerPools), existingChannels, address(gate));
@@ -205,8 +205,7 @@ contract DeployRecognizedUsage is Script {
         console.log("- Sellers cannot stake ANTS into pools until they are transfer-");
         console.log("  whitelisted or transfers are enabled.");
         console.log("- Legacy EmissionsV2 is now registered against the gate facade.");
-        console.log("  Old finalized claims can mint through gate.mint(); new V2");
-        console.log("  accruals are blocked because gate.channels() is address(0).");
+        console.log("  Old finalized claims can mint through gate.mint().");
         console.log("- After any one-off gate bucket claims for pre-effective epochs are");
         console.log("  handled, call gate.disableLegacyEpochMints().");
     }

@@ -6,6 +6,7 @@ import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 import { IANTSToken } from "../interfaces/IANTSToken.sol";
 import { IAntseedEmissionsGate } from "../interfaces/IAntseedEmissionsGate.sol";
+import { IAntseedRegistry } from "../interfaces/IAntseedRegistry.sol";
 
 /**
  * @title AntseedEmissionsGate
@@ -24,13 +25,13 @@ contract AntseedEmissionsGate is IAntseedEmissionsGate, Ownable2Step, Reentrancy
     uint256 public constant BPS_DENOMINATOR = 100_000;
 
     IANTSToken private immutable _antsToken;
+    IAntseedRegistry public immutable registry;
 
     uint256 public immutable effectiveEpoch;
     bool public legacyEpochMintsDisabled;
     mapping(uint256 epoch => uint256 amount) public epochMinted;
 
     address public legacyEmissionsMinter;
-    address public legacyDeposits;
     uint32 public totalMinterShareBps;
     mapping(bytes32 minterId => Minter config) public minters;
     mapping(bytes32 minterId => mapping(uint256 epoch => uint256 amount)) public minterEpochMinted;
@@ -44,7 +45,7 @@ contract AntseedEmissionsGate is IAntseedEmissionsGate, Ownable2Step, Reentrancy
     );
     event MinterSet(bytes32 indexed minterId, address indexed controller, uint32 shareBps, bool editable);
     event MinterRemoved(bytes32 indexed minterId, address indexed controller);
-    event LegacyClaimsConfigSet(address indexed minter, address indexed deposits);
+    event LegacyClaimsConfigSet(address indexed minter);
     event LegacyEmissionMinted(address indexed recipient, uint256 amount);
 
     error InvalidAddress();
@@ -60,8 +61,10 @@ contract AntseedEmissionsGate is IAntseedEmissionsGate, Ownable2Step, Reentrancy
     error MintersNotSet();
     error LegacyClaimsNotConfigured();
 
-    constructor() Ownable(msg.sender) {
+    constructor(address registry_) Ownable(msg.sender) {
+        if (registry_ == address(0)) revert InvalidAddress();
         _antsToken = IANTSToken(ANTS_TOKEN);
+        registry = IAntseedRegistry(registry_);
         uint256 epoch = block.timestamp <= GENESIS ? 0 : (block.timestamp - GENESIS) / EPOCH_DURATION;
         effectiveEpoch = epoch + 1;
     }
@@ -78,16 +81,8 @@ contract AntseedEmissionsGate is IAntseedEmissionsGate, Ownable2Step, Reentrancy
         return address(this);
     }
 
-    function actualAntsToken() external pure returns (address) {
-        return ANTS_TOKEN;
-    }
-
-    function channels() external pure returns (address) {
-        return address(0);
-    }
-
     function deposits() external view returns (address) {
-        return legacyDeposits;
+        return registry.deposits();
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -102,11 +97,10 @@ contract AntseedEmissionsGate is IAntseedEmissionsGate, Ownable2Step, Reentrancy
         _removeMinter(controller);
     }
 
-    function setLegacyClaimsConfig(address minter, address deposits_) external onlyOwner {
-        if (minter == address(0) || deposits_ == address(0)) revert InvalidAddress();
+    function setLegacyClaimsConfig(address minter) external onlyOwner {
+        if (minter == address(0)) revert InvalidAddress();
         legacyEmissionsMinter = minter;
-        legacyDeposits = deposits_;
-        emit LegacyClaimsConfigSet(minter, deposits_);
+        emit LegacyClaimsConfigSet(minter);
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -198,7 +192,9 @@ contract AntseedEmissionsGate is IAntseedEmissionsGate, Ownable2Step, Reentrancy
 
     function renounceOwnership() public override onlyOwner {
         if (totalMinterShareBps != BPS_DENOMINATOR) revert MintersNotSet();
-        if (legacyEmissionsMinter == address(0) || legacyDeposits == address(0)) revert LegacyClaimsNotConfigured();
+        if (legacyEmissionsMinter == address(0) || registry.deposits() == address(0)) {
+            revert LegacyClaimsNotConfigured();
+        }
         if (!legacyEpochMintsDisabled) revert LegacyEpochMintsStillEnabled();
         super.renounceOwnership();
     }
