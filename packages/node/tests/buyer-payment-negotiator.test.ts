@@ -582,7 +582,7 @@ describe('BuyerPaymentNegotiator', () => {
       expect(message).toContain("reserve() reverts");
       expect(message).toContain('antseed buyer status');
       expect(message).toContain('antseed buyer deposit');
-      expect(message).toContain('overloaded or temporarily unavailable');
+      expect(message).toContain('overloaded or gated on subscription');
     });
 
     it('enriches "Lock confirmation timed out" errors with likely causes', async () => {
@@ -605,7 +605,7 @@ describe('BuyerPaymentNegotiator', () => {
         await expect(pending).rejects.toThrow(/Lock confirmation timed out for seller/);
         await expect(pending).rejects.toThrow(/Likely causes:/);
         await expect(pending).rejects.toThrow(/reserve ceiling the seller will lock/);
-        await expect(pending).rejects.toThrow(/overloaded or temporarily unavailable/);
+        await expect(pending).rejects.toThrow(/overloaded or gated on subscription/);
       } finally {
         vi.useRealTimers();
       }

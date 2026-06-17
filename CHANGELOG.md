@@ -21,7 +21,6 @@ This project uses selective package publishing. Each release entry lists the pub
 
 ### Fixed
 
-- Fixed buyer payment authorization catch-up so expensive or concurrent paid requests send updated spending authorization promptly instead of surfacing avoidable payment-required responses.
 - Fixed buyer response-auth timeout warnings for non-inference probes and sellers that do not advertise response-auth support.
 - Fixed buyer discovery so temporarily unreachable metadata endpoints are probed for recovery before the full exponential cooldown expires, allowing recovered peers to reappear in buyer peer lists sooner.
 
