@@ -4,6 +4,16 @@ All notable user-facing changes to AntSeed packages are documented here.
 
 This project uses selective package publishing. Each release entry lists the published packages affected by that release.
 
+## Unreleased
+
+### Published
+
+- `@antseed/node`
+
+### Fixed
+
+- Fixed buyer payment authorization catch-up so expensive or concurrent paid requests send updated spending authorization promptly instead of surfacing avoidable payment-required responses.
+
 ## 2026-06-15 — Buyer peer failure accounting and desktop stream responsiveness
 
 ### Published

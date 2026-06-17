@@ -113,6 +113,25 @@ export class BuyerRequestHandler {
 
     let startTime = Date.now();
 
+    const preparePaymentForRequest = async (): Promise<void> => {
+      if (!negotiator || externalSpendingAuth) return;
+      await negotiator.preparePreRequestAuth(peer, conn);
+    };
+
+    const recordPaymentForResponse = async (response: SerializedHttpResponse): Promise<void> => {
+      if (!negotiator) return;
+      negotiator.estimateCostFromResponse(peer, response, requestedService, req.requestId);
+      if (externalSpendingAuth || response.statusCode < 200 || response.statusCode >= 400) return;
+      try {
+        await negotiator.sendPostResponseAuth(peer, conn);
+      } catch (err) {
+        debugWarn(
+          `[BuyerRequest] Failed to send post-response payment auth for ${req.requestId.slice(0, 8)} ` +
+          `to ${peer.peerId.slice(0, 12)}...: ${err instanceof Error ? err.message : err}`,
+        );
+      }
+    };
+
     const executeRequest = (): Promise<SerializedHttpResponse> => new Promise<SerializedHttpResponse>((resolve, reject) => {
       const timeoutMs = this._config.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
       const maxStreamBufferBytes = Math.max(1, this._config.maxStreamBufferBytes ?? 16 * 1024 * 1024);
@@ -284,21 +303,21 @@ export class BuyerRequestHandler {
       );
     });
 
+    await preparePaymentForRequest();
     const response = await executeRequest();
 
     if (response.statusCode === 402 && negotiator && !externalSpendingAuth) {
       const result = await negotiator.handle402(response, peer, conn, req);
       if (result.action === 'return') return result.response;
       startTime = Date.now();
+      await preparePaymentForRequest();
       const retriedResponse = await executeRequest();
-      negotiator.estimateCostFromResponse(peer, retriedResponse, requestedService, req.requestId);
+      await recordPaymentForResponse(retriedResponse);
       this._recordResponseAuth(peer, req, retriedResponse, requestedService, verificationMux);
       return retriedResponse;
     }
 
-    if (negotiator) {
-      negotiator.estimateCostFromResponse(peer, response, requestedService, req.requestId);
-    }
+    await recordPaymentForResponse(response);
 
     this._recordResponseAuth(peer, req, response, requestedService, verificationMux);
     return response;
