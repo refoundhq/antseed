@@ -171,5 +171,11 @@ describe('BuyerRequestHandler payment mux wiring', () => {
     );
     expect(sendPostResponseAuth).toHaveBeenCalledTimes(1);
     expect(sendPostResponseAuth).toHaveBeenCalledWith(peer, conn);
+    expect(
+      preparePreRequestAuth.mock.invocationCallOrder[1],
+    ).toBeLessThan(sendProxyRequest.mock.invocationCallOrder[1]);
+    expect(
+      sendProxyRequest.mock.invocationCallOrder[1],
+    ).toBeLessThan(sendPostResponseAuth.mock.invocationCallOrder[0]);
   });
 });
