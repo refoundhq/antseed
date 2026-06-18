@@ -14,6 +14,16 @@ interface IAntseedFreeUsage {
     }
 
     function activeChannelCount(address seller) external view returns (uint256);
+    function channels(bytes32 channelId) external view returns (
+        address buyer,
+        address seller,
+        uint256 latestSequence,
+        bytes32 metadataHash,
+        uint256 deadline,
+        uint256 updatedAt,
+        uint256 closedAt,
+        ChannelStatus status
+    );
     function computeChannelId(address buyer, address seller, bytes32 salt) external pure returns (bytes32);
     function getAgentStats(uint256 agentId) external view returns (AgentStats memory);
 

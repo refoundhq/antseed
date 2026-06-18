@@ -430,6 +430,9 @@ export class AntseedNode extends EventEmitter {
     if (this._buyerNegotiator) {
       this._buyerNegotiator.cleanup();
     }
+    if (this._sellerFreeUsageManager) {
+      await this._sellerFreeUsageManager.flushAllPendingRecords();
+    }
 
     if (this._sessionTracker) {
       await this._sessionTracker.finalizeAllSessions("node-stop");

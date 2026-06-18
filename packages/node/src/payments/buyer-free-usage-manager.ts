@@ -22,6 +22,7 @@ export interface BuyerFreeUsageConfig {
   chainId: number;
   freeUsageContractAddress: string;
   defaultAuthDurationSecs: number;
+  openAckTimeoutMs?: number;
 }
 
 interface FreeUsageSession {
@@ -38,6 +39,15 @@ interface FreeUsageSession {
   latestMetadata: FreeUsageMetadata;
 }
 
+interface OpenAckWaiter {
+  session: FreeUsageSession;
+  resolve: () => void;
+  reject: (err: Error) => void;
+  timer: ReturnType<typeof setTimeout>;
+}
+
+const DEFAULT_OPEN_ACK_TIMEOUT_MS = 30_000;
+
 export class BuyerFreeUsageManager {
   private readonly _identity: Identity;
   private readonly _config: BuyerFreeUsageConfig;
@@ -46,6 +56,7 @@ export class BuyerFreeUsageManager {
   private readonly _domain: ReturnType<typeof makeFreeUsageDomain>;
   private readonly _sessions = new Map<string, FreeUsageSession>();
   private readonly _sellerLocks = new Map<string, Promise<void>>();
+  private readonly _openAckWaiters = new Map<string, Set<OpenAckWaiter>>();
   private readonly _requestService = new RequestServiceTracker();
 
   constructor(
@@ -69,6 +80,8 @@ export class BuyerFreeUsageManager {
       const metadata = this._channelStore.getChannelMetadata(channel);
       this._sessions.set(channel.peerId, {
         channelId: channel.sessionId,
+        // Salt is only needed to create a fresh open signature; hydrated
+        // sessions are already opened and only sign usage auths.
         salt: '0x' + '00'.repeat(32),
         deadline: channel.deadline,
         sellerEvmAddr: channel.sellerEvmAddr,
@@ -127,10 +140,41 @@ export class BuyerFreeUsageManager {
     debugLog(`[BuyerFreeUsage] Open sent to ${peer.peerId.slice(0, 12)}... channel=${channelId.slice(0, 18)}...`);
   }
 
+  async waitForOpenAck(sellerPeerId: string, timeoutMs = this._config.openAckTimeoutMs ?? DEFAULT_OPEN_ACK_TIMEOUT_MS): Promise<void> {
+    const session = this._sessions.get(sellerPeerId);
+    if (!session) {
+      throw new Error(`free usage channel for ${sellerPeerId.slice(0, 12)}... was not prepared`);
+    }
+    if (session.openedAck) return;
+
+    await new Promise<void>((resolve, reject) => {
+      const waiter: OpenAckWaiter = {
+        session,
+        resolve,
+        reject,
+        timer: setTimeout(() => {
+          this._removeOpenAckWaiter(sellerPeerId, waiter);
+          if (this._sessions.get(sellerPeerId) === session && !session.openedAck) {
+            this._sessions.delete(sellerPeerId);
+            this._channelStore?.updateChannelStatus(session.channelId, CHANNEL_STATUS.TIMEOUT);
+          }
+          reject(new Error(`timed out waiting for free usage open ack from ${sellerPeerId.slice(0, 12)}...`));
+        }, timeoutMs),
+      };
+      let waiters = this._openAckWaiters.get(sellerPeerId);
+      if (!waiters) {
+        waiters = new Set();
+        this._openAckWaiters.set(sellerPeerId, waiters);
+      }
+      waiters.add(waiter);
+    });
+  }
+
   handleAck(sellerPeerId: string, payload: FreeUsageAckPayload): void {
     const session = this._sessions.get(sellerPeerId);
     if (!session || session.channelId !== payload.channelId) return;
     session.openedAck = true;
+    this._resolveOpenAckWaiters(sellerPeerId, session);
     debugLog(
       `[BuyerFreeUsage] Ack from ${sellerPeerId.slice(0, 12)}... channel=${payload.channelId.slice(0, 18)}...` +
       `${payload.acceptedSequence ? ` sequence=${payload.acceptedSequence}` : ''}`,
@@ -140,6 +184,7 @@ export class BuyerFreeUsageManager {
   onPeerDisconnect(sellerPeerId: string): void {
     this._sessions.delete(sellerPeerId);
     this._sellerLocks.delete(sellerPeerId);
+    this._rejectOpenAckWaiters(sellerPeerId, new Error(`peer ${sellerPeerId.slice(0, 12)}... disconnected before free usage open ack`));
   }
 
   async handleNeedAuth(
@@ -218,6 +263,33 @@ export class BuyerFreeUsageManager {
   private async _resolveSellerAddr(peer: PeerInfo): Promise<string> {
     if (!this._sellerAddressResolver) return peerIdToAddress(peer.peerId);
     return this._sellerAddressResolver.resolveSellerAddress(peer.peerId, peer.metadata);
+  }
+
+  private _resolveOpenAckWaiters(sellerPeerId: string, session: FreeUsageSession): void {
+    const waiters = this._openAckWaiters.get(sellerPeerId);
+    if (!waiters) return;
+    for (const waiter of [...waiters]) {
+      if (waiter.session !== session) continue;
+      this._removeOpenAckWaiter(sellerPeerId, waiter);
+      waiter.resolve();
+    }
+  }
+
+  private _rejectOpenAckWaiters(sellerPeerId: string, err: Error): void {
+    const waiters = this._openAckWaiters.get(sellerPeerId);
+    if (!waiters) return;
+    for (const waiter of [...waiters]) {
+      this._removeOpenAckWaiter(sellerPeerId, waiter);
+      waiter.reject(err);
+    }
+  }
+
+  private _removeOpenAckWaiter(sellerPeerId: string, waiter: OpenAckWaiter): void {
+    clearTimeout(waiter.timer);
+    const waiters = this._openAckWaiters.get(sellerPeerId);
+    if (!waiters) return;
+    waiters.delete(waiter);
+    if (waiters.size === 0) this._openAckWaiters.delete(sellerPeerId);
   }
 
   private _persistSession(

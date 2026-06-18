@@ -88,7 +88,7 @@ export class FreeUsageClient extends BaseEvmClient {
     };
   }
 
-  async computeChannelId(buyer: string, seller: string, salt: string): Promise<string> {
+  computeChannelId(buyer: string, seller: string, salt: string): string {
     return computeFreeUsageChannelId(buyer, seller, salt);
   }
 

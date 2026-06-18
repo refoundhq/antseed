@@ -192,6 +192,7 @@ export class BuyerPaymentNegotiator {
     if (!this._freeUsageManager) return;
     const pmux = this.getOrCreatePaymentMux(peer.peerId, conn);
     await this._freeUsageManager.prepareOpen(peer, pmux);
+    await this._freeUsageManager.waitForOpenAck(peer.peerId);
   }
 
   // ── Pre-request auth ────────────────────────────────────────

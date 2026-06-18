@@ -12,6 +12,7 @@ import { FreeUsageClient } from './evm/free-usage-client.js';
 import {
   computeFreeUsageChannelId,
   FREE_USAGE_AUTH_TYPES,
+  FREE_USAGE_METADATA_VERSION,
   FREE_USAGE_OPEN_TYPES,
   makeFreeUsageDomain,
 } from './evm/signatures.js';
@@ -21,6 +22,8 @@ export interface SellerFreeUsageConfig {
   fallbackRpcUrls?: string[];
   freeUsageContractAddress: string;
   chainId: number;
+  recordBatchSize?: number;
+  recordFlushIntervalMs?: number;
 }
 
 interface SellerFreeUsageSession {
@@ -35,12 +38,23 @@ interface SellerFreeUsageSession {
   requestedRequestCount: bigint;
   expectedUsageBySequence: Map<string, ExpectedFreeUsage>;
   openPromise: Promise<void>;
+  pendingRecord: PendingFreeUsageRecord | null;
+  recordsSinceFlush: number;
+  flushTimer: ReturnType<typeof setTimeout> | null;
+  flushPromise: Promise<void> | null;
 }
 
 interface ExpectedFreeUsage {
   cumulativeInputTokens: bigint;
   cumulativeOutputTokens: bigint;
   cumulativeRequestCount: bigint;
+}
+
+interface PendingFreeUsageRecord {
+  sequence: bigint;
+  metadata: string;
+  deadline: bigint;
+  usageSig: string;
 }
 
 const FREE_USAGE_METADATA_ABI = [
@@ -51,7 +65,8 @@ const FREE_USAGE_METADATA_ABI = [
   'tuple(bytes32 serviceId,uint256 cumulativeAmount,uint256 cumulativeInputTokens,uint256 cumulativeCachedInputTokens,uint256 cumulativeOutputTokens,uint256 cumulativeRequestCount)[]',
 ] as const;
 
-const FREE_USAGE_METADATA_VERSION = 1n;
+const DEFAULT_RECORD_BATCH_SIZE = 16;
+const DEFAULT_RECORD_FLUSH_INTERVAL_MS = 10_000;
 
 function normalizeTokenCount(value: number): bigint {
   if (!Number.isFinite(value) || value <= 0) return 0n;
@@ -63,6 +78,8 @@ export class SellerFreeUsageManager {
   private readonly _client: FreeUsageClient;
   private readonly _domain: ReturnType<typeof makeFreeUsageDomain>;
   private readonly _sellerEvmAddr: string;
+  private readonly _recordBatchSize: number;
+  private readonly _recordFlushIntervalMs: number;
   private readonly _sessions = new Map<string, SellerFreeUsageSession>();
   private readonly _buyerLocks = new Map<string, Promise<void>>();
 
@@ -70,6 +87,8 @@ export class SellerFreeUsageManager {
     this._signer = identity.wallet;
     this._sellerEvmAddr = identity.wallet.address;
     this._domain = makeFreeUsageDomain(config.chainId, config.freeUsageContractAddress);
+    this._recordBatchSize = Math.max(1, Math.trunc(config.recordBatchSize ?? DEFAULT_RECORD_BATCH_SIZE));
+    this._recordFlushIntervalMs = Math.max(1, Math.trunc(config.recordFlushIntervalMs ?? DEFAULT_RECORD_FLUSH_INTERVAL_MS));
     this._client = new FreeUsageClient({
       rpcUrl: config.rpcUrl,
       ...(config.fallbackRpcUrls ? { fallbackRpcUrls: config.fallbackRpcUrls } : {}),
@@ -103,8 +122,31 @@ export class SellerFreeUsageManager {
   }
 
   onPeerDisconnect(buyerPeerId: string): void {
-    this._sessions.delete(buyerPeerId);
+    const session = this._sessions.get(buyerPeerId);
+    if (session) {
+      this._clearFlushTimer(session);
+      if (session.pendingRecord || session.flushPromise) {
+        void this._flushPendingRecord(buyerPeerId, session).finally(() => {
+          if (this._sessions.get(buyerPeerId) === session) {
+            this._sessions.delete(buyerPeerId);
+          }
+        });
+      } else {
+        this._sessions.delete(buyerPeerId);
+      }
+    } else {
+      this._sessions.delete(buyerPeerId);
+    }
     this._buyerLocks.delete(buyerPeerId);
+  }
+
+  async flushAllPendingRecords(): Promise<void> {
+    await Promise.all(
+      [...this._sessions.entries()].map(([buyerPeerId, session]) => {
+        this._clearFlushTimer(session);
+        return this._flushPendingRecord(buyerPeerId, session);
+      }),
+    );
   }
 
   reportUsageRequest(
@@ -190,10 +232,21 @@ export class SellerFreeUsageManager {
       requestedRequestCount: 0n,
       expectedUsageBySequence: new Map(),
       openPromise,
+      pendingRecord: null,
+      recordsSinceFlush: 0,
+      flushTimer: null,
+      flushPromise: null,
     };
     this._sessions.set(buyerPeerId, session);
 
-    await openPromise;
+    try {
+      await openPromise;
+    } catch (err) {
+      if (this._sessions.get(buyerPeerId) === session) {
+        this._sessions.delete(buyerPeerId);
+      }
+      throw err;
+    }
     paymentMux.sendFreeUsageAck({ channelId: payload.channelId, acceptedSequence: '0' });
     debugLog(`[SellerFreeUsage] Open reported on-chain channel=${payload.channelId.slice(0, 18)}...`);
   }
@@ -276,16 +329,13 @@ export class SellerFreeUsageManager {
       throw new Error(`invalid FreeUsageAuth signer recovered=${recovered} expected=${session.buyerEvmAddr}`);
     }
 
-    await session.openPromise;
-    await this._client.record(
-      this._signer,
-      payload.channelId,
+    session.pendingRecord = {
       sequence,
-      payload.metadata,
-      BigInt(payload.deadline),
-      payload.usageSig,
-    );
-
+      metadata: payload.metadata,
+      deadline: BigInt(payload.deadline),
+      usageSig: payload.usageSig,
+    };
+    session.recordsSinceFlush += 1;
     session.acceptedSequence = sequence;
     for (const key of session.expectedUsageBySequence.keys()) {
       if (BigInt(key) <= sequence) session.expectedUsageBySequence.delete(key);
@@ -294,10 +344,95 @@ export class SellerFreeUsageManager {
       channelId: payload.channelId,
       acceptedSequence: sequence.toString(),
     });
+    this._scheduleRecordFlush(buyerPeerId, session);
     debugLog(
-      `[SellerFreeUsage] Usage reported on-chain channel=${payload.channelId.slice(0, 18)}... ` +
+      `[SellerFreeUsage] Usage auth accepted channel=${payload.channelId.slice(0, 18)}... ` +
       `sequence=${sequence}`,
     );
+  }
+
+  private _scheduleRecordFlush(
+    buyerPeerId: string,
+    session: SellerFreeUsageSession,
+    opts: { retry?: boolean } = {},
+  ): void {
+    if (!session.pendingRecord || session.flushPromise) return;
+    if (!opts.retry && session.recordsSinceFlush >= this._recordBatchSize) {
+      this._clearFlushTimer(session);
+      void this._flushPendingRecord(buyerPeerId, session);
+      return;
+    }
+    if (session.flushTimer) return;
+    session.flushTimer = setTimeout(() => {
+      session.flushTimer = null;
+      void this._flushPendingRecord(buyerPeerId, session);
+    }, this._recordFlushIntervalMs);
+    (session.flushTimer as { unref?: () => void }).unref?.();
+  }
+
+  private _clearFlushTimer(session: SellerFreeUsageSession): void {
+    if (!session.flushTimer) return;
+    clearTimeout(session.flushTimer);
+    session.flushTimer = null;
+  }
+
+  private _flushPendingRecord(buyerPeerId: string, session: SellerFreeUsageSession): Promise<void> {
+    if (!session.pendingRecord) return Promise.resolve();
+    if (session.flushPromise) return session.flushPromise;
+
+    let promise!: Promise<void>;
+    promise = (async () => {
+      const flushed = await this._doFlushPendingRecord(buyerPeerId, session);
+      if (session.flushPromise === promise) {
+        session.flushPromise = null;
+      }
+      if (session.pendingRecord) {
+        this._scheduleRecordFlush(buyerPeerId, session, flushed ? {} : { retry: true });
+      }
+    })();
+    session.flushPromise = promise;
+    return promise;
+  }
+
+  private async _doFlushPendingRecord(
+    buyerPeerId: string,
+    session: SellerFreeUsageSession,
+  ): Promise<boolean> {
+    const record = session.pendingRecord;
+    if (!record) return true;
+
+    this._clearFlushTimer(session);
+    try {
+      await session.openPromise;
+      await this._client.record(
+        this._signer,
+        session.channelId,
+        record.sequence,
+        record.metadata,
+        record.deadline,
+        record.usageSig,
+      );
+      const pending = session.pendingRecord;
+      if (!pending || pending.sequence <= record.sequence) {
+        session.pendingRecord = null;
+        session.recordsSinceFlush = 0;
+      } else {
+        const delta = pending.sequence - record.sequence;
+        session.recordsSinceFlush = Number(delta > BigInt(Number.MAX_SAFE_INTEGER) ? BigInt(Number.MAX_SAFE_INTEGER) : delta);
+      }
+      debugLog(
+        `[SellerFreeUsage] Usage reported on-chain channel=${session.channelId.slice(0, 18)}... ` +
+        `sequence=${record.sequence}`,
+      );
+      return true;
+    } catch (err) {
+      debugWarn(
+        `[SellerFreeUsage] Deferred record failed for ${buyerPeerId.slice(0, 12)}... ` +
+        `channel=${session.channelId.slice(0, 18)}... sequence=${record.sequence}: ` +
+        `${err instanceof Error ? err.message : err}`,
+      );
+      return false;
+    }
   }
 
   private async _tryGetExistingSession(channelId: string) {

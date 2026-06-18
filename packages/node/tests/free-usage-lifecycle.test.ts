@@ -56,11 +56,12 @@ function freeUsageConfig() {
   };
 }
 
-function sellerConfig() {
+function sellerConfig(overrides: Partial<ConstructorParameters<typeof SellerFreeUsageManager>[1]> = {}) {
   return {
     rpcUrl: 'http://127.0.0.1:8545',
     freeUsageContractAddress: FREE_USAGE_ADDRESS,
     chainId: CHAIN_ID,
+    ...overrides,
   };
 }
 
@@ -192,6 +193,30 @@ describe('FreeUsage P2P lifecycle', () => {
       },
       authPayload.usageSig,
     ).toLowerCase()).toBe(buyer.wallet.address.toLowerCase());
+  });
+
+  it('buyer waits for free usage open ack and clears unacked sessions on timeout', async () => {
+    const buyerManager = new BuyerFreeUsageManager(buyer, freeUsageConfig());
+    const buyerConn = makeConn();
+    const buyerMux = new PaymentMux(buyerConn.conn as any);
+
+    await buyerManager.prepareOpen(sellerPeer(), buyerMux);
+    const openPayload = decodeFreeUsageOpen(decodeSentFrame(buyerConn.frames[0]!).payload);
+
+    const waitForAck = buyerManager.waitForOpenAck(seller.peerId, 100);
+    buyerManager.handleAck(seller.peerId, {
+      channelId: openPayload.channelId,
+      acceptedSequence: '0',
+    });
+    await expect(waitForAck).resolves.toBeUndefined();
+
+    const timedOutManager = new BuyerFreeUsageManager(buyer, freeUsageConfig());
+    const timedOutConn = makeConn();
+    const timedOutMux = new PaymentMux(timedOutConn.conn as any);
+    await timedOutManager.prepareOpen(sellerPeer(), timedOutMux);
+
+    await expect(timedOutManager.waitForOpenAck(seller.peerId, 1)).rejects.toThrow(/timed out waiting/);
+    expect((timedOutManager as any)._sessions.size).toBe(0);
   });
 
   it('persists free usage accounting in the shared channel store', async () => {
@@ -381,7 +406,7 @@ describe('FreeUsage P2P lifecycle', () => {
 
   it('seller verifies open, requests usage auth, and reports the buyer signature', async () => {
     const buyerManager = new BuyerFreeUsageManager(buyer, freeUsageConfig());
-    const sellerManager = new SellerFreeUsageManager(seller, sellerConfig());
+    const sellerManager = new SellerFreeUsageManager(seller, sellerConfig({ recordBatchSize: 1 }));
     const client = installMockClient(sellerManager);
     const sellerConn = makeConn();
     const sellerMux = new PaymentMux(sellerConn.conn as any);
@@ -456,9 +481,81 @@ describe('FreeUsage P2P lifecycle', () => {
     });
   });
 
+  it('seller batches free usage records after local auth acceptance', async () => {
+    const buyerManager = new BuyerFreeUsageManager(buyer, freeUsageConfig());
+    const sellerManager = new SellerFreeUsageManager(seller, sellerConfig({
+      recordBatchSize: 2,
+      recordFlushIntervalMs: 60_000,
+    }));
+    const client = installMockClient(sellerManager);
+    const sellerConn = makeConn();
+    const sellerMux = new PaymentMux(sellerConn.conn as any);
+    const buyerConn = makeConn();
+    const buyerMux = new PaymentMux(buyerConn.conn as any);
+    const openPayload = await prepareOpen(buyerManager);
+
+    await openSellerSession(sellerManager, openPayload, sellerMux);
+    buyerManager.handleAck(seller.peerId, {
+      channelId: openPayload.channelId,
+      acceptedSequence: '0',
+    });
+    sellerConn.frames.length = 0;
+
+    sellerManager.reportUsageRequest(buyer.peerId, sellerMux, {
+      requestId: 'req-free-batch-1',
+      inputTokens: 12,
+      outputTokens: 7,
+      service: 'gpt-free',
+    });
+    buyerManager.trackRequestService('req-free-batch-1', 'gpt-free');
+    await buyerManager.handleNeedAuth(
+      seller.peerId,
+      decodeNeedFreeUsageAuth(decodeSentFrame(sellerConn.frames[0]!).payload),
+      buyerMux,
+    );
+    sellerConn.frames.length = 0;
+    sellerManager.handleAuth(buyer.peerId, decodeFreeUsageAuth(decodeSentFrame(buyerConn.frames[0]!).payload), sellerMux);
+    await flushAsync();
+
+    expect(client.record).not.toHaveBeenCalled();
+    expect(decodeFreeUsageAck(decodeSentFrame(sellerConn.frames[0]!).payload)).toEqual({
+      channelId: openPayload.channelId,
+      acceptedSequence: '1',
+    });
+
+    sellerConn.frames.length = 0;
+    buyerConn.frames.length = 0;
+    sellerManager.reportUsageRequest(buyer.peerId, sellerMux, {
+      requestId: 'req-free-batch-2',
+      inputTokens: 5,
+      outputTokens: 3,
+      service: 'gpt-free',
+    });
+    buyerManager.trackRequestService('req-free-batch-2', 'gpt-free');
+    await buyerManager.handleNeedAuth(
+      seller.peerId,
+      decodeNeedFreeUsageAuth(decodeSentFrame(sellerConn.frames[0]!).payload),
+      buyerMux,
+    );
+    const secondAuth = decodeFreeUsageAuth(decodeSentFrame(buyerConn.frames[0]!).payload);
+    sellerManager.handleAuth(buyer.peerId, secondAuth, sellerMux);
+
+    await vi.waitFor(() => {
+      expect(client.record).toHaveBeenCalledOnce();
+    });
+    expect(client.record).toHaveBeenCalledWith(
+      seller.wallet,
+      openPayload.channelId,
+      2n,
+      secondAuth.metadata,
+      BigInt(secondAuth.deadline),
+      secondAuth.usageSig,
+    );
+  });
+
   it('seller rejects wrong channel, wrong signer, metadata mismatch, and stale sequences', async () => {
     const buyerManager = new BuyerFreeUsageManager(buyer, freeUsageConfig());
-    const sellerManager = new SellerFreeUsageManager(seller, sellerConfig());
+    const sellerManager = new SellerFreeUsageManager(seller, sellerConfig({ recordBatchSize: 1 }));
     const client = installMockClient(sellerManager);
     const sellerConn = makeConn();
     const sellerMux = new PaymentMux(sellerConn.conn as any);
@@ -626,6 +723,24 @@ describe('FreeUsage P2P lifecycle', () => {
     }, sellerMux);
     await flushAsync();
     expect(client.open).not.toHaveBeenCalled();
+    expect(sellerConn.frames).toHaveLength(0);
+  });
+
+  it('seller clears provisional free usage sessions when open fails on-chain', async () => {
+    const buyerManager = new BuyerFreeUsageManager(buyer, freeUsageConfig());
+    const sellerManager = new SellerFreeUsageManager(seller, sellerConfig());
+    const client = installMockClient(sellerManager);
+    client.open.mockRejectedValueOnce(new Error('open reverted'));
+    const sellerConn = makeConn();
+    const sellerMux = new PaymentMux(sellerConn.conn as any);
+    const openPayload = await prepareOpen(buyerManager);
+
+    sellerManager.handleOpen(buyer.peerId, openPayload, sellerMux);
+
+    await vi.waitFor(() => {
+      expect(client.open).toHaveBeenCalledOnce();
+      expect((sellerManager as any)._sessions.size).toBe(0);
+    });
     expect(sellerConn.frames).toHaveLength(0);
   });
 

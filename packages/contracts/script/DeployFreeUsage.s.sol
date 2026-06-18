@@ -5,7 +5,7 @@ import "forge-std/Script.sol";
 
 import { AntseedFreeUsage } from "../payments/AntseedFreeUsage.sol";
 import { IAntseedRegistry } from "../interfaces/IAntseedRegistry.sol";
-import { ISetRegistry, ISetWriter } from "../interfaces/IAntseedWiring.sol";
+import { ISetWriter } from "../interfaces/IAntseedWiring.sol";
 
 /**
  * @title DeployFreeUsage
@@ -54,10 +54,6 @@ contract DeployFreeUsage is Script {
 
         AntseedFreeUsage freeUsage = new AntseedFreeUsage(registryAddress);
         console.log("AntseedFreeUsage:     ", address(freeUsage));
-
-        // Constructor already stores the registry; keep this explicit so
-        // deployment logs match the protocol-wide wiring checks.
-        ISetRegistry(address(freeUsage)).setRegistry(registryAddress);
 
         if (authorizeStats && stats != address(0)) {
             ISetWriter(stats).setWriter(address(freeUsage), true);
