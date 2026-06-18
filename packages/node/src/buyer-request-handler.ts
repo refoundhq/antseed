@@ -116,7 +116,6 @@ export class BuyerRequestHandler {
           await negotiator.prepareFreeUsageOpen(peer, conn);
         } catch (err) {
           debugWarn(`[BuyerRequest] Failed to prepare free usage channel for ${peer.peerId.slice(0, 12)}...: ${err instanceof Error ? err.message : err}`);
-          throw err;
         }
       } else {
         negotiator.bpm.trackRequestService(req.requestId, requestedService);

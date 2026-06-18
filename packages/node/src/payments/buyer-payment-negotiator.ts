@@ -192,7 +192,9 @@ export class BuyerPaymentNegotiator {
     if (!this._freeUsageManager) return;
     const pmux = this.getOrCreatePaymentMux(peer.peerId, conn);
     await this._freeUsageManager.prepareOpen(peer, pmux);
-    await this._freeUsageManager.waitForOpenAck(peer.peerId);
+    void this._freeUsageManager.waitForOpenAck(peer.peerId).catch((err) => {
+      debugWarn(`[BuyerNegotiator] Free usage open ack unavailable for ${peer.peerId.slice(0, 12)}...: ${err instanceof Error ? err.message : err}`);
+    });
   }
 
   // ── Pre-request auth ────────────────────────────────────────

@@ -154,6 +154,75 @@ describe('BuyerRequestHandler payment mux wiring', () => {
     expect(estimateCostFromResponse).not.toHaveBeenCalled();
   });
 
+  it('continues zero-price requests when free usage setup is unavailable', async () => {
+    const peer = {
+      peerId: 'b'.repeat(40),
+      providerPricing: {
+        openai: {
+          defaults: { inputUsdPerMillion: 1, outputUsdPerMillion: 1 },
+          services: {
+            'gpt-free': { inputUsdPerMillion: 0, outputUsdPerMillion: 0 },
+          },
+        },
+      },
+    } as PeerInfo;
+    const request: SerializedHttpRequest = {
+      requestId: 'req-free-legacy',
+      method: 'POST',
+      path: '/v1/chat/completions',
+      headers: { 'content-type': 'application/json' },
+      body: new TextEncoder().encode(JSON.stringify({ model: 'gpt-free' })),
+    };
+
+    const conn = { state: 'open' };
+    const sendProxyRequest = vi.fn((
+      _: SerializedHttpRequest,
+      onResponse: (response: SerializedHttpResponse, metadata: { streamingStart: boolean }) => void,
+    ) => {
+      onResponse({
+        requestId: request.requestId,
+        statusCode: 200,
+        headers: { 'content-type': 'application/json' },
+        body: new Uint8Array(0),
+      }, { streamingStart: false });
+    });
+    const prepareFreeUsageOpen = vi.fn(async () => {
+      throw new Error('free usage unsupported');
+    });
+    const handler = new BuyerRequestHandler(
+      {},
+      {
+        localPeerId: 'a'.repeat(40) as PeerId,
+        negotiator: {
+          bpm: { trackRequestService: vi.fn() },
+          getOrCreatePaymentMux: vi.fn().mockReturnValue({}),
+          prepareFreeUsageOpen,
+          trackFreeUsageRequestService: vi.fn(),
+          preparePreRequestAuth: vi.fn(),
+          sendPostResponseAuth: vi.fn(),
+          estimateCostFromResponse: vi.fn(),
+          parseCostHeaders: vi.fn(),
+          recordResponseContent: vi.fn(),
+        } as any,
+        verificationStorage: null,
+        verificationSampler: null,
+        getConnection: vi.fn(async () => conn) as any,
+        getMux: vi.fn(() => ({
+          sendProxyRequest,
+          cancelProxyRequest: vi.fn(),
+        })) as any,
+        getVerificationMux: vi.fn(() => createNoopVerificationMux()) as any,
+        registerPaymentMux: vi.fn(),
+      },
+    );
+
+    const response = await handler.sendRequest(peer, request);
+
+    expect(response.statusCode).toBe(200);
+    expect(prepareFreeUsageOpen).toHaveBeenCalledWith(peer, conn);
+    expect(sendProxyRequest).toHaveBeenCalledOnce();
+  });
+
   it('re-negotiates on 402 even when the peer was already locked', async () => {
     const peer = { peerId: 'b'.repeat(40) } as PeerInfo;
     const request: SerializedHttpRequest = {
