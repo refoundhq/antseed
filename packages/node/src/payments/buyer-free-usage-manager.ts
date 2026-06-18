@@ -45,6 +45,7 @@ export class BuyerFreeUsageManager {
   private readonly _channelStore?: ChannelStore;
   private readonly _domain: ReturnType<typeof makeFreeUsageDomain>;
   private readonly _sessions = new Map<string, FreeUsageSession>();
+  private readonly _sellerLocks = new Map<string, Promise<void>>();
   private readonly _requestService = new RequestServiceTracker();
 
   constructor(
@@ -138,9 +139,22 @@ export class BuyerFreeUsageManager {
 
   onPeerDisconnect(sellerPeerId: string): void {
     this._sessions.delete(sellerPeerId);
+    this._sellerLocks.delete(sellerPeerId);
   }
 
   async handleNeedAuth(
+    sellerPeerId: string,
+    payload: NeedFreeUsageAuthPayload,
+    paymentMux: PaymentMux,
+  ): Promise<void> {
+    const lock = (this._sellerLocks.get(sellerPeerId) ?? Promise.resolve()).then(async () => {
+      await this._handleNeedAuthInner(sellerPeerId, payload, paymentMux);
+    });
+    this._sellerLocks.set(sellerPeerId, lock.catch(() => {}));
+    return lock;
+  }
+
+  private async _handleNeedAuthInner(
     sellerPeerId: string,
     payload: NeedFreeUsageAuthPayload,
     paymentMux: PaymentMux,

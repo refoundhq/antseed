@@ -243,6 +243,8 @@ export class SellerFreeUsageManager {
     if (!expectedUsage) {
       throw new Error(`unexpected free usage sequence ${sequence}`);
     }
+    // The seller enforces aggregate counters it measured; per-service tuples
+    // remain buyer-attributed audit metadata.
     const signedUsage = this._decodeFreeUsageMetadata(payload.metadata);
     const payloadInputTokens = BigInt(payload.cumulativeInputTokens);
     const payloadOutputTokens = BigInt(payload.cumulativeOutputTokens);

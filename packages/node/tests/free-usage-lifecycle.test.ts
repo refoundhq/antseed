@@ -318,6 +318,67 @@ describe('FreeUsage P2P lifecycle', () => {
     expect(authPayload.cumulativeOutputTokens).toBe('7');
   });
 
+  it('serializes concurrent buyer free usage auth requests per seller', async () => {
+    const buyerManager = new BuyerFreeUsageManager(buyer, freeUsageConfig());
+    const openPayload = await prepareOpen(buyerManager);
+    buyerManager.handleAck(seller.peerId, {
+      channelId: openPayload.channelId,
+      acceptedSequence: '0',
+    });
+    buyerManager.trackRequestService('req-free-concurrent-1', 'gpt-free');
+    buyerManager.trackRequestService('req-free-concurrent-2', 'gpt-free');
+
+    const buyerConn = makeConn();
+    const buyerMux = new PaymentMux(buyerConn.conn as any);
+
+    await Promise.all([
+      buyerManager.handleNeedAuth(seller.peerId, {
+        channelId: openPayload.channelId,
+        requiredSequence: '1',
+        currentAcceptedSequence: '0',
+        requestId: 'req-free-concurrent-1',
+        inputTokens: '12',
+        outputTokens: '7',
+      }, buyerMux),
+      buyerManager.handleNeedAuth(seller.peerId, {
+        channelId: openPayload.channelId,
+        requiredSequence: '2',
+        currentAcceptedSequence: '0',
+        requestId: 'req-free-concurrent-2',
+        inputTokens: '7',
+        outputTokens: '3',
+      }, buyerMux),
+    ]);
+
+    const authPayloads = buyerConn.frames
+      .map((frame) => decodeFreeUsageAuth(decodeSentFrame(frame).payload))
+      .sort((a, b) => Number(BigInt(a.sequence) - BigInt(b.sequence)));
+    expect(authPayloads).toHaveLength(2);
+    expect(authPayloads[0]).toMatchObject({
+      sequence: '1',
+      cumulativeInputTokens: '12',
+      cumulativeOutputTokens: '7',
+    });
+    expect(authPayloads[1]).toMatchObject({
+      sequence: '2',
+      cumulativeInputTokens: '19',
+      cumulativeOutputTokens: '10',
+    });
+    expect(authPayloads[1]!.metadata).toBe(encodeFreeUsageMetadata({
+      cumulativeInputTokens: 19n,
+      cumulativeOutputTokens: 10n,
+      cumulativeRequestCount: 2n,
+      services: [{
+        serviceId: getServiceMetadataId('gpt-free'),
+        cumulativeAmount: 0n,
+        cumulativeInputTokens: 19n,
+        cumulativeCachedInputTokens: 0n,
+        cumulativeOutputTokens: 10n,
+        cumulativeRequestCount: 2n,
+      }],
+    }));
+  });
+
   it('seller verifies open, requests usage auth, and reports the buyer signature', async () => {
     const buyerManager = new BuyerFreeUsageManager(buyer, freeUsageConfig());
     const sellerManager = new SellerFreeUsageManager(seller, sellerConfig());
