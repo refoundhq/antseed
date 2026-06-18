@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { keccak256, verifyTypedData } from 'ethers';
 import { BuyerFreeUsageManager } from '../src/payments/buyer-free-usage-manager.js';
 import { SellerFreeUsageManager } from '../src/payments/seller-free-usage-manager.js';
-import { ChannelStore, CHANNEL_KIND, CHANNEL_ROLE } from '../src/payments/channel-store.js';
+import { ChannelStore, CHANNEL_KIND, CHANNEL_ROLE, CHANNEL_STATUS } from '../src/payments/channel-store.js';
 import { PaymentMux } from '../src/p2p/payment-mux.js';
 import { decodeFrame } from '../src/p2p/message-protocol.js';
 import {
@@ -217,6 +217,70 @@ describe('FreeUsage P2P lifecycle', () => {
 
     await expect(timedOutManager.waitForOpenAck(seller.peerId, 1)).rejects.toThrow(/timed out waiting/);
     expect((timedOutManager as any)._sessions.size).toBe(0);
+  });
+
+  it('does not wedge buyer state when sending FreeUsageOpen fails', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'free-usage-open-send-fails-'));
+    const store = new ChannelStore(dir);
+    try {
+      const buyerManager = new BuyerFreeUsageManager(buyer, freeUsageConfig(), undefined, store);
+      const failingMux = new PaymentMux({
+        send: vi.fn(() => {
+          throw new Error('datachannel closed');
+        }),
+      } as any);
+
+      await expect(buyerManager.prepareOpen(sellerPeer(), failingMux)).rejects.toThrow('datachannel closed');
+      expect((buyerManager as any)._sessions.size).toBe(0);
+      expect(store.getActiveChannelByPeer(seller.peerId, CHANNEL_ROLE.BUYER, CHANNEL_KIND.FREE)).toBeNull();
+
+      const retryConn = makeConn();
+      const retryMux = new PaymentMux(retryConn.conn as any);
+      await buyerManager.prepareOpen(sellerPeer(), retryMux);
+
+      expect(decodeSentFrame(retryConn.frames[0]!).type).toBe(MessageType.FreeUsageOpen);
+    } finally {
+      store.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('hydrates the newest free usage channel after rotation', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'free-usage-rotation-'));
+    const store = new ChannelStore(dir);
+    try {
+      const buyerManager = new BuyerFreeUsageManager(
+        buyer,
+        { ...freeUsageConfig(), defaultAuthDurationSecs: 20 },
+        undefined,
+        store,
+      );
+      const buyerConn = makeConn();
+      const buyerMux = new PaymentMux(buyerConn.conn as any);
+
+      await buyerManager.prepareOpen(sellerPeer(), buyerMux);
+      const firstOpen = decodeFreeUsageOpen(decodeSentFrame(buyerConn.frames[0]!).payload);
+      buyerManager.handleAck(seller.peerId, {
+        channelId: firstOpen.channelId,
+        acceptedSequence: '0',
+      });
+
+      await buyerManager.prepareOpen(sellerPeer(), buyerMux);
+      const secondOpen = decodeFreeUsageOpen(decodeSentFrame(buyerConn.frames[1]!).payload);
+      buyerManager.handleAck(seller.peerId, {
+        channelId: secondOpen.channelId,
+        acceptedSequence: '0',
+      });
+
+      expect(store.getChannel(firstOpen.channelId)?.status).toBe(CHANNEL_STATUS.GHOST);
+      expect(store.getChannel(secondOpen.channelId)?.status).toBe(CHANNEL_STATUS.ACTIVE);
+
+      const restartedManager = new BuyerFreeUsageManager(buyer, freeUsageConfig(), undefined, store);
+      expect((restartedManager as any)._sessions.get(seller.peerId).channelId).toBe(secondOpen.channelId);
+    } finally {
+      store.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it('persists free usage accounting in the shared channel store', async () => {

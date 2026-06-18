@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { BuyerRequestHandler } from '../src/buyer-request-handler.js';
+import { PaymentMux } from '../src/p2p/payment-mux.js';
 import type { SerializedHttpRequest } from '../src/types/http.js';
 import type { SerializedHttpResponse } from '../src/types/http.js';
 import type { PeerInfo, PeerId } from '../src/types/peer.js';
@@ -220,6 +221,71 @@ describe('BuyerRequestHandler payment mux wiring', () => {
 
     expect(response.statusCode).toBe(200);
     expect(prepareFreeUsageOpen).toHaveBeenCalledWith(peer, conn);
+    expect(sendProxyRequest).toHaveBeenCalledOnce();
+  });
+
+  it('opens free usage for zero-price services without a paid negotiator', async () => {
+    const peer = {
+      peerId: 'b'.repeat(40),
+      providerPricing: {
+        openai: {
+          defaults: { inputUsdPerMillion: 1, outputUsdPerMillion: 1 },
+          services: {
+            'gpt-free': { inputUsdPerMillion: 0, outputUsdPerMillion: 0 },
+          },
+        },
+      },
+    } as PeerInfo;
+    const request: SerializedHttpRequest = {
+      requestId: 'req-free-only',
+      method: 'POST',
+      path: '/v1/chat/completions',
+      headers: { 'content-type': 'application/json' },
+      body: new TextEncoder().encode(JSON.stringify({ model: 'gpt-free' })),
+    };
+
+    const conn = { state: 'open' };
+    const sendProxyRequest = vi.fn((
+      _: SerializedHttpRequest,
+      onResponse: (response: SerializedHttpResponse, metadata: { streamingStart: boolean }) => void,
+    ) => {
+      onResponse({
+        requestId: request.requestId,
+        statusCode: 200,
+        headers: { 'content-type': 'application/json' },
+        body: new Uint8Array(0),
+      }, { streamingStart: false });
+    });
+    const freeUsageManager = {
+      trackRequestService: vi.fn(),
+      prepareOpen: vi.fn(async () => {}),
+      waitForOpenAck: vi.fn(async () => {}),
+      handleAck: vi.fn(),
+      handleNeedAuth: vi.fn(async () => {}),
+    };
+    const handler = new BuyerRequestHandler(
+      {},
+      {
+        localPeerId: 'a'.repeat(40) as PeerId,
+        negotiator: null,
+        freeUsageManager: freeUsageManager as any,
+        verificationStorage: null,
+        verificationSampler: null,
+        getConnection: vi.fn(async () => conn) as any,
+        getMux: vi.fn(() => ({
+          sendProxyRequest,
+          cancelProxyRequest: vi.fn(),
+        })) as any,
+        getVerificationMux: vi.fn(() => createNoopVerificationMux()) as any,
+        registerPaymentMux: vi.fn(),
+      },
+    );
+
+    const response = await handler.sendRequest(peer, request);
+
+    expect(response.statusCode).toBe(200);
+    expect(freeUsageManager.trackRequestService).toHaveBeenCalledWith('req-free-only', 'gpt-free');
+    expect(freeUsageManager.prepareOpen).toHaveBeenCalledWith(peer, expect.any(PaymentMux));
     expect(sendProxyRequest).toHaveBeenCalledOnce();
   });
 

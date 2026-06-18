@@ -37,6 +37,7 @@ interface FreeUsageSession {
   services: FreeUsageMetadata['services'];
   openedAck: boolean;
   latestMetadata: FreeUsageMetadata;
+  openSig: string | null;
 }
 
 interface OpenAckWaiter {
@@ -77,6 +78,7 @@ export class BuyerFreeUsageManager {
     if (!this._channelStore) return;
     const activeChannels = this._channelStore.getActiveChannelsByBuyer(CHANNEL_ROLE.BUYER, this._identity.wallet.address, CHANNEL_KIND.FREE);
     for (const channel of activeChannels) {
+      if (this._sessions.has(channel.peerId)) continue;
       const metadata = this._channelStore.getChannelMetadata(channel);
       this._sessions.set(channel.peerId, {
         channelId: channel.sessionId,
@@ -92,6 +94,7 @@ export class BuyerFreeUsageManager {
         services: metadata.services,
         openedAck: true,
         latestMetadata: metadata,
+        openSig: channel.latestBuyerSig,
       });
     }
   }
@@ -132,11 +135,19 @@ export class BuyerFreeUsageManager {
       services: [],
       openedAck: false,
       latestMetadata: metadata,
+      openSig,
     };
     this._sessions.set(peer.peerId, session);
-    this._persistSession(peer.peerId, session, openSig, null, null);
-
-    paymentMux.sendFreeUsageOpen({ channelId, salt, deadline, openSig });
+    try {
+      paymentMux.sendFreeUsageOpen({ channelId, salt, deadline, openSig });
+    } catch (err) {
+      if (existing) {
+        this._sessions.set(peer.peerId, existing);
+      } else {
+        this._sessions.delete(peer.peerId);
+      }
+      throw err;
+    }
     debugLog(`[BuyerFreeUsage] Open sent to ${peer.peerId.slice(0, 12)}... channel=${channelId.slice(0, 18)}...`);
   }
 
@@ -174,6 +185,8 @@ export class BuyerFreeUsageManager {
     const session = this._sessions.get(sellerPeerId);
     if (!session || session.channelId !== payload.channelId) return;
     session.openedAck = true;
+    this._persistSession(sellerPeerId, session, session.openSig, null, null);
+    this._retireOtherActiveSessions(sellerPeerId, session.channelId);
     this._resolveOpenAckWaiters(sellerPeerId, session);
     debugLog(
       `[BuyerFreeUsage] Ack from ${sellerPeerId.slice(0, 12)}... channel=${payload.channelId.slice(0, 18)}...` +
@@ -290,6 +303,19 @@ export class BuyerFreeUsageManager {
     if (!waiters) return;
     waiters.delete(waiter);
     if (waiters.size === 0) this._openAckWaiters.delete(sellerPeerId);
+  }
+
+  private _retireOtherActiveSessions(sellerPeerId: string, keepSessionId: string): void {
+    if (!this._channelStore) return;
+    const activeChannels = this._channelStore.getActiveChannelsByBuyer(
+      CHANNEL_ROLE.BUYER,
+      this._identity.wallet.address,
+      CHANNEL_KIND.FREE,
+    );
+    for (const channel of activeChannels) {
+      if (channel.peerId !== sellerPeerId || channel.sessionId === keepSessionId) continue;
+      this._channelStore.updateChannelStatus(channel.sessionId, CHANNEL_STATUS.GHOST);
+    }
   }
 
   private _persistSession(

@@ -1520,6 +1520,7 @@ export class AntseedNode extends EventEmitter {
       {
         localPeerId: identity.peerId,
         negotiator: this._buyerNegotiator,
+        freeUsageManager: this._buyerFreeUsageManager,
         verificationStorage: this._verificationStorage,
         verificationSampler: this._verificationSampler,
         getConnection: (peer) => this._getOrCreateConnection(peer),

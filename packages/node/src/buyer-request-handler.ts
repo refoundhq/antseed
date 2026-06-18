@@ -8,13 +8,14 @@ import {
 import type { PeerInfo, PeerId } from "./types/peer.js";
 import type { PeerConnection } from "./p2p/connection-manager.js";
 import type { ProxyMux } from "./proxy/proxy-mux.js";
-import type { PaymentMux } from "./p2p/payment-mux.js";
+import { PaymentMux } from "./p2p/payment-mux.js";
 import { ConnectionState } from "./types/connection.js";
 import type { BuyerPaymentNegotiator } from "./payments/buyer-payment-negotiator.js";
 import { debugLog, debugWarn } from "./utils/debug.js";
 import type { VerificationMux } from "./verification/verification-mux.js";
 import type { VerificationStorage } from "./verification/storage.js";
 import type { VerificationSampler } from "./verification/samples.js";
+import type { BuyerFreeUsageManager } from "./payments/buyer-free-usage-manager.js";
 import { verifyResponseAuth } from "./verification/response-auth.js";
 import { tryParseJsonObject } from "./utils/json-codec.js";
 import { CONNECTION_CAPABILITY_RESPONSE_AUTH_V1 } from "./types/protocol.js";
@@ -48,6 +49,7 @@ const DEFAULT_RESPONSE_AUTH_GRACE_MS = 30_000;
 export interface BuyerRequestHandlerDeps {
   localPeerId: PeerId;
   negotiator: BuyerPaymentNegotiator | null;
+  freeUsageManager?: BuyerFreeUsageManager | null;
   verificationStorage: VerificationStorage | null;
   verificationSampler: VerificationSampler | null;
   getConnection: (peer: PeerInfo) => Promise<PeerConnection>;
@@ -119,6 +121,13 @@ export class BuyerRequestHandler {
         }
       } else {
         negotiator.bpm.trackRequestService(req.requestId, requestedService);
+      }
+    } else if (requestedService && isFreeService && this._deps.freeUsageManager) {
+      this._deps.freeUsageManager.trackRequestService(req.requestId, requestedService);
+      try {
+        this._prepareDirectFreeUsageOpen(peer, conn);
+      } catch (err) {
+        debugWarn(`[BuyerRequest] Failed to prepare free usage channel for ${peer.peerId.slice(0, 12)}...: ${err instanceof Error ? err.message : err}`);
       }
     }
 
@@ -315,6 +324,28 @@ export class BuyerRequestHandler {
 
     this._recordResponseAuth(peer, req, response, requestedService, verificationMux);
     return response;
+  }
+
+  private _prepareDirectFreeUsageOpen(peer: PeerInfo, conn: PeerConnection): void {
+    const freeUsage = this._deps.freeUsageManager;
+    if (!freeUsage) return;
+
+    const pmux = new PaymentMux(conn);
+    pmux.onFreeUsageAck((payload) => {
+      freeUsage.handleAck(peer.peerId, payload);
+    });
+    pmux.onNeedFreeUsageAuth((payload) => {
+      const p = freeUsage.handleNeedAuth(peer.peerId, payload, pmux);
+      p.catch((err) => {
+        debugWarn(`[BuyerRequest] Failed to handle free usage auth request from ${peer.peerId.slice(0, 12)}...: ${err instanceof Error ? err.message : err}`);
+      });
+    });
+    this._deps.registerPaymentMux(peer.peerId, pmux);
+    void freeUsage.prepareOpen(peer, pmux)
+      .then(() => freeUsage.waitForOpenAck(peer.peerId))
+      .catch((err) => {
+        debugWarn(`[BuyerRequest] Free usage open ack unavailable for ${peer.peerId.slice(0, 12)}...: ${err instanceof Error ? err.message : err}`);
+      });
   }
 
   private _recordResponseAuth(
