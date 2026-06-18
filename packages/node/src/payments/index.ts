@@ -86,8 +86,8 @@ export { EmissionsClient } from './evm/emissions-client.js';
 export type { EmissionsClientConfig, EmissionsEpochParams } from './evm/emissions-client.js';
 
 // Channel persistence
-export { ChannelStore, CHANNEL_STATUS } from './channel-store.js';
-export type { StoredChannel, StoredReceipt } from './channel-store.js';
+export { ChannelStore, CHANNEL_KIND, CHANNEL_ROLE, CHANNEL_STATUS } from './channel-store.js';
+export type { ChannelKind, ChannelRole, ChannelStatus, StoredChannel, StoredReceipt } from './channel-store.js';
 
 // Buyer payment manager
 export { BuyerPaymentManager } from './buyer-payment-manager.js';

@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { keccak256, verifyTypedData } from 'ethers';
 import { BuyerFreeUsageManager } from '../src/payments/buyer-free-usage-manager.js';
 import { SellerFreeUsageManager } from '../src/payments/seller-free-usage-manager.js';
-import { ChannelStore } from '../src/payments/channel-store.js';
+import { ChannelStore, CHANNEL_KIND, CHANNEL_ROLE } from '../src/payments/channel-store.js';
 import { PaymentMux } from '../src/p2p/payment-mux.js';
 import { decodeFrame } from '../src/p2p/message-protocol.js';
 import {
@@ -215,11 +215,11 @@ describe('FreeUsage P2P lifecycle', () => {
         service: 'gpt-free',
       }, buyerMux);
 
-      expect(store.getActiveChannelByPeer(seller.peerId, 'buyer')).toBeNull();
-      const freeChannel = store.getActiveChannelByPeer(seller.peerId, 'buyer', 'free');
+      expect(store.getActiveChannelByPeer(seller.peerId, CHANNEL_ROLE.BUYER)).toBeNull();
+      const freeChannel = store.getActiveChannelByPeer(seller.peerId, CHANNEL_ROLE.BUYER, CHANNEL_KIND.FREE);
       expect(freeChannel).toMatchObject({
         sessionId: openPayload.channelId,
-        channelKind: 'free',
+        channelKind: CHANNEL_KIND.FREE,
         authMax: '0',
         tokensDelivered: '12',
         previousConsumption: '7',
@@ -257,7 +257,7 @@ describe('FreeUsage P2P lifecycle', () => {
 
       const restartedAuth = decodeFreeUsageAuth(decodeSentFrame(restartedConn.frames[0]!).payload);
       expect(restartedAuth.sequence).toBe('2');
-      const updatedFreeChannel = store.getActiveChannelByPeer(seller.peerId, 'buyer', 'free')!;
+      const updatedFreeChannel = store.getActiveChannelByPeer(seller.peerId, CHANNEL_ROLE.BUYER, CHANNEL_KIND.FREE)!;
       expect(updatedFreeChannel.requestCount).toBe(2);
       expect(updatedFreeChannel.tokensDelivered).toBe('15');
       expect(updatedFreeChannel.previousConsumption).toBe('9');

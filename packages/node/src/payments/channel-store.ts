@@ -12,12 +12,24 @@ export const CHANNEL_STATUS = {
   GHOST: 'ghost',
 } as const;
 
-export type ChannelKind = 'paid' | 'free';
+export const CHANNEL_KIND = {
+  PAID: 'paid',
+  FREE: 'free',
+} as const;
+
+export const CHANNEL_ROLE = {
+  BUYER: 'buyer',
+  SELLER: 'seller',
+} as const;
+
+export type ChannelStatus = typeof CHANNEL_STATUS[keyof typeof CHANNEL_STATUS];
+export type ChannelKind = typeof CHANNEL_KIND[keyof typeof CHANNEL_KIND];
+export type ChannelRole = typeof CHANNEL_ROLE[keyof typeof CHANNEL_ROLE];
 
 export interface StoredChannel {
   sessionId: string;
   peerId: string;
-  role: 'buyer' | 'seller';
+  role: ChannelRole;
   channelKind?: ChannelKind;
   sellerEvmAddr: string;
   buyerEvmAddr: string;
@@ -31,7 +43,7 @@ export interface StoredChannel {
   reservedAt: number;
   settledAt: number | null;
   settledAmount: string | null; // bigint as string
-  status: 'active' | 'settled' | 'timeout' | 'ghost';
+  status: ChannelStatus;
   latestBuyerSig: string | null;
   latestSpendingAuthSig: string | null;
   latestMetadata: string | null;       // hex-encoded
@@ -250,7 +262,7 @@ export class ChannelStore {
       sessionId: channel.sessionId,
       peerId: channel.peerId,
       role: channel.role,
-      channelKind: channel.channelKind ?? 'paid',
+      channelKind: channel.channelKind ?? CHANNEL_KIND.PAID,
       sellerEvmAddr: channel.sellerEvmAddr,
       buyerEvmAddr: channel.buyerEvmAddr,
       nonce: channel.nonce,
@@ -277,12 +289,12 @@ export class ChannelStore {
     return row ? rowToChannel(row) : null;
   }
 
-  getActiveChannelByPeer(peerId: string, role: string, channelKind: ChannelKind = 'paid'): StoredChannel | null {
+  getActiveChannelByPeer(peerId: string, role: ChannelRole, channelKind: ChannelKind = CHANNEL_KIND.PAID): StoredChannel | null {
     const row = this._stmts.getActiveByPeer.get(peerId, role, channelKind, CHANNEL_STATUS.ACTIVE) as ChannelRow | undefined;
     return row ? rowToChannel(row) : null;
   }
 
-  getActiveChannelByPeerAndBuyer(peerId: string, role: string, buyerEvmAddr: string, channelKind: ChannelKind = 'paid'): StoredChannel | null {
+  getActiveChannelByPeerAndBuyer(peerId: string, role: ChannelRole, buyerEvmAddr: string, channelKind: ChannelKind = CHANNEL_KIND.PAID): StoredChannel | null {
     const row = this._stmts.getActiveByPeerAndBuyer.get(
       peerId,
       role,
@@ -293,17 +305,17 @@ export class ChannelStore {
     return row ? rowToChannel(row) : null;
   }
 
-  getLatestChannel(peerId: string, role: string, channelKind: ChannelKind = 'paid'): StoredChannel | null {
+  getLatestChannel(peerId: string, role: ChannelRole, channelKind: ChannelKind = CHANNEL_KIND.PAID): StoredChannel | null {
     const row = this._stmts.getLatestByPeer.get(peerId, role, channelKind) as ChannelRow | undefined;
     return row ? rowToChannel(row) : null;
   }
 
-  getLatestChannelByPeerAndBuyer(peerId: string, role: string, buyerEvmAddr: string, channelKind: ChannelKind = 'paid'): StoredChannel | null {
+  getLatestChannelByPeerAndBuyer(peerId: string, role: ChannelRole, buyerEvmAddr: string, channelKind: ChannelKind = CHANNEL_KIND.PAID): StoredChannel | null {
     const row = this._stmts.getLatestByPeerAndBuyer.get(peerId, role, buyerEvmAddr, channelKind) as ChannelRow | undefined;
     return row ? rowToChannel(row) : null;
   }
 
-  updateChannelStatus(sessionId: string, status: string, settledAmount?: string): void {
+  updateChannelStatus(sessionId: string, status: ChannelStatus, settledAmount?: string): void {
     const now = Date.now();
     if (settledAmount !== undefined) {
       this._stmts.updateStatusWithAmount.run(status, now, settledAmount, now, sessionId);
@@ -316,30 +328,30 @@ export class ChannelStore {
     this._stmts.updateTokens.run(tokens, requestCount, Date.now(), sessionId);
   }
 
-  getMaxNonce(role: string): number {
+  getMaxNonce(role: ChannelRole): number {
     const row = this._stmts.getMaxNonce.get(role) as { max_nonce: number | null } | undefined;
     return row?.max_nonce ?? 0;
   }
 
   /** List all channels ordered by most recent first. */
-  listAllChannels(limit = 100, channelKind: ChannelKind = 'paid'): StoredChannel[] {
+  listAllChannels(limit = 100, channelKind: ChannelKind = CHANNEL_KIND.PAID): StoredChannel[] {
     const rows = this._stmts.listAll.all(channelKind, limit) as ChannelRow[];
     return rows.map(rowToChannel);
   }
 
   /** Get all active channels for a given role (buyer or seller). */
-  getActiveChannels(role: string, channelKind: ChannelKind = 'paid'): StoredChannel[] {
+  getActiveChannels(role: ChannelRole, channelKind: ChannelKind = CHANNEL_KIND.PAID): StoredChannel[] {
     const rows = this._stmts.getActiveChannels.all(role, channelKind, CHANNEL_STATUS.ACTIVE) as ChannelRow[];
     return rows.map(rowToChannel);
   }
 
-  getActiveChannelsByBuyer(role: string, buyerEvmAddr: string, channelKind: ChannelKind = 'paid'): StoredChannel[] {
+  getActiveChannelsByBuyer(role: ChannelRole, buyerEvmAddr: string, channelKind: ChannelKind = CHANNEL_KIND.PAID): StoredChannel[] {
     const rows = this._stmts.getActiveChannelsByBuyer.all(role, buyerEvmAddr, channelKind, CHANNEL_STATUS.ACTIVE) as ChannelRow[];
     return rows.map(rowToChannel);
   }
 
   /** All channels for a given buyer (any status), ordered by most recent first. */
-  getAllChannelsByBuyer(role: string, buyerEvmAddr: string, channelKind: ChannelKind = 'paid'): StoredChannel[] {
+  getAllChannelsByBuyer(role: ChannelRole, buyerEvmAddr: string, channelKind: ChannelKind = CHANNEL_KIND.PAID): StoredChannel[] {
     const rows = this._db
       .prepare(
         'SELECT * FROM payment_channels WHERE role = ? AND buyer_evm_addr = ? AND channel_kind = ? ORDER BY created_at DESC',
@@ -349,7 +361,7 @@ export class ChannelStore {
   }
 
   /** Aggregate totals across all channels for a given peer and role. */
-  getTotalsByPeer(peerId: string, role: string, channelKind: ChannelKind = 'paid'): {
+  getTotalsByPeer(peerId: string, role: ChannelRole, channelKind: ChannelKind = CHANNEL_KIND.PAID): {
     totalSessions: number;
     totalRequests: number;
     totalInputTokens: number;
@@ -389,7 +401,7 @@ export class ChannelStore {
     };
   }
 
-  getTotalsByPeerAndBuyer(peerId: string, role: string, buyerEvmAddr: string, channelKind: ChannelKind = 'paid'): {
+  getTotalsByPeerAndBuyer(peerId: string, role: ChannelRole, buyerEvmAddr: string, channelKind: ChannelKind = CHANNEL_KIND.PAID): {
     totalSessions: number;
     totalRequests: number;
     totalInputTokens: number;
@@ -420,7 +432,7 @@ export class ChannelStore {
 
   // ── Timeout queries ───────────────────────────────────────────
 
-  getTimedOutChannels(timeoutSeconds: number, channelKind: ChannelKind = 'paid'): StoredChannel[] {
+  getTimedOutChannels(timeoutSeconds: number, channelKind: ChannelKind = CHANNEL_KIND.PAID): StoredChannel[] {
     const cutoff = Date.now() - timeoutSeconds * 1000;
     const rows = this._stmts.getTimedOut.all(channelKind, CHANNEL_STATUS.ACTIVE, cutoff) as ChannelRow[];
     return rows.map(rowToChannel);
@@ -573,8 +585,8 @@ function rowToChannel(row: ChannelRow): StoredChannel {
   return {
     sessionId: row.session_id,
     peerId: row.peer_id,
-    role: row.role as 'buyer' | 'seller',
-    channelKind: (row.channel_kind ?? 'paid') as ChannelKind,
+    role: row.role as ChannelRole,
+    channelKind: (row.channel_kind ?? CHANNEL_KIND.PAID) as ChannelKind,
     sellerEvmAddr: row.seller_evm_addr,
     buyerEvmAddr: row.buyer_evm_addr,
     nonce: row.nonce,

@@ -71,6 +71,7 @@ import {
   SellerFreeUsageManager,
   StakingClient,
   ChannelStore,
+  CHANNEL_ROLE,
   CHANNEL_STATUS,
 } from "./payments/index.js";
 import { debugLog, debugWarn } from "./utils/debug.js";
@@ -960,18 +961,18 @@ export class AntseedNode extends EventEmitter {
     const buyerAddress = this._identity?.wallet.address ?? null;
     const channel = (buyerAddress != null)
       ? (
-        this._channelStore?.getActiveChannelByPeerAndBuyer(sellerPeerId, 'buyer', buyerAddress)
-        ?? this._channelStore?.getLatestChannelByPeerAndBuyer(sellerPeerId, 'buyer', buyerAddress)
+        this._channelStore?.getActiveChannelByPeerAndBuyer(sellerPeerId, CHANNEL_ROLE.BUYER, buyerAddress)
+        ?? this._channelStore?.getLatestChannelByPeerAndBuyer(sellerPeerId, CHANNEL_ROLE.BUYER, buyerAddress)
       )
       : (
-        this._channelStore?.getActiveChannelByPeer(sellerPeerId, 'buyer')
-        ?? this._channelStore?.getLatestChannel(sellerPeerId, 'buyer')
+        this._channelStore?.getActiveChannelByPeer(sellerPeerId, CHANNEL_ROLE.BUYER)
+        ?? this._channelStore?.getLatestChannel(sellerPeerId, CHANNEL_ROLE.BUYER)
       )
       ?? null;
 
     const lifetime = (buyerAddress != null)
-      ? this._channelStore?.getTotalsByPeerAndBuyer(sellerPeerId, 'buyer', buyerAddress)
-      : this._channelStore?.getTotalsByPeer(sellerPeerId, 'buyer')
+      ? this._channelStore?.getTotalsByPeerAndBuyer(sellerPeerId, CHANNEL_ROLE.BUYER, buyerAddress)
+      : this._channelStore?.getTotalsByPeer(sellerPeerId, CHANNEL_ROLE.BUYER)
       ?? null;
 
     const liveTotals = this._buyerPaymentManager?.getResponseTokenTotals(sellerPeerId);
@@ -1029,7 +1030,7 @@ export class AntseedNode extends EventEmitter {
   }> {
     const buyerAddress = this._identity?.wallet.address ?? null;
     if (!buyerAddress || !this._channelStore) return [];
-    const stored = this._channelStore.getActiveChannelsByBuyer('buyer', buyerAddress);
+    const stored = this._channelStore.getActiveChannelsByBuyer(CHANNEL_ROLE.BUYER, buyerAddress);
     return stored.map((c) => {
       const liveReserve = this._buyerPaymentManager?.getReserveCeiling(c.peerId);
       const reserveMax = (liveReserve != null && liveReserve > 0n)

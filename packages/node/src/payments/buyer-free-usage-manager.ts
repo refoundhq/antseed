@@ -15,7 +15,7 @@ import {
   signFreeUsageOpen,
   type FreeUsageMetadata,
 } from './evm/signatures.js';
-import type { ChannelStore } from './channel-store.js';
+import { CHANNEL_KIND, CHANNEL_ROLE, CHANNEL_STATUS, type ChannelStore } from './channel-store.js';
 import { advanceUsageMetadata, RequestServiceTracker } from './channel-usage-accounting.js';
 
 export interface BuyerFreeUsageConfig {
@@ -64,7 +64,7 @@ export class BuyerFreeUsageManager {
 
   private _hydrateFromStore(): void {
     if (!this._channelStore) return;
-    const activeChannels = this._channelStore.getActiveChannelsByBuyer('buyer', this._identity.wallet.address, 'free');
+    const activeChannels = this._channelStore.getActiveChannelsByBuyer(CHANNEL_ROLE.BUYER, this._identity.wallet.address, CHANNEL_KIND.FREE);
     for (const channel of activeChannels) {
       const metadata = this._channelStore.getChannelMetadata(channel);
       this._sessions.set(channel.peerId, {
@@ -233,8 +233,8 @@ export class BuyerFreeUsageManager {
     this._channelStore.upsertChannel({
       sessionId: session.channelId,
       peerId: sellerPeerId,
-      role: 'buyer',
-      channelKind: 'free',
+      role: CHANNEL_ROLE.BUYER,
+      channelKind: CHANNEL_KIND.FREE,
       sellerEvmAddr: session.sellerEvmAddr,
       buyerEvmAddr: this._identity.wallet.address,
       nonce: 0,
@@ -247,7 +247,7 @@ export class BuyerFreeUsageManager {
       reservedAt: existing?.reservedAt ?? now,
       settledAt: null,
       settledAmount: null,
-      status: 'active',
+      status: CHANNEL_STATUS.ACTIVE,
       latestBuyerSig: openSig ?? existing?.latestBuyerSig ?? null,
       latestSpendingAuthSig: usageSig ?? existing?.latestSpendingAuthSig ?? null,
       latestMetadata: encodedMetadata ?? existing?.latestMetadata ?? null,

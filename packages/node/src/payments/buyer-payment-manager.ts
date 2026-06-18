@@ -23,7 +23,7 @@ import { debugLog, debugWarn } from '../utils/debug.js';
 import { peerIdToAddress, type PeerId } from '../types/peer.js';
 import type { SellerAddressResolver } from '../discovery/seller-address-resolver.js';
 import type { PeerMetadata } from '../discovery/peer-metadata.js';
-import { ChannelStore, type StoredChannel } from './channel-store.js';
+import { ChannelStore, CHANNEL_ROLE, CHANNEL_STATUS, type StoredChannel } from './channel-store.js';
 import { advanceUsageMetadata, CountedRequestTracker, RequestServiceTracker } from './channel-usage-accounting.js';
 import { estimateCostFromBytes, computeCostUsdc, type ServicePricing } from './pricing.js';
 
@@ -130,7 +130,7 @@ export class BuyerPaymentManager {
 
   /** Hydrate cumulative tracking maps from persisted active buyer sessions. */
   private _hydrateFromStore(): void {
-    const activeChannels = this._channelStore.getActiveChannelsByBuyer('buyer', this._identity.wallet.address);
+    const activeChannels = this._channelStore.getActiveChannelsByBuyer(CHANNEL_ROLE.BUYER, this._identity.wallet.address);
     for (const channel of activeChannels) {
       const peerId = channel.peerId;
       const persistedCumulative = BigInt(channel.authMax);
@@ -182,12 +182,12 @@ export class BuyerPaymentManager {
   }
 
   getActiveSession(sellerPeerId: string): StoredChannel | null {
-    return this._channelStore.getActiveChannelByPeerAndBuyer(sellerPeerId, 'buyer', this._identity.wallet.address);
+    return this._channelStore.getActiveChannelByPeerAndBuyer(sellerPeerId, CHANNEL_ROLE.BUYER, this._identity.wallet.address);
   }
 
   retireSession(
     sellerPeerId: string,
-    status: Extract<StoredChannel['status'], 'settled' | 'timeout' | 'ghost'>,
+    status: typeof CHANNEL_STATUS.SETTLED | typeof CHANNEL_STATUS.TIMEOUT | typeof CHANNEL_STATUS.GHOST,
     settledAmount?: bigint,
   ): void {
     const session = this.getActiveSession(sellerPeerId);
@@ -515,7 +515,7 @@ export class BuyerPaymentManager {
     const session: StoredChannel = {
       sessionId: channelId,
       peerId: sellerPeerId,
-      role: 'buyer',
+      role: CHANNEL_ROLE.BUYER,
       sellerEvmAddr,
       buyerEvmAddr: this._identity.wallet.address,
       nonce: 0,
@@ -528,7 +528,7 @@ export class BuyerPaymentManager {
       reservedAt: now,
       settledAt: null,
       settledAmount: null,
-      status: 'active',
+      status: CHANNEL_STATUS.ACTIVE,
       latestBuyerSig: null,
       latestSpendingAuthSig: null,
       latestMetadata: null,
