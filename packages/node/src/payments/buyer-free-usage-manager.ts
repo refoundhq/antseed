@@ -136,6 +136,10 @@ export class BuyerFreeUsageManager {
     );
   }
 
+  onPeerDisconnect(sellerPeerId: string): void {
+    this._sessions.delete(sellerPeerId);
+  }
+
   async handleNeedAuth(
     sellerPeerId: string,
     payload: NeedFreeUsageAuthPayload,
@@ -154,8 +158,7 @@ export class BuyerFreeUsageManager {
 
     const inputTokens = BigInt(payload.inputTokens ?? '0');
     const outputTokens = BigInt(payload.outputTokens ?? '0');
-    const attributedService = this._requestService.take(payload.requestId) ?? payload.service;
-    session.latestSequence = requiredSequence;
+    const attributedService = this._requestService.get(payload.requestId) ?? payload.service;
 
     const metadata = advanceUsageMetadata(session.latestMetadata, attributedService, {
       amount: 0n,
@@ -164,32 +167,34 @@ export class BuyerFreeUsageManager {
       outputTokens,
       requests: 1n,
     });
-    session.cumulativeInputTokens = metadata.cumulativeInputTokens;
-    session.cumulativeOutputTokens = metadata.cumulativeOutputTokens;
-    session.cumulativeRequestCount = metadata.cumulativeRequestCount;
-    session.services = metadata.services;
-    session.latestMetadata = metadata;
     const metadataHash = computeFreeUsageMetadataHash(metadata);
     const encodedMetadata = encodeFreeUsageMetadata(metadata);
     const usageSig = await signFreeUsageAuth(this._identity.wallet, this._domain, {
       channelId: session.channelId,
-      sequence: session.latestSequence,
+      sequence: requiredSequence,
       metadataHash,
       deadline: BigInt(session.deadline),
     });
 
-    this._persistSession(sellerPeerId, session, null, usageSig, encodedMetadata);
-
     paymentMux.sendFreeUsageAuth({
       channelId: session.channelId,
-      cumulativeInputTokens: session.cumulativeInputTokens.toString(),
-      cumulativeOutputTokens: session.cumulativeOutputTokens.toString(),
-      sequence: session.latestSequence.toString(),
+      cumulativeInputTokens: metadata.cumulativeInputTokens.toString(),
+      cumulativeOutputTokens: metadata.cumulativeOutputTokens.toString(),
+      sequence: requiredSequence.toString(),
       metadataHash,
       metadata: encodedMetadata,
       deadline: session.deadline,
       usageSig,
     });
+
+    session.latestSequence = requiredSequence;
+    session.cumulativeInputTokens = metadata.cumulativeInputTokens;
+    session.cumulativeOutputTokens = metadata.cumulativeOutputTokens;
+    session.cumulativeRequestCount = metadata.cumulativeRequestCount;
+    session.services = metadata.services;
+    session.latestMetadata = metadata;
+    this._requestService.take(payload.requestId);
+    this._persistSession(sellerPeerId, session, null, usageSig, encodedMetadata);
     debugLog(
       `[BuyerFreeUsage] UsageAuth sent to ${sellerPeerId.slice(0, 12)}... ` +
       `channel=${session.channelId.slice(0, 18)}... sequence=${session.latestSequence}`,

@@ -1227,6 +1227,8 @@ export class AntseedNode extends EventEmitter {
         this._decoders.delete(peerId);
         // Clean up buyer-side payment state on disconnect
         this._buyerNegotiator?.onPeerDisconnect(peerId);
+        this._buyerFreeUsageManager?.onPeerDisconnect(peerId);
+        this._sellerFreeUsageManager?.onPeerDisconnect(peerId);
         // Handle buyer disconnect (seller side)
         if (this._sellerPaymentManager) {
           this._sellerPaymentManager.onBuyerDisconnect(peerId);
@@ -1296,6 +1298,7 @@ export class AntseedNode extends EventEmitter {
     );
 
     await this._initializePayments(dataDir);
+    this._warnIfFreeUsageMeteringUnavailable();
 
     // Wire idle session events to on-chain settlement
     if (this._sellerPaymentManager) {
@@ -1983,6 +1986,33 @@ export class AntseedNode extends EventEmitter {
     };
   }
 
+  private _warnIfFreeUsageMeteringUnavailable(): void {
+    if (this._sellerFreeUsageManager || !this._hasFreePricedService()) return;
+    const missingAddress = !this._config.payments?.freeUsageAddress;
+    debugWarn(
+      `[Node] Zero-priced service advertised but AntseedFreeUsage is not configured` +
+      `${missingAddress ? ' (payments.freeUsageAddress missing)' : ''}. ` +
+      `Free requests will be served without on-chain usage proofs.`,
+    );
+  }
+
+  private _hasFreePricedService(): boolean {
+    for (const provider of this._providers) {
+      if (provider.services.length === 0 && this._isZeroPricing(provider.pricing.defaults)) return true;
+      for (const service of provider.services) {
+        const servicePricing = provider.pricing.services?.[service] ?? provider.pricing.defaults;
+        if (this._isZeroPricing(servicePricing)) return true;
+      }
+    }
+    return false;
+  }
+
+  private _isZeroPricing(pricing: { inputUsdPerMillion: number; outputUsdPerMillion: number; cachedInputUsdPerMillion?: number }): boolean {
+    const cachedPrice = pricing.cachedInputUsdPerMillion ?? pricing.inputUsdPerMillion;
+    return pricing.inputUsdPerMillion === 0
+      && pricing.outputUsdPerMillion === 0
+      && cachedPrice === 0;
+  }
 }
 
 function parsePeerAddress(address: string): { host: string; port: number } {

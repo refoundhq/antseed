@@ -277,6 +277,47 @@ describe('FreeUsage P2P lifecycle', () => {
     }
   });
 
+  it('does not advance buyer sequence state when sending usage auth fails', async () => {
+    const buyerManager = new BuyerFreeUsageManager(buyer, freeUsageConfig());
+    const openPayload = await prepareOpen(buyerManager);
+    buyerManager.handleAck(seller.peerId, {
+      channelId: openPayload.channelId,
+      acceptedSequence: '0',
+    });
+    buyerManager.trackRequestService('req-free-send-fails', 'gpt-free');
+
+    const failingMux = new PaymentMux({
+      send: vi.fn(() => {
+        throw new Error('datachannel closed');
+      }),
+    } as any);
+
+    await expect(buyerManager.handleNeedAuth(seller.peerId, {
+      channelId: openPayload.channelId,
+      requiredSequence: '1',
+      currentAcceptedSequence: '0',
+      requestId: 'req-free-send-fails',
+      inputTokens: '12',
+      outputTokens: '7',
+    }, failingMux)).rejects.toThrow('datachannel closed');
+
+    const retryConn = makeConn();
+    const retryMux = new PaymentMux(retryConn.conn as any);
+    await buyerManager.handleNeedAuth(seller.peerId, {
+      channelId: openPayload.channelId,
+      requiredSequence: '1',
+      currentAcceptedSequence: '0',
+      requestId: 'req-free-send-fails',
+      inputTokens: '12',
+      outputTokens: '7',
+    }, retryMux);
+
+    const authPayload = decodeFreeUsageAuth(decodeSentFrame(retryConn.frames[0]!).payload);
+    expect(authPayload.sequence).toBe('1');
+    expect(authPayload.cumulativeInputTokens).toBe('12');
+    expect(authPayload.cumulativeOutputTokens).toBe('7');
+  });
+
   it('seller verifies open, requests usage auth, and reports the buyer signature', async () => {
     const buyerManager = new BuyerFreeUsageManager(buyer, freeUsageConfig());
     const sellerManager = new SellerFreeUsageManager(seller, sellerConfig());
@@ -367,6 +408,13 @@ describe('FreeUsage P2P lifecycle', () => {
       channelId: openPayload.channelId,
       acceptedSequence: '0',
     });
+    sellerManager.reportUsageRequest(buyer.peerId, sellerMux, {
+      requestId: 'req-free-1',
+      inputTokens: 12,
+      outputTokens: 7,
+      service: 'gpt-free',
+    });
+    sellerConn.frames.length = 0;
 
     const buyerConn = makeConn();
     const buyerMux = new PaymentMux(buyerConn.conn as any);
@@ -433,6 +481,40 @@ describe('FreeUsage P2P lifecycle', () => {
     expect(client.record).not.toHaveBeenCalled();
     expect(sellerConn.frames).toHaveLength(0);
 
+    const mismatchedMetadata = encodeFreeUsageMetadata({
+      cumulativeInputTokens: 13n,
+      cumulativeOutputTokens: 7n,
+      cumulativeRequestCount: 1n,
+      services: [{
+        serviceId: getServiceMetadataId('gpt-free'),
+        cumulativeAmount: 0n,
+        cumulativeInputTokens: 13n,
+        cumulativeCachedInputTokens: 0n,
+        cumulativeOutputTokens: 7n,
+        cumulativeRequestCount: 1n,
+      }],
+    });
+    const mismatchedTotalsAuth: FreeUsageAuthPayload = {
+      ...validAuth,
+      cumulativeInputTokens: '13',
+      metadata: mismatchedMetadata,
+      metadataHash: keccak256(mismatchedMetadata),
+      usageSig: await signFreeUsageAuth(
+        buyer.wallet,
+        makeFreeUsageDomain(CHAIN_ID, FREE_USAGE_ADDRESS),
+        {
+          channelId: openPayload.channelId,
+          sequence: 1n,
+          metadataHash: keccak256(mismatchedMetadata),
+          deadline: BigInt(validAuth.deadline),
+        },
+      ),
+    };
+    sellerManager.handleAuth(buyer.peerId, mismatchedTotalsAuth, sellerMux);
+    await flushAsync();
+    expect(client.record).not.toHaveBeenCalled();
+    expect(sellerConn.frames).toHaveLength(0);
+
     sellerManager.handleAuth(buyer.peerId, validAuth, sellerMux);
     await vi.waitFor(() => {
       expect(client.record).toHaveBeenCalledOnce();
@@ -484,5 +566,26 @@ describe('FreeUsage P2P lifecycle', () => {
     await flushAsync();
     expect(client.open).not.toHaveBeenCalled();
     expect(sellerConn.frames).toHaveLength(0);
+  });
+
+  it('cleans up free usage sessions on peer disconnect', async () => {
+    const buyerManager = new BuyerFreeUsageManager(buyer, freeUsageConfig());
+    const sellerManager = new SellerFreeUsageManager(seller, sellerConfig());
+    installMockClient(sellerManager);
+    const sellerConn = makeConn();
+    const sellerMux = new PaymentMux(sellerConn.conn as any);
+    const openPayload = await prepareOpen(buyerManager);
+
+    await openSellerSession(sellerManager, openPayload, sellerMux);
+    expect((buyerManager as any)._sessions.size).toBe(1);
+    expect((sellerManager as any)._sessions.size).toBe(1);
+    expect((sellerManager as any)._buyerLocks.size).toBe(1);
+
+    buyerManager.onPeerDisconnect(seller.peerId);
+    sellerManager.onPeerDisconnect(buyer.peerId);
+
+    expect((buyerManager as any)._sessions.size).toBe(0);
+    expect((sellerManager as any)._sessions.size).toBe(0);
+    expect((sellerManager as any)._buyerLocks.size).toBe(0);
   });
 });

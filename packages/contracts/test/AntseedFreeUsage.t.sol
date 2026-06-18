@@ -164,6 +164,143 @@ contract AntseedFreeUsageTest is Test {
         assertEq(buyerStats.totalRequestCount, 2);
     }
 
+    function test_open_revert_expired() public {
+        vm.warp(1000);
+        bytes32 salt = keccak256("expired-open");
+        bytes32 channelId = freeUsage.computeChannelId(buyer, seller, salt);
+        uint256 deadline = block.timestamp - 1;
+        bytes memory openSig = signOpen(BUYER_PK, channelId, deadline);
+
+        vm.prank(seller);
+        vm.expectRevert(AntseedFreeUsage.ChannelExpired.selector);
+        freeUsage.open(buyer, salt, deadline, openSig);
+    }
+
+    function test_open_revert_paused() public {
+        bytes32 salt = keccak256("paused-open");
+        bytes32 channelId = freeUsage.computeChannelId(buyer, seller, salt);
+        uint256 deadline = block.timestamp + 1 hours;
+        bytes memory openSig = signOpen(BUYER_PK, channelId, deadline);
+
+        freeUsage.pause();
+
+        vm.prank(seller);
+        vm.expectRevert();
+        freeUsage.open(buyer, salt, deadline, openSig);
+    }
+
+    function test_open_revert_sellerNotStaked() public {
+        bytes32 salt = keccak256("unstaked-open");
+        bytes32 channelId = freeUsage.computeChannelId(buyer, randomUser, salt);
+        uint256 deadline = block.timestamp + 1 hours;
+        bytes memory openSig = signOpen(BUYER_PK, channelId, deadline);
+
+        vm.prank(randomUser);
+        vm.expectRevert(AntseedFreeUsage.SellerNotStaked.selector);
+        freeUsage.open(buyer, salt, deadline, openSig);
+    }
+
+    function test_open_revert_channelExists() public {
+        bytes32 salt = keccak256("double-open");
+        bytes32 channelId = freeUsage.computeChannelId(buyer, seller, salt);
+        uint256 deadline = block.timestamp + 1 hours;
+        bytes memory openSig = signOpen(BUYER_PK, channelId, deadline);
+
+        vm.startPrank(seller);
+        freeUsage.open(buyer, salt, deadline, openSig);
+        vm.expectRevert(AntseedFreeUsage.ChannelExists.selector);
+        freeUsage.open(buyer, salt, deadline, openSig);
+        vm.stopPrank();
+    }
+
+    function test_record_revert_expiredChannel() public {
+        bytes32 salt = keccak256("expired-record");
+        bytes32 channelId = freeUsage.computeChannelId(buyer, seller, salt);
+        uint256 channelDeadline = block.timestamp + 1;
+        bytes memory openSig = signOpen(BUYER_PK, channelId, channelDeadline);
+        vm.prank(seller);
+        freeUsage.open(buyer, salt, channelDeadline, openSig);
+
+        vm.warp(channelDeadline + 1);
+        bytes memory metadata = encodeMetadata(100, 40, 1, oneService(), zeroPrices());
+        uint256 usageDeadline = block.timestamp + 1 hours;
+        bytes memory usageSig = signUsage(BUYER_PK, channelId, 1, metadata, usageDeadline);
+
+        vm.prank(seller);
+        vm.expectRevert(AntseedFreeUsage.ChannelExpired.selector);
+        freeUsage.record(channelId, 1, metadata, usageDeadline, usageSig);
+    }
+
+    function test_close_revert_expiredChannel() public {
+        bytes32 salt = keccak256("expired-close");
+        bytes32 channelId = freeUsage.computeChannelId(buyer, seller, salt);
+        uint256 channelDeadline = block.timestamp + 1;
+        bytes memory openSig = signOpen(BUYER_PK, channelId, channelDeadline);
+        vm.prank(seller);
+        freeUsage.open(buyer, salt, channelDeadline, openSig);
+
+        vm.warp(channelDeadline + 1);
+        bytes memory metadata = encodeMetadata(100, 40, 1, oneService(), zeroPrices());
+        uint256 usageDeadline = block.timestamp + 1 hours;
+        bytes memory usageSig = signUsage(BUYER_PK, channelId, 1, metadata, usageDeadline);
+
+        vm.prank(seller);
+        vm.expectRevert(AntseedFreeUsage.ChannelExpired.selector);
+        freeUsage.close(channelId, 1, metadata, usageDeadline, usageSig);
+    }
+
+    function test_recordAndClose_revert_notAuthorized() public {
+        (bytes32 channelId, uint256 deadline) = openFreeChannel();
+        bytes memory metadata = encodeMetadata(100, 40, 1, oneService(), zeroPrices());
+        bytes memory usageSig = signUsage(BUYER_PK, channelId, 1, metadata, deadline);
+
+        vm.prank(randomUser);
+        vm.expectRevert(AntseedFreeUsage.NotAuthorized.selector);
+        freeUsage.record(channelId, 1, metadata, deadline, usageSig);
+
+        vm.prank(randomUser);
+        vm.expectRevert(AntseedFreeUsage.NotAuthorized.selector);
+        freeUsage.close(channelId, 1, metadata, deadline, usageSig);
+    }
+
+    function test_record_revert_afterClose() public {
+        (bytes32 channelId, uint256 deadline) = openFreeChannel();
+        bytes memory metadata = encodeMetadata(100, 40, 1, oneService(), zeroPrices());
+        bytes memory usageSig = signUsage(BUYER_PK, channelId, 1, metadata, deadline);
+
+        vm.prank(seller);
+        freeUsage.close(channelId, 1, metadata, deadline, usageSig);
+
+        vm.prank(seller);
+        vm.expectRevert(AntseedFreeUsage.ChannelNotActive.selector);
+        freeUsage.record(channelId, 1, metadata, deadline, usageSig);
+    }
+
+    function test_record_revert_crossChannelSignature() public {
+        (bytes32 channelId, uint256 deadline) = openFreeChannel();
+        bytes32 otherChannelId = freeUsage.computeChannelId(buyer, seller, keccak256("other-channel"));
+        bytes memory metadata = encodeMetadata(100, 40, 1, oneService(), zeroPrices());
+        bytes memory usageSig = signUsage(BUYER_PK, otherChannelId, 1, metadata, deadline);
+
+        vm.prank(seller);
+        vm.expectRevert(AntseedFreeUsage.InvalidSignature.selector);
+        freeUsage.record(channelId, 1, metadata, deadline, usageSig);
+    }
+
+    function test_close_sequenceZeroDoesNotIncrementStats() public {
+        (bytes32 channelId, uint256 deadline) = openFreeChannel();
+        bytes memory metadata = encodeMetadata(0, 0, 0, oneService(), zeroPrices());
+        bytes memory usageSig = signUsage(BUYER_PK, channelId, 0, metadata, deadline);
+
+        vm.prank(seller);
+        freeUsage.close(channelId, 0, metadata, deadline, usageSig);
+
+        AntseedFreeUsage.AgentStats memory agentStats = freeUsage.getAgentStats(sellerAgentId);
+        assertEq(agentStats.channelCount, 0);
+        assertEq(agentStats.lastSettledAt, 0);
+        assertEq(freeUsage.activeChannelCount(seller), 0);
+    }
+
     function test_computeChannelId_isSeparatedFromPaidChannels() public view {
         bytes32 salt = keccak256("shared-salt");
         bytes32 paidChannelId = keccak256(abi.encode(buyer, seller, salt));

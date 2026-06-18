@@ -24,6 +24,14 @@ function parsePaymentJson(data: Uint8Array): Record<string, unknown> {
   });
 }
 
+function requireFiniteNumberField(obj: Record<string, unknown>, field: string): number {
+  const value = typeof obj[field] === 'number' ? obj[field] : Number(requireStringField(obj, field));
+  if (!Number.isFinite(value)) {
+    throw new Error(`Payment payload field "${field}" must be a finite number`);
+  }
+  return value;
+}
+
 // --- Encoders ---
 
 export function encodeSpendingAuth(payload: SpendingAuthPayload): Uint8Array {
@@ -88,7 +96,7 @@ export function decodeFreeUsageOpen(data: Uint8Array): FreeUsageOpenPayload {
   return {
     channelId: requireStringField(obj, 'channelId'),
     salt: requireStringField(obj, 'salt'),
-    deadline: typeof obj.deadline === 'number' ? obj.deadline : Number(requireStringField(obj, 'deadline')),
+    deadline: requireFiniteNumberField(obj, 'deadline'),
     openSig: requireStringField(obj, 'openSig'),
   };
 }
@@ -102,7 +110,7 @@ export function decodeFreeUsageAuth(data: Uint8Array): FreeUsageAuthPayload {
     sequence: requireStringField(obj, 'sequence'),
     metadataHash: requireStringField(obj, 'metadataHash'),
     metadata: requireStringField(obj, 'metadata'),
-    deadline: typeof obj.deadline === 'number' ? obj.deadline : Number(requireStringField(obj, 'deadline')),
+    deadline: requireFiniteNumberField(obj, 'deadline'),
     usageSig: requireStringField(obj, 'usageSig'),
   };
 }

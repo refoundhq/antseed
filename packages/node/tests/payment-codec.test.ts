@@ -39,6 +39,16 @@ describe('payment codec round-trips', () => {
     expect(decodeFreeUsageOpen(encodeFreeUsageOpen(payload))).toEqual(payload);
   });
 
+  it('rejects FreeUsageOpen with a non-finite deadline', () => {
+    const encoded = new TextEncoder().encode(JSON.stringify({
+      channelId: '0x' + 'ab'.repeat(32),
+      salt: '0x' + '01'.repeat(32),
+      deadline: 'NaN',
+      openSig: '0x' + 'ef'.repeat(65),
+    }));
+    expect(() => decodeFreeUsageOpen(encoded)).toThrow(/finite number/);
+  });
+
   it('FreeUsageAuth', () => {
     const payload = {
       channelId: '0x' + 'ab'.repeat(32),
@@ -51,6 +61,20 @@ describe('payment codec round-trips', () => {
       usageSig: '0x' + 'ef'.repeat(65),
     };
     expect(decodeFreeUsageAuth(encodeFreeUsageAuth(payload))).toEqual(payload);
+  });
+
+  it('rejects FreeUsageAuth with a non-finite deadline', () => {
+    const encoded = new TextEncoder().encode(JSON.stringify({
+      channelId: '0x' + 'ab'.repeat(32),
+      cumulativeInputTokens: '100',
+      cumulativeOutputTokens: '40',
+      sequence: '2',
+      metadataHash: '0x' + 'cd'.repeat(32),
+      metadata: '0x' + '12'.repeat(128),
+      deadline: 'NaN',
+      usageSig: '0x' + 'ef'.repeat(65),
+    }));
+    expect(() => decodeFreeUsageAuth(encoded)).toThrow(/finite number/);
   });
 
   it('FreeUsageAck', () => {

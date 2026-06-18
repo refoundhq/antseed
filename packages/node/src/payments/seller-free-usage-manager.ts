@@ -1,4 +1,4 @@
-import { keccak256, verifyTypedData } from 'ethers';
+import { AbiCoder, keccak256, verifyTypedData } from 'ethers';
 import type { Identity } from '../p2p/identity.js';
 import type { PaymentMux } from '../p2p/payment-mux.js';
 import type {
@@ -30,7 +30,32 @@ interface SellerFreeUsageSession {
   deadline: number;
   acceptedSequence: bigint;
   requestedSequence: bigint;
+  requestedInputTokens: bigint;
+  requestedOutputTokens: bigint;
+  requestedRequestCount: bigint;
+  expectedUsageBySequence: Map<string, ExpectedFreeUsage>;
   openPromise: Promise<void>;
+}
+
+interface ExpectedFreeUsage {
+  cumulativeInputTokens: bigint;
+  cumulativeOutputTokens: bigint;
+  cumulativeRequestCount: bigint;
+}
+
+const FREE_USAGE_METADATA_ABI = [
+  'uint256',
+  'uint256',
+  'uint256',
+  'uint256',
+  'tuple(bytes32 serviceId,uint256 cumulativeAmount,uint256 cumulativeInputTokens,uint256 cumulativeCachedInputTokens,uint256 cumulativeOutputTokens,uint256 cumulativeRequestCount)[]',
+] as const;
+
+const FREE_USAGE_METADATA_VERSION = 1n;
+
+function normalizeTokenCount(value: number): bigint {
+  if (!Number.isFinite(value) || value <= 0) return 0n;
+  return BigInt(Math.trunc(value));
 }
 
 export class SellerFreeUsageManager {
@@ -77,6 +102,11 @@ export class SellerFreeUsageManager {
     });
   }
 
+  onPeerDisconnect(buyerPeerId: string): void {
+    this._sessions.delete(buyerPeerId);
+    this._buyerLocks.delete(buyerPeerId);
+  }
+
   reportUsageRequest(
     buyerPeerId: string,
     paymentMux: PaymentMux,
@@ -91,20 +121,29 @@ export class SellerFreeUsageManager {
     const nextSequence = (session.requestedSequence > session.acceptedSequence
       ? session.requestedSequence
       : session.acceptedSequence) + 1n;
-    session.requestedSequence = nextSequence;
-
     const payload: NeedFreeUsageAuthPayload = {
       channelId: session.channelId,
       requiredSequence: nextSequence.toString(),
       currentAcceptedSequence: session.acceptedSequence.toString(),
       ...(usage.requestId ? { requestId: usage.requestId } : {}),
-      inputTokens: String(Math.max(0, usage.inputTokens)),
-      outputTokens: String(Math.max(0, usage.outputTokens)),
+      inputTokens: normalizeTokenCount(usage.inputTokens).toString(),
+      outputTokens: normalizeTokenCount(usage.outputTokens).toString(),
       ...(usage.service ? { service: usage.service } : {}),
     };
 
     try {
       paymentMux.sendNeedFreeUsageAuth(payload);
+      const inputTokens = normalizeTokenCount(usage.inputTokens);
+      const outputTokens = normalizeTokenCount(usage.outputTokens);
+      session.requestedSequence = nextSequence;
+      session.requestedInputTokens += inputTokens;
+      session.requestedOutputTokens += outputTokens;
+      session.requestedRequestCount += 1n;
+      session.expectedUsageBySequence.set(nextSequence.toString(), {
+        cumulativeInputTokens: session.requestedInputTokens,
+        cumulativeOutputTokens: session.requestedOutputTokens,
+        cumulativeRequestCount: session.requestedRequestCount,
+      });
       debugLog(
         `[SellerFreeUsage] NeedFreeUsageAuth sent to ${buyerPeerId.slice(0, 12)}... ` +
         `channel=${session.channelId.slice(0, 18)}... sequence=${nextSequence}`,
@@ -146,6 +185,10 @@ export class SellerFreeUsageManager {
       deadline: payload.deadline,
       acceptedSequence: 0n,
       requestedSequence: 0n,
+      requestedInputTokens: 0n,
+      requestedOutputTokens: 0n,
+      requestedRequestCount: 0n,
+      expectedUsageBySequence: new Map(),
       openPromise,
     };
     this._sessions.set(buyerPeerId, session);
@@ -195,6 +238,27 @@ export class SellerFreeUsageManager {
     if (metadataHash.toLowerCase() !== payload.metadataHash.toLowerCase()) {
       throw new Error('metadataHash mismatch');
     }
+    const sequenceKey = sequence.toString();
+    const expectedUsage = session.expectedUsageBySequence.get(sequenceKey);
+    if (!expectedUsage) {
+      throw new Error(`unexpected free usage sequence ${sequence}`);
+    }
+    const signedUsage = this._decodeFreeUsageMetadata(payload.metadata);
+    const payloadInputTokens = BigInt(payload.cumulativeInputTokens);
+    const payloadOutputTokens = BigInt(payload.cumulativeOutputTokens);
+    if (
+      payloadInputTokens !== signedUsage.cumulativeInputTokens
+      || payloadOutputTokens !== signedUsage.cumulativeOutputTokens
+      || signedUsage.cumulativeInputTokens !== expectedUsage.cumulativeInputTokens
+      || signedUsage.cumulativeOutputTokens !== expectedUsage.cumulativeOutputTokens
+      || signedUsage.cumulativeRequestCount !== expectedUsage.cumulativeRequestCount
+    ) {
+      throw new Error(
+        `free usage totals mismatch sequence=${sequence} ` +
+        `expected(in=${expectedUsage.cumulativeInputTokens},out=${expectedUsage.cumulativeOutputTokens},requests=${expectedUsage.cumulativeRequestCount}) ` +
+        `got(in=${signedUsage.cumulativeInputTokens},out=${signedUsage.cumulativeOutputTokens},requests=${signedUsage.cumulativeRequestCount})`,
+      );
+    }
     const recovered = verifyTypedData(
       this._domain,
       FREE_USAGE_AUTH_TYPES,
@@ -221,6 +285,9 @@ export class SellerFreeUsageManager {
     );
 
     session.acceptedSequence = sequence;
+    for (const key of session.expectedUsageBySequence.keys()) {
+      if (BigInt(key) <= sequence) session.expectedUsageBySequence.delete(key);
+    }
     paymentMux.sendFreeUsageAck({
       channelId: payload.channelId,
       acceptedSequence: sequence.toString(),
@@ -237,5 +304,20 @@ export class SellerFreeUsageManager {
     } catch {
       return null;
     }
+  }
+
+  private _decodeFreeUsageMetadata(metadata: string): ExpectedFreeUsage {
+    const [version, inputTokens, outputTokens, requestCount] = AbiCoder.defaultAbiCoder().decode(
+      FREE_USAGE_METADATA_ABI,
+      metadata,
+    );
+    if (BigInt(version) !== FREE_USAGE_METADATA_VERSION) {
+      throw new Error(`unsupported free usage metadata version ${version}`);
+    }
+    return {
+      cumulativeInputTokens: BigInt(inputTokens),
+      cumulativeOutputTokens: BigInt(outputTokens),
+      cumulativeRequestCount: BigInt(requestCount),
+    };
   }
 }
