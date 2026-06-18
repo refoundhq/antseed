@@ -28,6 +28,14 @@ export interface ProviderAnnouncement {
   servicePricing?: Record<string, TokenPricingUsdPerMillion>;
   serviceCategories?: Record<string, string[]>;
   serviceApiProtocols?: Record<string, ServiceApiProtocol[]>;
+  /**
+   * Optional TEE attestation evidence URL (relative path like `/evidence`
+   * resolved against the peer's signaling endpoint, or an absolute URL).
+   * Advertised by TEE-wrapped sellers so buyers can fetch attestation evidence.
+   * TODO(tee): wire into codec + bump METADATA_VERSION (encode only when
+   * version >= next bump, gated like prior additive extensions).
+   */
+  teeAttestationUrl?: string;
   maxConcurrency: number;
   currentLoad: number;
 }

@@ -504,6 +504,22 @@ importers:
         specifier: ^2.0.0
         version: 2.1.9(@types/node@22.7.5)(sass@1.97.3)(terser@5.46.0)
 
+  packages/tee:
+    dependencies:
+      '@antseed/node':
+        specifier: '>=0.1.0'
+        version: link:../node
+    devDependencies:
+      '@types/node':
+        specifier: ^20.11.0
+        version: 20.19.33
+      typescript:
+        specifier: ^5.5.0
+        version: 5.9.3
+      vitest:
+        specifier: ^2.0.0
+        version: 2.1.9(@types/node@20.19.33)(sass@1.97.3)(terser@5.46.0)
+
   packages/ui:
     dependencies:
       aria-hidden:

@@ -1,0 +1,51 @@
+{
+  "name": "@antseed/tee",
+  "version": "0.0.1",
+  "description": "Confidential-broker attestation primitive, buyer verifier, and approved-code valid-set registry for AntSeed TEE sellers (MVP: requirement #1 — only approved code runs).",
+  "type": "module",
+  "files": [
+    "dist"
+  ],
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./attestation": {
+      "import": "./dist/attestation/index.js",
+      "types": "./dist/attestation/index.d.ts"
+    },
+    "./evidence": {
+      "import": "./dist/evidence/routes.js",
+      "types": "./dist/evidence/routes.d.ts"
+    },
+    "./verifier": {
+      "import": "./dist/verifier/verify.js",
+      "types": "./dist/verifier/verify.d.ts"
+    },
+    "./registry": {
+      "import": "./dist/registry/client.js",
+      "types": "./dist/registry/client.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "@antseed/node": ">=0.1.0"
+  },
+  "peerDependenciesMeta": {
+    "@antseed/node": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "typescript": "^5.5.0",
+    "vitest": "^2.0.0"
+  }
+}

@@ -125,6 +125,29 @@ export interface SellerCLIConfig {
   verifications?: VerificationConfig;
   /** Maximum upload body size (bytes) accepted from buyers per request. Default: 64 MiB. */
   maxUploadBodyBytes?: number;
+  /**
+   * Optional TEE attestation config. When `enabled`, the CLI lazy-loads
+   * `@antseed/tee`, exposes evidence endpoints, and advertises
+   * `teeAttestationUrl` + the `tee` service category. Mirrors
+   * `@antseed/tee`'s `TeeSellerConfig` (kept inline to avoid a hard dependency
+   * on the optional package).
+   */
+  tee?: TeeSellerConfig;
+}
+
+/**
+ * Seller-side TEE attestation config. Structural mirror of
+ * `@antseed/tee`'s `TeeSellerConfig` — see `packages/tee`.
+ */
+export interface TeeSellerConfig {
+  /** Enable TEE attestation: load @antseed/tee, expose evidence endpoints, advertise. */
+  enabled: boolean;
+  /** Force a platform; default is autodetect from sysfs. 'mock' is dev-only. */
+  platform?: 'tdx' | 'sev-snp' | 'mock';
+  /** Content digest of the running image (forward-compat; computed by the base in two-tier). */
+  imageDigest?: string;
+  /** Where the verifier-side approved set lives (defaults to the AntSeed well-known endpoint). */
+  registryUrl?: string;
 }
 
 /**
