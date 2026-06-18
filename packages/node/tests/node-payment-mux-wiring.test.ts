@@ -80,6 +80,80 @@ describe('BuyerRequestHandler payment mux wiring', () => {
     ).toBeLessThan(sendProxyRequest.mock.invocationCallOrder[0]);
   });
 
+  it('opens free usage and skips paid cost tracking for advertised zero-price services', async () => {
+    const peer = {
+      peerId: 'b'.repeat(40),
+      providerPricing: {
+        openai: {
+          defaults: { inputUsdPerMillion: 1, outputUsdPerMillion: 1 },
+          services: {
+            'gpt-free': { inputUsdPerMillion: 0, outputUsdPerMillion: 0 },
+          },
+        },
+      },
+    } as PeerInfo;
+    const request: SerializedHttpRequest = {
+      requestId: 'req-free-usage',
+      method: 'POST',
+      path: '/v1/chat/completions',
+      headers: { 'content-type': 'application/json' },
+      body: new TextEncoder().encode(JSON.stringify({ model: 'gpt-free' })),
+    };
+
+    const conn = { state: 'open' };
+    const sendProxyRequest = vi.fn((
+      _: SerializedHttpRequest,
+      onResponse: (response: SerializedHttpResponse, metadata: { streamingStart: boolean }) => void,
+    ) => {
+      onResponse({
+        requestId: request.requestId,
+        statusCode: 200,
+        headers: { 'content-type': 'application/json' },
+        body: new TextEncoder().encode(JSON.stringify({
+          usage: { prompt_tokens: 12, completion_tokens: 7 },
+        })),
+      }, { streamingStart: false });
+    });
+
+    const trackRequestService = vi.fn();
+    const trackFreeUsageRequestService = vi.fn();
+    const prepareFreeUsageOpen = vi.fn(async () => {});
+    const estimateCostFromResponse = vi.fn();
+    const handler = new BuyerRequestHandler(
+      {},
+      {
+        localPeerId: 'a'.repeat(40) as PeerId,
+        negotiator: {
+          bpm: { trackRequestService },
+          getOrCreatePaymentMux: vi.fn().mockReturnValue({}),
+          prepareFreeUsageOpen,
+          trackFreeUsageRequestService,
+          preparePreRequestAuth: vi.fn(),
+          sendPostResponseAuth: vi.fn(),
+          estimateCostFromResponse,
+          parseCostHeaders: vi.fn(),
+          recordResponseContent: vi.fn(),
+        } as any,
+        verificationStorage: null,
+        verificationSampler: null,
+        getConnection: vi.fn(async () => conn) as any,
+        getMux: vi.fn(() => ({
+          sendProxyRequest,
+          cancelProxyRequest: vi.fn(),
+        })) as any,
+        getVerificationMux: vi.fn(() => createNoopVerificationMux()) as any,
+        registerPaymentMux: vi.fn(),
+      },
+    );
+
+    await handler.sendRequest(peer, request);
+
+    expect(trackFreeUsageRequestService).toHaveBeenCalledWith('req-free-usage', 'gpt-free');
+    expect(prepareFreeUsageOpen).toHaveBeenCalledWith(peer, conn);
+    expect(trackRequestService).not.toHaveBeenCalled();
+    expect(estimateCostFromResponse).not.toHaveBeenCalled();
+  });
+
   it('re-negotiates on 402 even when the peer was already locked', async () => {
     const peer = { peerId: 'b'.repeat(40) } as PeerInfo;
     const request: SerializedHttpRequest = {

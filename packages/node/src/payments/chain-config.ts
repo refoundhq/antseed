@@ -13,6 +13,8 @@ export interface ChainConfig {
   fallbackRpcUrls?: string[];
   depositsContractAddress: string;
   channelsContractAddress: string;
+  /** Optional AntseedFreeUsage contract address for zero-price signed usage. */
+  freeUsageContractAddress?: string;
   stakingContractAddress?: string;
   usdcContractAddress: string;
   identityRegistryAddress?: string;
@@ -104,6 +106,7 @@ export function resolveChainConfig(overrides?: {
   fallbackRpcUrls?: string[];
   depositsContractAddress?: string;
   channelsContractAddress?: string;
+  freeUsageContractAddress?: string;
   stakingContractAddress?: string;
   usdcContractAddress?: string;
   identityRegistryAddress?: string;
@@ -124,6 +127,7 @@ export function resolveChainConfig(overrides?: {
     ...(resolvedFallbacks !== undefined ? { fallbackRpcUrls: resolvedFallbacks } : {}),
     ...(overrides?.depositsContractAddress ? { depositsContractAddress: overrides.depositsContractAddress } : {}),
     ...(overrides?.channelsContractAddress ? { channelsContractAddress: overrides.channelsContractAddress } : {}),
+    ...(overrides?.freeUsageContractAddress ? { freeUsageContractAddress: overrides.freeUsageContractAddress } : {}),
     ...(overrides?.stakingContractAddress ? { stakingContractAddress: overrides.stakingContractAddress } : {}),
     ...(overrides?.usdcContractAddress ? { usdcContractAddress: overrides.usdcContractAddress } : {}),
     ...(overrides?.identityRegistryAddress ? { identityRegistryAddress: overrides.identityRegistryAddress } : {}),

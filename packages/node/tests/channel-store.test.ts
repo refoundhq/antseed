@@ -104,6 +104,27 @@ describe('ChannelStore', () => {
     expect(active!.sessionId).toBe(s2.sessionId);
   });
 
+  it('keeps active paid and free channels separate for the same peer', () => {
+    const paid = makeChannel({
+      sessionId: '0x' + '10'.repeat(32),
+      channelKind: 'paid',
+      createdAt: Date.now() - 1000,
+    });
+    const free = makeChannel({
+      sessionId: '0x' + '20'.repeat(32),
+      channelKind: 'free',
+      authMax: '0',
+      createdAt: Date.now(),
+    });
+    store.upsertChannel(paid);
+    store.upsertChannel(free);
+
+    expect(store.getActiveChannelByPeer('peer-abc123', 'buyer')!.sessionId).toBe(paid.sessionId);
+    expect(store.getActiveChannelByPeer('peer-abc123', 'buyer', 'free')!.sessionId).toBe(free.sessionId);
+    expect(store.listAllChannels()).toHaveLength(1);
+    expect(store.listAllChannels(100, 'free')).toHaveLength(1);
+  });
+
   it('test_getActiveByPeer: returns null when no active channel', () => {
     const s1 = makeChannel({ status: 'settled' });
     store.upsertChannel(s1);

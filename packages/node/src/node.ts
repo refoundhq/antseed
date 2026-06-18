@@ -66,6 +66,9 @@ import {
   type PaymentMethod,
   DepositsClient,
   ChannelsClient,
+  FreeUsageClient,
+  BuyerFreeUsageManager,
+  SellerFreeUsageManager,
   StakingClient,
   ChannelStore,
   CHANNEL_STATUS,
@@ -125,6 +128,8 @@ export interface NodePaymentsConfig {
   depositsAddress?: string;
   /** Deployed AntseedChannels contract address */
   channelsAddress?: string;
+  /** Optional deployed AntseedFreeUsage contract address */
+  freeUsageAddress?: string;
   /** USDC token contract address */
   usdcAddress?: string;
   /** ERC-8004 IdentityRegistry contract address */
@@ -250,6 +255,9 @@ export class AntseedNode extends EventEmitter {
   private _balanceManager: BalanceManager | null = null;
   private _depositsClient: DepositsClient | null = null;
   private _channelsClient: ChannelsClient | null = null;
+  private _freeUsageClient: FreeUsageClient | null = null;
+  private _buyerFreeUsageManager: BuyerFreeUsageManager | null = null;
+  private _sellerFreeUsageManager: SellerFreeUsageManager | null = null;
   private _stakingClient: StakingClient | null = null;
   private _sellerAddressResolver: SellerAddressResolver | null = null;
   private _identityClient: IdentityClient | null = null;
@@ -340,6 +348,20 @@ export class AntseedNode extends EventEmitter {
     return this._identityClient;
   }
 
+  /** AntseedFreeUsage client (null if not configured). */
+  get freeUsageClient(): FreeUsageClient | null {
+    return this._freeUsageClient;
+  }
+
+  /** Buyer-side free usage manager (null if free usage is not configured). */
+  get buyerFreeUsageManager(): BuyerFreeUsageManager | null {
+    return this._buyerFreeUsageManager;
+  }
+
+  /** Seller-side free usage manager (null if free usage is not configured). */
+  get sellerFreeUsageManager(): SellerFreeUsageManager | null {
+    return this._sellerFreeUsageManager;
+  }
 
   /** Current connection state for a peer if a connection exists, otherwise null. */
   getPeerConnectionState(peerId: PeerId): ConnectionState | null {
@@ -503,6 +525,9 @@ export class AntseedNode extends EventEmitter {
     this._balanceManager = null;
     this._depositsClient = null;
     this._channelsClient = null;
+    this._freeUsageClient = null;
+    this._buyerFreeUsageManager = null;
+    this._sellerFreeUsageManager = null;
     this._stakingClient = null;
     this._identityClient = null;
     this._sellerAddressResolver = null;
@@ -1376,6 +1401,7 @@ export class AntseedNode extends EventEmitter {
       identity,
       providers: this._providers,
       sellerPaymentManager: this._sellerPaymentManager,
+      sellerFreeUsageManager: this._sellerFreeUsageManager,
       sessionTracker: this._sessionTracker,
       channelsClient: this._channelsClient,
       announcer: this._announcer,
@@ -1471,6 +1497,7 @@ export class AntseedNode extends EventEmitter {
           {},
           this,
           this._sellerAddressResolver ?? undefined,
+          this._buyerFreeUsageManager,
         );
         debugLog(`[Node] Buyer payment negotiator initialized`);
       }
@@ -1524,6 +1551,22 @@ export class AntseedNode extends EventEmitter {
         debugWarn(`[Node] SpendingAuth rejected — SellerPaymentManager not configured`);
       });
     }
+    if (this._sellerFreeUsageManager) {
+      const freeUsage = this._sellerFreeUsageManager;
+      paymentMux.onFreeUsageOpen((payload) => {
+        freeUsage.handleOpen(buyerPeerId, payload, paymentMux);
+      });
+      paymentMux.onFreeUsageAuth((payload) => {
+        freeUsage.handleAuth(buyerPeerId, payload, paymentMux);
+      });
+    } else {
+      paymentMux.onFreeUsageOpen(() => {
+        debugWarn(`[Node] FreeUsageOpen ignored — SellerFreeUsageManager not configured`);
+      });
+      paymentMux.onFreeUsageAuth(() => {
+        debugWarn(`[Node] FreeUsageAuth ignored — SellerFreeUsageManager not configured`);
+      });
+    }
     this._paymentMuxes.set(buyerPeerId, paymentMux);
     this._verificationMuxes.set(buyerPeerId, verificationMux);
 
@@ -1541,6 +1584,17 @@ export class AntseedNode extends EventEmitter {
     }
 
     const fallbackRpcUrls = payments.fallbackRpcUrls;
+    const paymentsDir = join(dataDir, "payments");
+
+    // Shared store for paid and free channel accounting.
+    if (!this._channelStore) {
+      try {
+        this._channelStore = new ChannelStore(paymentsDir);
+        debugLog("[Node] ChannelStore initialized");
+      } catch (err) {
+        debugWarn(`[Node] ChannelStore unavailable: ${err instanceof Error ? err.message : err}`);
+      }
+    }
 
     // Initialize DepositsClient
     if (payments.rpcUrl && payments.depositsAddress && payments.usdcAddress) {
@@ -1588,6 +1642,39 @@ export class AntseedNode extends EventEmitter {
       debugLog(`[Node] SellerAddressResolver initialized`);
     }
 
+    // Initialize FreeUsageClient
+    if (payments.rpcUrl && payments.freeUsageAddress) {
+      this._freeUsageClient = new FreeUsageClient({
+        rpcUrl: payments.rpcUrl,
+        ...(fallbackRpcUrls ? { fallbackRpcUrls } : {}),
+        contractAddress: payments.freeUsageAddress,
+        ...(payments.chainId ? { evmChainId: payments.chainId } : {}),
+      });
+      debugLog(`[Node] FreeUsageClient initialized (contract=${payments.freeUsageAddress.slice(0, 10)}...)`);
+
+      if (this._identity) {
+        const freeUsageConfig = {
+          rpcUrl: payments.rpcUrl,
+          ...(fallbackRpcUrls ? { fallbackRpcUrls } : {}),
+          freeUsageContractAddress: payments.freeUsageAddress,
+          chainId: payments.chainId ?? 8453,
+        };
+        this._buyerFreeUsageManager = new BuyerFreeUsageManager(
+          this._identity,
+          {
+            chainId: freeUsageConfig.chainId,
+            freeUsageContractAddress: freeUsageConfig.freeUsageContractAddress,
+            defaultAuthDurationSecs: payments.defaultAuthDurationSecs ?? 900,
+          },
+          this._sellerAddressResolver ?? undefined,
+          this._channelStore ?? undefined,
+        );
+        if (this._config.role === 'seller') {
+          this._sellerFreeUsageManager = new SellerFreeUsageManager(this._identity, freeUsageConfig);
+        }
+      }
+    }
+
     // Initialize StakingClient
     if (payments.rpcUrl && payments.stakingAddress && payments.usdcAddress) {
       this._stakingClient = new StakingClient({
@@ -1609,17 +1696,6 @@ export class AntseedNode extends EventEmitter {
         ...(payments.chainId ? { evmChainId: payments.chainId } : {}),
       });
       debugLog(`[Node] IdentityClient initialized (contract=${payments.identityRegistryAddress.slice(0, 10)}...)`);
-    }
-
-    // Initialize ChannelStore for persistent payment channels (shared instance)
-    const paymentsDir = join(dataDir, "payments");
-    if (!this._channelStore) {
-      try {
-        this._channelStore = new ChannelStore(paymentsDir);
-        debugLog("[Node] ChannelStore initialized");
-      } catch (err) {
-        debugWarn(`[Node] ChannelStore unavailable: ${err instanceof Error ? err.message : err}`);
-      }
     }
 
     // Initialize SellerPaymentManager for seller role

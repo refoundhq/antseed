@@ -106,10 +106,18 @@ export class BuyerRequestHandler {
       await negotiator.applyExternalSpendingAuth(peer, conn, externalSpendingAuth);
     }
 
-    // Track which service the buyer requested so NeedAuth validation uses buyer's own pricing
+    // Track which service the buyer requested so auth validation uses buyer's own pricing.
     const requestedService = extractServiceFromBody(req.body);
+    const isFreeService = requestedService ? isPeerServiceFree(peer, requestedService) : false;
     if (negotiator && requestedService) {
-      negotiator.bpm.trackRequestService(req.requestId, requestedService);
+      if (isFreeService) {
+        negotiator.trackFreeUsageRequestService(req.requestId, requestedService);
+        await negotiator.prepareFreeUsageOpen(peer, conn).catch((err) => {
+          debugWarn(`[BuyerRequest] Failed to prepare free usage channel for ${peer.peerId.slice(0, 12)}...: ${err instanceof Error ? err.message : err}`);
+        });
+      } else {
+        negotiator.bpm.trackRequestService(req.requestId, requestedService);
+      }
     }
 
     let startTime = Date.now();
@@ -292,12 +300,14 @@ export class BuyerRequestHandler {
       if (result.action === 'return') return result.response;
       startTime = Date.now();
       const retriedResponse = await executeRequest();
-      negotiator.estimateCostFromResponse(peer, retriedResponse, requestedService, req.requestId);
+      if (!isFreeService) {
+        negotiator.estimateCostFromResponse(peer, retriedResponse, requestedService, req.requestId);
+      }
       this._recordResponseAuth(peer, req, retriedResponse, requestedService, verificationMux);
       return retriedResponse;
     }
 
-    if (negotiator) {
+    if (negotiator && !isFreeService) {
       negotiator.estimateCostFromResponse(peer, response, requestedService, req.requestId);
     }
 
@@ -389,6 +399,33 @@ function shouldExpectResponseAuth(
   if (!requestedService) return false;
   if (response.statusCode === 402) return false;
   return peer.capabilities?.includes(CONNECTION_CAPABILITY_RESPONSE_AUTH_V1) === true;
+}
+
+function isPeerServiceFree(peer: PeerInfo, service: string): boolean {
+  const servicePricing = findPeerServicePricing(peer, service);
+  if (!servicePricing) return false;
+  return (servicePricing.inputUsdPerMillion ?? 0) === 0
+    && (servicePricing.outputUsdPerMillion ?? 0) === 0
+    && (servicePricing.cachedInputUsdPerMillion ?? 0) === 0;
+}
+
+function findPeerServicePricing(peer: PeerInfo, service: string): {
+  inputUsdPerMillion?: number;
+  outputUsdPerMillion?: number;
+  cachedInputUsdPerMillion?: number;
+} | null {
+  for (const providerPricing of Object.values(peer.providerPricing ?? {})) {
+    const servicePricing = providerPricing.services?.[service];
+    if (servicePricing) return servicePricing;
+  }
+  if (peer.defaultInputUsdPerMillion != null || peer.defaultOutputUsdPerMillion != null) {
+    return {
+      inputUsdPerMillion: peer.defaultInputUsdPerMillion ?? 0,
+      outputUsdPerMillion: peer.defaultOutputUsdPerMillion ?? 0,
+      cachedInputUsdPerMillion: peer.defaultCachedInputUsdPerMillion,
+    };
+  }
+  return null;
 }
 
 function concatChunks(chunks: Uint8Array[]): Uint8Array {
