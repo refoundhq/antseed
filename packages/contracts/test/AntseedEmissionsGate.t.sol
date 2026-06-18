@@ -654,6 +654,12 @@ contract AntseedEmissionsGateTest is Test {
         vm.expectRevert(AntseedEmissionsGate.MinterNotEditable.selector);
         gate.setMinter(legacyMinterId, address(this), 1, true);
 
+        address newLegacyMinter = address(0xACE);
+        gate.setMinterController(legacyMinterId, newLegacyMinter);
+        assertEq(_configuredMinter(legacyMinterId), newLegacyMinter);
+        assertEq(gate.controllerMinterIds(address(legacyV2)), bytes32(0));
+        assertEq(gate.controllerMinterIds(newLegacyMinter), legacyMinterId);
+
         vm.expectRevert(AntseedEmissionsGate.MinterNotEditable.selector);
         gate.removeMinter(legacyMinterId);
 
@@ -662,6 +668,13 @@ contract AntseedEmissionsGateTest is Test {
 
         vm.expectRevert(AntseedEmissionsGate.MinterNotEditable.selector);
         gate.removeMinter(RESERVE_MINTER_ID);
+
+        address newTeamWallet = address(0xB0B);
+        gate.setMinterController(TEAM_MINTER_ID, newTeamWallet);
+        assertEq(_configuredMinter(TEAM_MINTER_ID), newTeamWallet);
+        assertEq(gate.minterEpochBudget(TEAM_MINTER_ID, 4), _shareBudget(15_000, 4));
+        assertEq(gate.controllerMinterIds(teamWallet), bytes32(0));
+        assertEq(gate.controllerMinterIds(newTeamWallet), TEAM_MINTER_ID);
 
         _setSellerPoolsMinter(address(this));
         assertEq(_configuredMinter(SELLER_POOLS_MINTER_ID), address(this));
@@ -675,7 +688,7 @@ contract AntseedEmissionsGateTest is Test {
         _setSellerPoolsMinter(newMinter);
         assertEq(_configuredMinter(SELLER_POOLS_MINTER_ID), newMinter);
 
-        assertEq(_configuredMinter(TEAM_MINTER_ID), teamWallet);
+        assertEq(_configuredMinter(TEAM_MINTER_ID), newTeamWallet);
         assertEq(_configuredMinter(RESERVE_MINTER_ID), reserveDest);
         assertEq(_configuredMinter(VERIFICATION_MINTER_ID), verificationWallet);
     }
@@ -1674,6 +1687,32 @@ contract AntseedEmissionsGateTest is Test {
         assertEq(gate.minterEpochMinted(SELLER_POOLS_MINTER_ID, 4), budget);
     }
 
+    function test_shareEditsDoNotRewriteFinalizedEpochBudgets() public {
+        _deployGate(4);
+
+        _setSellerPoolsMinter(address(this));
+        assertEq(gate.minterEpochBudget(SELLER_POOLS_MINTER_ID, 4), _shareBudget(45_000, 4));
+
+        _warpGateEpoch(5);
+        gate.setMinter(SELLER_POOLS_MINTER_ID, address(this), 30_000, true);
+
+        assertEq(gate.totalMinterShareBps(), 75_000);
+        assertEq(gate.minterEpochBudget(SELLER_POOLS_MINTER_ID, 4), _shareBudget(45_000, 4));
+        assertEq(gate.minterEpochBudget(SELLER_POOLS_MINTER_ID, 5), _shareBudget(30_000, 5));
+
+        uint256 epoch4Budget = _shareBudget(45_000, 4);
+        gate.claim(4, address(this), epoch4Budget);
+        assertEq(gate.minterEpochMinted(SELLER_POOLS_MINTER_ID, 4), epoch4Budget);
+
+        vm.expectRevert(AntseedEmissionsGate.BucketBudgetExceeded.selector);
+        gate.claim(4, address(this), 1);
+
+        _warpGateEpoch(6);
+        uint256 epoch5Budget = _shareBudget(30_000, 5);
+        gate.claim(5, address(this), epoch5Budget);
+        assertEq(gate.minterEpochMinted(SELLER_POOLS_MINTER_ID, 5), epoch5Budget);
+    }
+
     function test_lockedMinterCannotBeEditedOrRemoved() public {
         _deployGate(4);
 
@@ -1685,6 +1724,19 @@ contract AntseedEmissionsGateTest is Test {
 
         vm.expectRevert(AntseedEmissionsGate.MinterNotEditable.selector);
         gate.removeMinter(LOCKED_MINTER_ID);
+
+        address newLockedMinter = address(0xBEEF);
+        gate.setMinterController(LOCKED_MINTER_ID, newLockedMinter);
+        assertEq(_configuredMinter(LOCKED_MINTER_ID), newLockedMinter);
+        assertEq(gate.minterEpochBudget(LOCKED_MINTER_ID, 4), _shareBudget(7_000, 4));
+        assertEq(gate.controllerMinterIds(lockedMinter), bytes32(0));
+        assertEq(gate.controllerMinterIds(newLockedMinter), LOCKED_MINTER_ID);
+
+        _warpGateEpoch(5);
+        uint256 budget = _shareBudget(7_000, 4);
+        vm.prank(newLockedMinter);
+        gate.claim(4, newLockedMinter, budget);
+        assertEq(token.balanceOf(newLockedMinter), budget);
     }
 
     function test_gateRejectsOverAllocatedMinterShares() public {
@@ -1717,29 +1769,44 @@ contract AntseedEmissionsGateTest is Test {
         gate.claim(4, teamWallet, 0);
     }
 
-    function test_registryBackedBucketsAreLockedAndVerificationCanMove() public {
+    function test_registryBackedBucketSharesAreLockedButControllersCanMove() public {
         _deployGate(4);
 
+        address newTeamWallet = address(0xB0B);
+        address newReserveWallet = address(0xB0C);
         address newVerificationWallet = address(0xB0D);
 
         vm.expectRevert(AntseedEmissionsGate.MinterNotEditable.selector);
-        gate.setMinter(TEAM_MINTER_ID, address(0xB0B), TEAM_SHARE_BPS, true);
+        gate.setMinter(TEAM_MINTER_ID, newTeamWallet, TEAM_SHARE_BPS, true);
 
         vm.expectRevert(AntseedEmissionsGate.MinterNotEditable.selector);
-        gate.setMinter(RESERVE_MINTER_ID, address(0xB0C), RESERVE_SHARE_BPS, true);
+        gate.setMinter(RESERVE_MINTER_ID, newReserveWallet, RESERVE_SHARE_BPS, true);
+
+        gate.setMinterController(TEAM_MINTER_ID, newTeamWallet);
+        gate.setMinterController(RESERVE_MINTER_ID, newReserveWallet);
 
         _setVerificationMinter(newVerificationWallet);
 
-        assertEq(_configuredMinter(TEAM_MINTER_ID), teamWallet);
-        assertEq(_configuredMinter(RESERVE_MINTER_ID), reserveDest);
+        assertEq(_configuredMinter(TEAM_MINTER_ID), newTeamWallet);
+        assertEq(_configuredMinter(RESERVE_MINTER_ID), newReserveWallet);
         assertEq(_configuredMinter(VERIFICATION_MINTER_ID), newVerificationWallet);
+        assertEq(gate.minterEpochBudget(TEAM_MINTER_ID, 4), _shareBudget(15_000, 4));
+        assertEq(gate.minterEpochBudget(RESERVE_MINTER_ID, 4), _shareBudget(15_000, 4));
+        assertEq(gate.controllerMinterIds(teamWallet), bytes32(0));
+        assertEq(gate.controllerMinterIds(reserveDest), bytes32(0));
+        assertEq(gate.controllerMinterIds(newTeamWallet), TEAM_MINTER_ID);
+        assertEq(gate.controllerMinterIds(newReserveWallet), RESERVE_MINTER_ID);
         assertEq(gate.controllerMinterIds(verificationWallet), bytes32(0));
         assertEq(gate.controllerMinterIds(newVerificationWallet), VERIFICATION_MINTER_ID);
 
         _warpGateEpoch(5);
+        _claim(TEAM_MINTER_ID, newTeamWallet, 4);
+        _claim(RESERVE_MINTER_ID, newReserveWallet, 4);
         uint256 verificationBudgetEpoch4 = _shareBudget(15_000, 4);
         _claim(VERIFICATION_MINTER_ID, newVerificationWallet, 4);
         assertEq(token.balanceOf(newVerificationWallet), verificationBudgetEpoch4);
+        assertEq(token.balanceOf(newTeamWallet), _shareBudget(15_000, 4));
+        assertEq(token.balanceOf(newReserveWallet), _shareBudget(15_000, 4));
     }
 
     function test_verificationBucketFitsDefaultSplitAndPaysItsWallet() public {

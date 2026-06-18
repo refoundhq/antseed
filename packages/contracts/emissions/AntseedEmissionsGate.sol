@@ -17,6 +17,11 @@ import { IAntseedRegistry } from "../interfaces/IAntseedRegistry.sol";
  *         address currently authorized to mint against that id.
  */
 contract AntseedEmissionsGate is IAntseedEmissionsGate, Ownable2Step, ReentrancyGuard {
+    struct ShareCheckpoint {
+        uint256 startEpoch;
+        uint32 shareBps;
+    }
+
     address public constant ANTS_TOKEN = 0xa87EE81b2C0Bc659307ca2D9ffdC38514DD85263;
     uint256 public constant GENESIS = 1_775_728_461;
     uint256 public constant EPOCH_DURATION = 7 days;
@@ -37,6 +42,7 @@ contract AntseedEmissionsGate is IAntseedEmissionsGate, Ownable2Step, Reentrancy
     uint32 public totalMinterShareBps;
     mapping(bytes32 minterId => Minter config) private _minters;
     mapping(address controller => bytes32 minterId) public controllerMinterIds;
+    mapping(bytes32 minterId => ShareCheckpoint[] checkpoints) private _minterShareCheckpoints;
     mapping(bytes32 minterId => mapping(uint256 epoch => uint256 amount)) public minterEpochMinted;
 
     event LegacyEpochMintsDisabled();
@@ -79,6 +85,7 @@ contract AntseedEmissionsGate is IAntseedEmissionsGate, Ownable2Step, Reentrancy
         controllerMinterIds[legacyMinter] = LEGACY_EMISSIONS_MINTER_ID;
         _minters[LEGACY_EMISSIONS_MINTER_ID] =
             Minter({ controller: legacyMinter, shareBps: uint32(BPS_DENOMINATOR), editable: false });
+        _recordMinterShare(LEGACY_EMISSIONS_MINTER_ID, 0, uint32(BPS_DENOMINATOR));
         _setMinter(TEAM_MINTER_ID, teamWallet, teamShareBps, false);
         _setMinter(RESERVE_MINTER_ID, protocolReserve, reserveShareBps, false);
     }
@@ -105,6 +112,10 @@ contract AntseedEmissionsGate is IAntseedEmissionsGate, Ownable2Step, Reentrancy
 
     function setMinter(bytes32 id, address controller, uint32 shareBps, bool editable) external onlyOwner {
         _setMinter(id, controller, shareBps, editable);
+    }
+
+    function setMinterController(bytes32 id, address controller) external onlyOwner {
+        _setMinterController(id, controller);
     }
 
     function removeMinter(bytes32 id) external onlyOwner {
@@ -144,7 +155,7 @@ contract AntseedEmissionsGate is IAntseedEmissionsGate, Ownable2Step, Reentrancy
     function minterEpochBudget(bytes32 id, uint256 epoch) public view returns (uint256) {
         Minter memory minter = _minters[id];
         if (minter.controller == address(0)) return 0;
-        return _shareBudget(epoch, minter.shareBps);
+        return _shareBudget(epoch, _minterShareBpsAt(id, epoch));
     }
 
     function controllerEpochBudget(address controller, uint256 epoch) public view returns (uint256) {
@@ -223,7 +234,28 @@ contract AntseedEmissionsGate is IAntseedEmissionsGate, Ownable2Step, Reentrancy
 
         totalMinterShareBps = nextTotalMinterShareBps;
         _minters[id] = Minter({ controller: controller, shareBps: shareBps, editable: editable });
+        uint256 startEpoch = _minterShareCheckpoints[id].length == 0 ? 0 : currentEpoch();
+        _recordMinterShare(id, startEpoch, shareBps);
         emit MinterSet(id, controller, shareBps, editable);
+    }
+
+    function _setMinterController(bytes32 id, address controller) internal {
+        if (id == bytes32(0)) revert InvalidMinterId();
+        if (controller == address(0)) revert InvalidAddress();
+
+        Minter memory existing = _minters[id];
+        if (existing.controller == address(0)) revert NotEmissionMinter();
+
+        bytes32 assignedId = controllerMinterIds[controller];
+        if (assignedId != bytes32(0) && assignedId != id) revert InvalidMinterId();
+
+        if (existing.controller != controller) {
+            delete controllerMinterIds[existing.controller];
+            controllerMinterIds[controller] = id;
+            _minters[id] = Minter({ controller: controller, shareBps: existing.shareBps, editable: existing.editable });
+        }
+
+        emit MinterSet(id, controller, existing.shareBps, existing.editable);
     }
 
     function _removeMinter(bytes32 id) internal {
@@ -233,12 +265,15 @@ contract AntseedEmissionsGate is IAntseedEmissionsGate, Ownable2Step, Reentrancy
         if (!existing.editable) revert MinterNotEditable();
 
         totalMinterShareBps -= existing.shareBps;
+        _recordMinterShare(id, currentEpoch(), 0);
         delete controllerMinterIds[existing.controller];
         delete _minters[id];
         emit MinterRemoved(id, existing.controller);
     }
 
-    function _claimFromMinter(bytes32 id, address controller, uint256 epoch, address recipient, uint256 amount) internal {
+    function _claimFromMinter(bytes32 id, address controller, uint256 epoch, address recipient, uint256 amount)
+        internal
+    {
         Minter memory minter = _minters[id];
         if (minter.controller == address(0) || minter.controller != controller) revert NotEmissionMinter();
         if (recipient == address(0)) revert InvalidAddress();
@@ -248,7 +283,7 @@ contract AntseedEmissionsGate is IAntseedEmissionsGate, Ownable2Step, Reentrancy
         if (epoch < effectiveEpoch && legacyEpochMintsDisabled) revert LegacyEpochMintingDisabled();
 
         uint256 newMinterMinted = minterEpochMinted[id][epoch] + amount;
-        if (newMinterMinted > _shareBudget(epoch, minter.shareBps)) revert BucketBudgetExceeded();
+        if (newMinterMinted > _shareBudget(epoch, _minterShareBpsAt(id, epoch))) revert BucketBudgetExceeded();
         minterEpochMinted[id][epoch] = newMinterMinted;
 
         uint256 minted = epochMinted[epoch] + amount;
@@ -261,5 +296,36 @@ contract AntseedEmissionsGate is IAntseedEmissionsGate, Ownable2Step, Reentrancy
 
     function _shareBudget(uint256 epoch, uint32 shareBps) internal pure returns (uint256) {
         return (getEpochEmission(epoch) * shareBps) / BPS_DENOMINATOR;
+    }
+
+    function _recordMinterShare(bytes32 id, uint256 startEpoch, uint32 shareBps) internal {
+        ShareCheckpoint[] storage checkpoints = _minterShareCheckpoints[id];
+        uint256 length = checkpoints.length;
+
+        if (length != 0 && checkpoints[length - 1].startEpoch == startEpoch) {
+            checkpoints[length - 1].shareBps = shareBps;
+            return;
+        }
+
+        checkpoints.push(ShareCheckpoint({ startEpoch: startEpoch, shareBps: shareBps }));
+    }
+
+    function _minterShareBpsAt(bytes32 id, uint256 epoch) internal view returns (uint32) {
+        ShareCheckpoint[] storage checkpoints = _minterShareCheckpoints[id];
+        uint256 length = checkpoints.length;
+        if (length == 0 || epoch < checkpoints[0].startEpoch) return 0;
+
+        uint256 low;
+        uint256 high = length;
+        while (low < high) {
+            uint256 mid = (low + high) / 2;
+            if (checkpoints[mid].startEpoch <= epoch) {
+                low = mid + 1;
+            } else {
+                high = mid;
+            }
+        }
+
+        return checkpoints[low - 1].shareBps;
     }
 }
