@@ -95,6 +95,7 @@ function installMockClient(manager: SellerFreeUsageManager) {
   const client = {
     open: vi.fn(async () => '0xopen'),
     record: vi.fn(async () => '0xrecord'),
+    close: vi.fn(async () => '0xclose'),
     getSession: vi.fn(async () => {
       throw new Error('missing session');
     }),
@@ -615,6 +616,59 @@ describe('FreeUsage P2P lifecycle', () => {
       BigInt(secondAuth.deadline),
       secondAuth.usageSig,
     );
+  });
+
+  it('seller closes the latest pending free usage record on disconnect', async () => {
+    const buyerManager = new BuyerFreeUsageManager(buyer, freeUsageConfig());
+    const sellerManager = new SellerFreeUsageManager(seller, sellerConfig({
+      recordBatchSize: 10,
+      recordFlushIntervalMs: 60_000,
+    }));
+    const client = installMockClient(sellerManager);
+    const sellerConn = makeConn();
+    const sellerMux = new PaymentMux(sellerConn.conn as any);
+    const buyerConn = makeConn();
+    const buyerMux = new PaymentMux(buyerConn.conn as any);
+    const openPayload = await prepareOpen(buyerManager);
+
+    await openSellerSession(sellerManager, openPayload, sellerMux);
+    buyerManager.handleAck(seller.peerId, {
+      channelId: openPayload.channelId,
+      acceptedSequence: '0',
+    });
+    sellerConn.frames.length = 0;
+
+    sellerManager.reportUsageRequest(buyer.peerId, sellerMux, {
+      requestId: 'req-free-close',
+      inputTokens: 12,
+      outputTokens: 7,
+      service: 'gpt-free',
+    });
+    buyerManager.trackRequestService('req-free-close', 'gpt-free');
+    await buyerManager.handleNeedAuth(
+      seller.peerId,
+      decodeNeedFreeUsageAuth(decodeSentFrame(sellerConn.frames[0]!).payload),
+      buyerMux,
+    );
+    const authPayload = decodeFreeUsageAuth(decodeSentFrame(buyerConn.frames[0]!).payload);
+    sellerManager.handleAuth(buyer.peerId, authPayload, sellerMux);
+    await flushAsync();
+
+    expect(client.record).not.toHaveBeenCalled();
+    sellerManager.onPeerDisconnect(buyer.peerId);
+
+    await vi.waitFor(() => {
+      expect(client.close).toHaveBeenCalledOnce();
+    });
+    expect(client.close).toHaveBeenCalledWith(
+      seller.wallet,
+      openPayload.channelId,
+      1n,
+      authPayload.metadata,
+      BigInt(authPayload.deadline),
+      authPayload.usageSig,
+    );
+    expect(client.record).not.toHaveBeenCalled();
   });
 
   it('seller rejects wrong channel, wrong signer, metadata mismatch, and stale sequences', async () => {

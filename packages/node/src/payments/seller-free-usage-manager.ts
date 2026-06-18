@@ -42,6 +42,7 @@ interface SellerFreeUsageSession {
   recordsSinceFlush: number;
   flushTimer: ReturnType<typeof setTimeout> | null;
   flushPromise: Promise<void> | null;
+  closeRequested: boolean;
 }
 
 interface ExpectedFreeUsage {
@@ -125,6 +126,7 @@ export class SellerFreeUsageManager {
     const session = this._sessions.get(buyerPeerId);
     if (session) {
       this._clearFlushTimer(session);
+      session.closeRequested = true;
       if (session.pendingRecord || session.flushPromise) {
         void this._flushPendingRecord(buyerPeerId, session).finally(() => {
           if (this._sessions.get(buyerPeerId) === session) {
@@ -236,6 +238,7 @@ export class SellerFreeUsageManager {
       recordsSinceFlush: 0,
       flushTimer: null,
       flushPromise: null,
+      closeRequested: false,
     };
     this._sessions.set(buyerPeerId, session);
 
@@ -386,7 +389,7 @@ export class SellerFreeUsageManager {
       if (session.flushPromise === promise) {
         session.flushPromise = null;
       }
-      if (session.pendingRecord) {
+      if (session.pendingRecord && !session.closeRequested) {
         this._scheduleRecordFlush(buyerPeerId, session, flushed ? {} : { retry: true });
       }
     })();
@@ -404,14 +407,36 @@ export class SellerFreeUsageManager {
     this._clearFlushTimer(session);
     try {
       await session.openPromise;
-      await this._client.record(
-        this._signer,
-        session.channelId,
-        record.sequence,
-        record.metadata,
-        record.deadline,
-        record.usageSig,
-      );
+      const closeRequested = session.closeRequested;
+      if (closeRequested) {
+        await this._client.close(
+          this._signer,
+          session.channelId,
+          record.sequence,
+          record.metadata,
+          record.deadline,
+          record.usageSig,
+        );
+      } else {
+        await this._client.record(
+          this._signer,
+          session.channelId,
+          record.sequence,
+          record.metadata,
+          record.deadline,
+          record.usageSig,
+        );
+      }
+      if (!closeRequested && session.closeRequested) {
+        await this._client.close(
+          this._signer,
+          session.channelId,
+          record.sequence,
+          record.metadata,
+          record.deadline,
+          record.usageSig,
+        );
+      }
       const pending = session.pendingRecord;
       if (!pending || pending.sequence <= record.sequence) {
         session.pendingRecord = null;
@@ -421,7 +446,7 @@ export class SellerFreeUsageManager {
         session.recordsSinceFlush = Number(delta > BigInt(Number.MAX_SAFE_INTEGER) ? BigInt(Number.MAX_SAFE_INTEGER) : delta);
       }
       debugLog(
-        `[SellerFreeUsage] Usage reported on-chain channel=${session.channelId.slice(0, 18)}... ` +
+        `[SellerFreeUsage] Usage ${session.closeRequested ? 'closed' : 'reported'} on-chain channel=${session.channelId.slice(0, 18)}... ` +
         `sequence=${record.sequence}`,
       );
       return true;
