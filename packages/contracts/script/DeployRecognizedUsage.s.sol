@@ -62,6 +62,9 @@ interface IAntseedLegacyEmissionsAdmin {
  */
 contract DeployRecognizedUsage is Script {
     address public constant ANTS_TOKEN = 0xa87EE81b2C0Bc659307ca2D9ffdC38514DD85263;
+    bytes32 public constant VERIFICATION_MINTER_ID = keccak256("antseed.emissions.verification.v1");
+    bytes32 public constant SELLER_POOLS_MINTER_ID = keccak256("antseed.emissions.seller-pools.v1");
+    bytes32 public constant USAGE_MINTER_ID = keccak256("antseed.emissions.usage.v1");
 
     function run() external {
         uint256 deployerPrivateKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
@@ -93,7 +96,7 @@ contract DeployRecognizedUsage is Script {
 
         vm.startBroadcast(deployerPrivateKey);
 
-        AntseedEmissionsGate gate = new AntseedEmissionsGate(registryAddress);
+        AntseedEmissionsGate gate = new AntseedEmissionsGate(registryAddress, 15_000, 15_000);
         uint256 currentEpoch = gate.currentEpoch();
         uint256 effectiveEpoch = gate.effectiveEpoch();
         uint256 genesis = gate.genesis();
@@ -145,10 +148,7 @@ contract DeployRecognizedUsage is Script {
         console.log("SellerRegistry:       ", address(sellerRegistry));
 
         console.log("EmissionsGate:          ", address(gate));
-        gate.setMinter(teamWallet, 15_000, true);
-        gate.setMinter(protocolReserve, 15_000, true);
-        gate.setMinter(verificationWallet, 15_000, true);
-        gate.setLegacyClaimsConfig(existingEmissions);
+        gate.setMinter(VERIFICATION_MINTER_ID, verificationWallet, 15_000, true);
 
         AntseedUsageAccounting usageAccounting =
             new AntseedUsageAccounting(address(sellerPools), existingChannels, address(gate));
@@ -166,8 +166,8 @@ contract DeployRecognizedUsage is Script {
         // address even while ANTS transfers are globally disabled.
         IANTSTokenAdmin(antsToken).setTransferWhitelist(address(sellerPools), true);
         sellerPools.setRewardStaker(address(sellerPoolsRewards), true);
-        gate.setMinter(address(sellerPoolsRewards), 45_000, true);
-        gate.setMinter(address(usageRewards), 10_000, true);
+        gate.setMinter(SELLER_POOLS_MINTER_ID, address(sellerPoolsRewards), 45_000, true);
+        gate.setMinter(USAGE_MINTER_ID, address(usageRewards), 10_000, true);
 
         // Mint authority moves only after every bucket minter is configured: a
         // broadcast that fails before this line leaves the legacy emissions

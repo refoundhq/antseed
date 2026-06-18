@@ -73,11 +73,14 @@ contract AntseedUsageAccountingGasTest is Test {
         registry.setIdentityRegistry(address(identityRegistry));
         sellerAgentLookup = new MockSellerAgentLookupForUsageAccountingGas();
         registry.setStaking(address(sellerAgentLookup));
+        registry.setEmissions(address(this));
+        registry.setProtocolReserve(address(0x70));
+        registry.setTeamWallet(address(0x80));
 
         token.setRegistry(address(registry));
         token.enableTransfers();
 
-        gate = new AntseedEmissionsGate(address(registry));
+        gate = new AntseedEmissionsGate(address(registry), 15_000, 15_000);
         usageAccounting = new AntseedUsageAccounting(address(0), address(this), address(gate));
         registry.setEmissions(address(usageAccounting));
 

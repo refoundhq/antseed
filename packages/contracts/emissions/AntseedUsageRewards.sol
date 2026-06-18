@@ -190,7 +190,7 @@ contract AntseedUsageRewards is Ownable2Step, Pausable, ReentrancyGuard {
     }
 
     function usageSideEpochBudget(uint256 epoch) public view returns (uint256) {
-        return emissionsGate.minterEpochBudget(address(this), epoch) / 2;
+        return emissionsGate.controllerEpochBudget(address(this), epoch) / 2;
     }
 
     function _rewardAmounts(uint256 epoch, uint256 weightedPoints, uint256 totalWeightedPoints)
@@ -212,12 +212,12 @@ contract AntseedUsageRewards is Ownable2Step, Pausable, ReentrancyGuard {
 
     function _mintReward(uint256 epoch, address recipient, uint256 claimableAmount, uint256 reserveAmount) internal {
         if (claimableAmount != 0) {
-            emissionsGate.mint(epoch, recipient, claimableAmount);
+            emissionsGate.claim(epoch, recipient, claimableAmount);
         }
         if (reserveAmount != 0) {
             address reserve = registry.protocolReserve();
             if (reserve == address(0)) revert InvalidAddress();
-            emissionsGate.mint(epoch, reserve, reserveAmount);
+            emissionsGate.claim(epoch, reserve, reserveAmount);
         }
     }
 

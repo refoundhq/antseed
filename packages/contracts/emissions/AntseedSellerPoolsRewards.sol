@@ -443,14 +443,14 @@ contract AntseedSellerPoolsRewards is Ownable2Step, Pausable, ReentrancyGuard {
         uint256 totalPoints = accounting.totalWeightedPoolPointsByEpoch(epoch);
         if (poolPoints == 0 || totalPoints == 0) return 0;
 
-        uint256 budget = emissionsGate.minterEpochBudget(address(this), epoch);
+        uint256 budget = emissionsGate.controllerEpochBudget(address(this), epoch);
         if (budget == 0) return 0;
         return Math.mulDiv(budget, poolPoints, totalPoints);
     }
 
     function _mint(uint256 epoch, address recipient, uint256 amount) internal {
         if (amount == 0) return;
-        emissionsGate.mint(epoch, recipient, amount);
+        emissionsGate.claim(epoch, recipient, amount);
     }
 
     function _transferReward(address recipient, uint256 amount) internal {
