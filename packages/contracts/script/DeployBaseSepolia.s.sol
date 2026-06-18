@@ -105,16 +105,6 @@ contract DeployBaseSepolia is Script {
         require(emissions != address(0), "Emissions deploy failed");
         console.log("AntseedEmissions:     ", emissions);
 
-        // 9. AntseedFreeUsage(registry)
-        bytes memory freeUsageBytecode = abi.encodePacked(
-            vm.getCode("AntseedFreeUsage.sol:AntseedFreeUsage"),
-            abi.encode(address(antseedRegistry))
-        );
-        address freeUsage;
-        assembly { freeUsage := create(0, add(freeUsageBytecode, 0x20), mload(freeUsageBytecode)) }
-        require(freeUsage != address(0), "FreeUsage deploy failed");
-        console.log("AntseedFreeUsage:     ", freeUsage);
-
         // ---- Wire registry ----
         antseedRegistry.setChannels(channels);
         antseedRegistry.setStats(stats);
@@ -132,11 +122,9 @@ contract DeployBaseSepolia is Script {
         ISetRegistry(staking).setRegistry(address(antseedRegistry));
         ISetRegistry(emissions).setRegistry(address(antseedRegistry));
         ISetRegistry(antsToken).setRegistry(address(antseedRegistry));
-        ISetRegistry(freeUsage).setRegistry(address(antseedRegistry));
 
-        // ---- Authorize Channels and FreeUsage as Stats writers ----
+        // ---- Authorize Channels as Stats writer ----
         ISetWriter(stats).setWriter(channels, true);
-        ISetWriter(stats).setWriter(freeUsage, true);
 
         vm.stopBroadcast();
 
@@ -147,7 +135,6 @@ contract DeployBaseSepolia is Script {
         console.log("  usdcContractAddress:    ", usdc);
         console.log("  depositsContractAddress:", deposits);
         console.log("  channelsContractAddress:", channels);
-        console.log("  freeUsageContractAddress:", freeUsage);
         console.log("  stakingContractAddress: ", staking);
         console.log("  emissionsContractAddress:", emissions);
         console.log("  identityRegistryAddress:", IDENTITY_REGISTRY);
