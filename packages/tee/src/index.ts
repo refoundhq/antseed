@@ -76,6 +76,16 @@ export type {
 } from "./evidence/document.js";
 export { buildLauncherEvidence } from "./evidence/builder.js";
 export type { LauncherEvidenceContext } from "./evidence/builder.js";
+export {
+  rtmrExtend,
+  replayRtmr,
+  rtmrLogAnchored,
+  measureDigest,
+  findEvent,
+  RTMR_LEN,
+  RTMR_EVENT,
+} from "./evidence/rtmr.js";
+export type { RtmrEvent } from "./evidence/rtmr.js";
 
 // v2 (interface only) — model-call transcript decorator.
 // `TeeAttestingProvider` is a type-only `declare class` (no runtime body yet),
