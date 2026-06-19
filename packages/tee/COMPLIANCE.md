@@ -70,6 +70,30 @@ and a reviewer may set it for platforms where the hardware guarantees it.
 The image emits a measured-boot / IMA event log the buyer can policy-check directly
 (the self-verifying level). Reserved; verified once the IMA track lands.
 
+## 2b. Measured specific attestations (Tier A — implemented)
+
+Specific properties a buyer can require **measured into the hardware**, not just
+governance-vouched — the "specific attestations, not flat lockdown" model. Each is
+an independent à-la-carte claim; the operator may keep a shell, just minus the one
+capability that could undo the property.
+
+| Claim | Measured enforcer | Capability dropped | How the buyer verifies |
+|-------|-------------------|--------------------|------------------------|
+| `egress-allowlisted` | nftables default-deny + allowlist | `CAP_NET_ADMIN` | egress policy's SHA-384 ∈ the RTMR event log AND the log replays to the quote's RTMR3 AND the launcher is approved AND egress meets the buyer's required set |
+| `no-buyer-data-at-rest` | tmpfs writable + swap off | `CAP_SYS_ADMIN` | storage policy measured into the RTMR (same chain) |
+| `known-binaries-only` | IMA measured execution | — | the IMA log replays to the quote's RTMR AND every measured hash ∈ the signed `knownBinaries` allowlist |
+
+The measured launcher (`antseed-tee-infra/packer/files/antseed-measured-launch`)
+applies each enforcer, drops the capability, **extends a TDX RTMR** with the policy
+digest (canonical JSON → SHA-384, matching the verifier's `measureDigest`), records
+the event log, reads the IMA log, and writes the measured-evidence the seller serves.
+The buyer's `verifyLauncherEvidence` replays the log (`rtmr.ts`) against the genuine
+quote — a log that doesn't anchor is rejected. This is **Tier A** for these specific
+properties without a flat locked image; it depends on the approved launcher honestly
+applying what it measures (the `approved-launcher` claim) — its two hardware
+validation points (runtime RTMR-extend interface, IMA-into-RTMR) are flagged in the
+launcher script and gate enabling it by default.
+
 ## 3. Review → sign (governance-asserted, today)
 
 1. A builder publishes their image build (source + the resulting measurement, ideally reproducibly).

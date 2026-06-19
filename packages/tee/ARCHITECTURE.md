@@ -184,6 +184,18 @@ Named claims (extensible):
 | `network-policy` | egress locked to declared provider/attestation endpoints | measured network-policy hash ∈ approved + capabilities |
 | `no-operator-shell` | operator has no shell to read keys/plaintext | launcher capability attested by measurement |
 | `mem-encryption` | RAM encrypted by the platform | platform evidence |
+| `egress-allowlisted` ⭑ | your query only egresses to the declared allowlist | egress policy **measured into an RTMR** + approved launcher applies it (CAP_NET_ADMIN dropped) |
+| `no-buyer-data-at-rest` ⭑ | your query is never written to persistent storage | storage policy **measured into an RTMR** + approved launcher applies it (tmpfs/no-swap, CAP_SYS_ADMIN dropped) |
+| `known-binaries-only` ⭑ | only approved binaries have executed | IMA log **anchored in an RTMR** + every hash ∈ governance allowlist |
+
+⭑ = **MEASURED (Tier A)** specific attestation. Unlike the governance-vouched
+`storage-policy`/`network-policy` rows (the launcher's approved entry *vouches* the
+policy hash), the ⭑ claims require the policy digest to be **replayed into the
+quote's RTMR** (`rtmr.ts`) — hardware-rooted, not a self-report — AND the approved
+launcher to be the one that applies the enforcer and drops the capability that could
+undo it. This is "specific attestations, not flat lockdown": the operator may keep a
+shell, just minus `CAP_NET_ADMIN`/`CAP_SYS_ADMIN`, so it cannot widen egress or
+remount the data path. Each is independent and à-la-carte (COMPLIANCE.md §3).
 
 **Dependency lattice (keeps à-la-carte sound):** every claim except
 `hardware-genuine` is `verified` only if the **binding substrate** holds — quote
