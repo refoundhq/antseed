@@ -7,12 +7,21 @@ import type { ApprovedBinary, ValidSetEntry } from "../registry/types.js";
 import {
   signEvidenceDocument,
   hashPolicy,
+  stableStringify,
   EVIDENCE_SCHEMA_LAUNCHER,
   type EvidenceDocument,
   type StoragePolicy,
   type NetworkPolicy,
   type ClaimId,
 } from "../evidence/document.js";
+import {
+  measureDigest,
+  replayRtmr,
+  imaLogToEvents,
+  RTMR_EVENT,
+  type RtmrEvent,
+  type ImaEntry,
+} from "../evidence/rtmr.js";
 import type { AttestationPlatform } from "../attestation/types.js";
 import { verifyLauncherEvidence } from "./launcher-verify.js";
 import { defaultProductionPolicy, type VerificationPolicy } from "./policy.js";
@@ -228,4 +237,111 @@ test("nonce mismatch (replay) breaks the binding substrate", async () => {
   const r = verifyLauncherEvidence({ evidence: doc, connectedPeerPubkey: PEER, nonce: "ff00", registry, policy: devPolicy({ requiredClaims: ["hardware-genuine"] }) });
   expect(r.substrate.ok).toBe(false);
   expect(r.verdict).toBe("failed");
+});
+
+// ---- MEASURED specific attestations (RTMR-anchored) ----
+
+const ALL_MEASURED: ClaimId[] = ['egress-allowlisted', 'no-buyer-data-at-rest', 'known-binaries-only'];
+
+async function measuredScenario(o: {
+  network?: NetworkPolicy;
+  storage?: StoragePolicy;
+  imaHashes?: string[];
+  knownBinaries?: string[];
+  breakAnchor?: boolean;
+  claims?: ClaimId[];
+} = {}) {
+  const { publicKey, privateKey } = generateKeyPairSync('ed25519');
+  const enclavePubkey = (publicKey.export({ type: 'spki', format: 'der' }) as Buffer).toString('hex');
+  const quote = await new MockAttestation().generateQuote({ peerPubkey: PEER, enclavePubkey, nonce: NONCE });
+
+  const network = o.network ?? NETWORK;
+  const storage = o.storage ?? STORAGE;
+  const rtmrLog: RtmrEvent[] = [
+    { rtmr: 3, digest: measureDigest(stableStringify(network)), eventType: RTMR_EVENT.egressPolicy },
+    { rtmr: 3, digest: measureDigest(stableStringify(storage)), eventType: RTMR_EVENT.storagePolicy },
+  ];
+  const imaHashes = o.imaHashes ?? ['a1'.repeat(32), 'b2'.repeat(32)];
+  const imaLog: ImaEntry[] = imaHashes.map((h, i) => ({ hash: h, path: `/usr/bin/p${i}` }));
+
+  const rtmr3 = o.breakAnchor ? 'de'.repeat(48) : replayRtmr(rtmrLog, 3);
+  const rtmr2 = replayRtmr(imaLogToEvents(imaLog, 2), 2);
+
+  const unsigned: Omit<EvidenceDocument, 'enclaveSignature'> = {
+    schema: EVIDENCE_SCHEMA_LAUNCHER,
+    claims: o.claims ?? ['hardware-genuine', 'approved-launcher', ...ALL_MEASURED],
+    platform: 'mock',
+    quote: Buffer.from(quote.quote).toString('base64'),
+    measurements: { ...quote.measurements, rtmr3, rtmr2 },
+    reportDataHex: Buffer.from(quote.reportData).toString('hex'),
+    nonce: NONCE,
+    peerPubkey: PEER,
+    enclavePubkey,
+    launcherMeasurement: MOCK_MEASUREMENT,
+    storagePolicy: storage,
+    networkPolicy: network,
+    rtmrLog,
+    imaLog,
+    imaRtmrIndex: 2,
+    timestamp: 1700000000000,
+  };
+  const doc: EvidenceDocument = { ...unsigned, enclaveSignature: signEvidenceDocument(unsigned, privateKey) };
+
+  const { set, signerHex } = signValidSet({
+    version: 1,
+    entries: [{ platform: 'mock', measurement: MOCK_MEASUREMENT, status: 'active' }],
+    knownBinaries: o.knownBinaries ?? imaHashes,
+  });
+  const registry = new RegistryClient({ pinnedSigner: signerHex });
+  registry.loadFromObject(set);
+  return { doc, registry };
+}
+
+test('measured: egress + storage + known-binaries all verify when RTMR-anchored', async () => {
+  const { doc, registry } = await measuredScenario();
+  const r = verifyLauncherEvidence({
+    evidence: doc, connectedPeerPubkey: PEER, nonce: NONCE, registry,
+    policy: devPolicy({ requiredClaims: ALL_MEASURED }),
+  });
+  for (const id of ALL_MEASURED) expect(claim(r, id).verdict, id).toBe('verified');
+  expect(r.verdict).toBe('verified');
+});
+
+test('measured: a non-anchored RTMR log fails egress + storage', async () => {
+  const { doc, registry } = await measuredScenario({ breakAnchor: true });
+  const r = verifyLauncherEvidence({ evidence: doc, connectedPeerPubkey: PEER, nonce: NONCE, registry, policy: devPolicy() });
+  expect(claim(r, 'egress-allowlisted').verdict).toBe('failed');
+  expect(claim(r, 'no-buyer-data-at-rest').verdict).toBe('failed');
+});
+
+test('measured: an egress policy that allows arbitrary egress fails the requirement', async () => {
+  const open: NetworkPolicy = { ...NETWORK, denyArbitraryEgress: false };
+  const { doc, registry } = await measuredScenario({ network: open });
+  const r = verifyLauncherEvidence({ evidence: doc, connectedPeerPubkey: PEER, nonce: NONCE, registry, policy: devPolicy() });
+  expect(claim(r, 'egress-allowlisted').verdict).toBe('failed');
+});
+
+test('known-binaries-only fails when an executed binary is not on the allowlist', async () => {
+  const { doc, registry } = await measuredScenario({
+    imaHashes: ['a1'.repeat(32), 'b2'.repeat(32), 'cc'.repeat(32)],
+    knownBinaries: ['a1'.repeat(32), 'b2'.repeat(32)],
+  });
+  const r = verifyLauncherEvidence({
+    evidence: doc, connectedPeerPubkey: PEER, nonce: NONCE, registry,
+    policy: devPolicy({ requiredClaims: ['known-binaries-only'] }),
+  });
+  expect(claim(r, 'known-binaries-only').verdict).toBe('failed');
+  expect(r.verdict).toBe('failed');
+});
+
+test('measured claims fall to not-proven when the launcher measurement is unapproved', async () => {
+  const { doc } = await measuredScenario();
+  const { set, signerHex } = signValidSet({
+    version: 1,
+    entries: [{ platform: 'mock', measurement: 'ee'.repeat(48), status: 'active' }],
+  });
+  const reg2 = new RegistryClient({ pinnedSigner: signerHex });
+  reg2.loadFromObject(set);
+  const r = verifyLauncherEvidence({ evidence: doc, connectedPeerPubkey: PEER, nonce: NONCE, registry: reg2, policy: devPolicy() });
+  expect(claim(r, 'egress-allowlisted').verdict).toBe('not-proven');
 });

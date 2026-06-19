@@ -7,11 +7,19 @@ import { defaultProductionPolicy, type VerificationPolicy } from "./policy.js";
 import {
   verifyEvidenceSignature,
   hashPolicy,
+  stableStringify,
   type EvidenceDocument,
   type ClaimId,
   type StoragePolicy,
   type NetworkPolicy,
 } from "../evidence/document.js";
+import {
+  rtmrLogAnchored,
+  measureDigest,
+  findEvent,
+  imaLogToEvents,
+  RTMR_EVENT,
+} from "../evidence/rtmr.js";
 
 /**
  * The BuyerPolicyVerifier for the launcher evidence schema (ARCHITECTURE.md §6).
@@ -116,6 +124,9 @@ export function verifyLauncherEvidence(input: LauncherVerifyInput): LauncherVeri
     evalNetwork(doc, entry, policy, docOk),
     evalCapability("no-operator-shell", doc, entry, docOk),
     evalMemEncryption(doc, g, isMock, docOk),
+    evalEgressAllowlisted(doc, registry, policy, docOk, g.measurement),
+    evalNoDataAtRest(doc, registry, policy, docOk, g.measurement),
+    evalKnownBinariesOnly(doc, registry, docOk, g.measurement),
   ];
 
   // requiredCapabilities fold into the report via no-operator-shell + storage/network;
@@ -361,6 +372,103 @@ function evalMemEncryption(
     return verified(c, `${doc.platform} encrypts guest memory by construction`);
   }
   return notProven(c, `memory encryption not established for platform '${doc.platform}'`);
+}
+
+// ---- MEASURED specific attestations (RTMR-anchored; Tier A) ----
+
+/**
+ * A policy is MEASURED iff (a) the rtmrLog has the typed event whose digest equals
+ * SHA-384 of the canonical declared policy, AND (b) the rtmrLog replays to the
+ * quote's RTMR3 (hardware anchor). Both must hold — a digest match without an
+ * anchor is just a self-report; an anchor without a digest match is a different policy.
+ */
+function policyMeasured(
+  doc: EvidenceDocument,
+  policyObj: unknown,
+  eventType: string,
+): { digestMatches: boolean; anchored: boolean } {
+  if (!doc.rtmrLog || doc.rtmrLog.length === 0) return { digestMatches: false, anchored: false };
+  const ev = findEvent(doc.rtmrLog, eventType);
+  if (!ev) return { digestMatches: false, anchored: false };
+  const digestMatches = ev.digest.toLowerCase() === measureDigest(stableStringify(policyObj));
+  const rtmr3 = doc.measurements["rtmr3"];
+  const anchored = Boolean(rtmr3) && rtmrLogAnchored(doc.rtmrLog, 3, rtmr3!);
+  return { digestMatches, anchored };
+}
+
+function evalEgressAllowlisted(
+  doc: EvidenceDocument,
+  registry: RegistryClient,
+  policy: VerificationPolicy,
+  docOk: boolean,
+  measurement: string,
+): ClaimResult {
+  const c: ClaimId = "egress-allowlisted";
+  if (!doc.claims.includes(c)) return notClaimed(c);
+  if (!docOk) return notProven(c, "trust substrate failed — measured egress policy cannot be rooted");
+  if (!registry.isApproved(doc.platform, measurement)) {
+    return notProven(c, "launcher measurement is not approved — cannot trust it applied + capability-locked the egress policy");
+  }
+  if (!doc.networkPolicy) return failed(c, "claimed but no network policy present in evidence");
+  const m = policyMeasured(doc, doc.networkPolicy, RTMR_EVENT.egressPolicy);
+  if (!m.digestMatches) return failed(c, "the declared egress policy is not the one measured into the RTMR");
+  if (!m.anchored) return failed(c, "the RTMR event log does not replay to the quote's RTMR3 (not hardware-anchored)");
+  const unmet = satisfies<NetworkPolicy>(doc.networkPolicy, policy.requiredNetwork ?? { denyArbitraryEgress: true });
+  if (unmet) return failed(c, `measured, but does not meet the buyer requirement: ${unmet}`);
+  return verified(c, "egress allowlist is MEASURED into the RTMR; the approved launcher enforces default-deny with CAP_NET_ADMIN dropped");
+}
+
+function evalNoDataAtRest(
+  doc: EvidenceDocument,
+  registry: RegistryClient,
+  policy: VerificationPolicy,
+  docOk: boolean,
+  measurement: string,
+): ClaimResult {
+  const c: ClaimId = "no-buyer-data-at-rest";
+  if (!doc.claims.includes(c)) return notClaimed(c);
+  if (!docOk) return notProven(c, "trust substrate failed — measured storage policy cannot be rooted");
+  if (!registry.isApproved(doc.platform, measurement)) {
+    return notProven(c, "launcher measurement is not approved — cannot trust it applied + capability-locked the storage policy");
+  }
+  if (!doc.storagePolicy) return failed(c, "claimed but no storage policy present in evidence");
+  const m = policyMeasured(doc, doc.storagePolicy, RTMR_EVENT.storagePolicy);
+  if (!m.digestMatches) return failed(c, "the declared storage policy is not the one measured into the RTMR");
+  if (!m.anchored) return failed(c, "the RTMR event log does not replay to the quote's RTMR3 (not hardware-anchored)");
+  const need: Partial<StoragePolicy> = policy.requiredStorage ?? {
+    noPersistentPlaintext: true,
+    ephemeralWritable: true,
+  };
+  const unmet = satisfies<StoragePolicy>(doc.storagePolicy, need);
+  if (unmet) return failed(c, `measured, but does not meet the buyer requirement: ${unmet}`);
+  return verified(c, "storage policy is MEASURED into the RTMR; writable state is tmpfs/ephemeral, no persistent plaintext (CAP_SYS_ADMIN dropped)");
+}
+
+function evalKnownBinariesOnly(
+  doc: EvidenceDocument,
+  registry: RegistryClient,
+  docOk: boolean,
+  measurement: string,
+): ClaimResult {
+  const c: ClaimId = "known-binaries-only";
+  if (!doc.claims.includes(c)) return notClaimed(c);
+  if (!docOk) return notProven(c, "trust substrate failed — IMA log cannot be rooted");
+  if (!registry.isApproved(doc.platform, measurement)) {
+    return notProven(c, "launcher measurement is not approved — cannot trust the IMA configuration");
+  }
+  if (!doc.imaLog || doc.imaLog.length === 0) return failed(c, "claimed but no IMA measurement log present in evidence");
+  const idx = doc.imaRtmrIndex ?? 2;
+  const rtmr = doc.measurements["rtmr" + idx];
+  if (!rtmr || !rtmrLogAnchored(imaLogToEvents(doc.imaLog, idx), idx, rtmr)) {
+    return failed(c, `the IMA log does not replay to the quote's RTMR${idx} (not hardware-anchored)`);
+  }
+  const approved = registry.approvedImaHashes();
+  if (approved.size === 0) return notProven(c, "no approved known-binary allowlist is published in the registry");
+  const unknown = doc.imaLog.filter((e) => !approved.has(e.hash.toLowerCase().replace(/^0x/, "")));
+  if (unknown.length > 0) {
+    return failed(c, `${unknown.length} executed binar${unknown.length === 1 ? "y is" : "ies are"} NOT on the approved allowlist (e.g. ${shorten(unknown[0]!.hash)})`);
+  }
+  return verified(c, `all ${doc.imaLog.length} measured executables are on the approved allowlist (IMA log hardware-anchored in RTMR${idx})`);
 }
 
 function shorten(hex: string): string {

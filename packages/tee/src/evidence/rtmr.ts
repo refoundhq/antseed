@@ -89,3 +89,31 @@ export function findEvent(events: RtmrEvent[], eventType: string): RtmrEvent | n
   const matches = events.filter((e) => e.eventType === eventType);
   return matches.length === 1 ? matches[0]! : null;
 }
+
+/**
+ * One IMA (Integrity Measurement Architecture) measurement-log entry: an
+ * executable/file the kernel measured before it ran. `hash` is the content hash —
+ * it is BOTH extended into the IMA RTMR (so the log is hardware-anchored) AND
+ * checked against the approved known-binary allowlist. (Model simplification: real
+ * IMA extends a template hash that also covers the path; here the content hash is
+ * the extended value, which faithfully commits the RTMR to the ordered multiset of
+ * approved contents.)
+ */
+export interface ImaEntry {
+  /** Hex content hash of the measured executable/file. */
+  hash: string;
+  /** Hash algorithm (e.g. "sha256" / "sha384"). Informational. */
+  alg?: string;
+  /** Path / event name (informational). */
+  path?: string;
+}
+
+/** Convert an IMA log into RTMR events on `rtmrIndex` for replay/anchoring. */
+export function imaLogToEvents(entries: ImaEntry[], rtmrIndex: number): RtmrEvent[] {
+  return entries.map((e) => ({
+    rtmr: rtmrIndex,
+    digest: e.hash,
+    eventType: "antseed.ima-entry",
+    ...(e.path ? { description: e.path } : {}),
+  }));
+}

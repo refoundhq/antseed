@@ -7,6 +7,7 @@ import {
   type KeyObject,
 } from "node:crypto";
 import type { AttestationPlatform } from "../attestation/types.js";
+import type { RtmrEvent, ImaEntry } from "./rtmr.js";
 
 /**
  * The launcher evidence document + its enclave-signature primitive.
@@ -34,7 +35,11 @@ export type ClaimId =
   | "storage-policy"
   | "network-policy"
   | "no-operator-shell"
-  | "mem-encryption";
+  | "mem-encryption"
+  // --- MEASURED specific attestations (RTMR-anchored; Tier A — see COMPLIANCE.md) ---
+  | "egress-allowlisted"
+  | "no-buyer-data-at-rest"
+  | "known-binaries-only";
 
 export const ALL_CLAIMS: readonly ClaimId[] = [
   "hardware-genuine",
@@ -46,6 +51,9 @@ export const ALL_CLAIMS: readonly ClaimId[] = [
   "network-policy",
   "no-operator-shell",
   "mem-encryption",
+  "egress-allowlisted",
+  "no-buyer-data-at-rest",
+  "known-binaries-only",
 ];
 
 /**
@@ -128,6 +136,14 @@ export interface EvidenceDocument {
   configHash?: string;
   bundleDigest?: string;
   eventLogRef?: string;
+
+  // --- measured runtime policy (RTMR-anchored; Tier A) ---
+  /** Ordered measured-event log the launcher extended into the runtime RTMR(s). */
+  rtmrLog?: RtmrEvent[];
+  /** IMA measurement log (executables/files measured before they ran). */
+  imaLog?: ImaEntry[];
+  /** Which RTMR the IMA log extends (default 2). */
+  imaRtmrIndex?: number;
 
   timestamp: number;
   enclaveSignature: string; // ed25519(enclavePubkey) over canonical(doc \ enclaveSignature)

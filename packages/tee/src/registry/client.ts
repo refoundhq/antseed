@@ -50,6 +50,7 @@ export function canonicalizeSignedPayload(set: ValidSet): Uint8Array {
   }
   if (set.binaries !== undefined) payload.binaries = set.binaries.map((b) => normalizeBinary(b));
   if (set.revokedBinaries !== undefined) payload.revokedBinaries = set.revokedBinaries;
+  if (set.knownBinaries !== undefined) payload.knownBinaries = set.knownBinaries;
   return new TextEncoder().encode(stableStringify(payload));
 }
 
@@ -297,6 +298,16 @@ export class RegistryClient {
         e.measurement.toLowerCase() === m &&
         e.status === "active",
     );
+  }
+
+  /**
+   * The approved IMA content-hash allowlist (lowercase hex) for the
+   * `known-binaries-only` claim. Empty if no set is loaded or none is published.
+   */
+  approvedImaHashes(): Set<string> {
+    const out = new Set<string>();
+    for (const h of this.set?.knownBinaries ?? []) out.add(h.toLowerCase().replace(/^0x/, ""));
+    return out;
   }
 
   /** The verified set, or undefined if none is loaded. */

@@ -82,10 +82,11 @@ export {
   rtmrLogAnchored,
   measureDigest,
   findEvent,
+  imaLogToEvents,
   RTMR_LEN,
   RTMR_EVENT,
 } from "./evidence/rtmr.js";
-export type { RtmrEvent } from "./evidence/rtmr.js";
+export type { RtmrEvent, ImaEntry } from "./evidence/rtmr.js";
 
 // v2 (interface only) — model-call transcript decorator.
 // `TeeAttestingProvider` is a type-only `declare class` (no runtime body yet),

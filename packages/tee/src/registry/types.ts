@@ -122,6 +122,12 @@ export interface ValidSet {
   binaries?: ApprovedBinary[];
   /** Optional explicit binary-digest kill switch (revoked regardless of status). Lowercase hex. */
   revokedBinaries?: string[];
+  /**
+   * Optional approved IMA content-hash allowlist for the `known-binaries-only`
+   * claim: every executable measured in the seller's IMA log must be in this set.
+   * Lowercase hex.
+   */
+  knownBinaries?: string[];
 }
 
 /**
@@ -140,4 +146,5 @@ export interface ValidSetSignedPayload {
   revokedMeasurements?: string[];
   binaries?: ApprovedBinary[];
   revokedBinaries?: string[];
+  knownBinaries?: string[];
 }
