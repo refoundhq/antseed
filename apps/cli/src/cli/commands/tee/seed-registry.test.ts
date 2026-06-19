@@ -136,3 +136,25 @@ test('seed-registry consumes collateral from the evidence bundle (no --collatera
   buyer.loadFromObject(set);
   assert.equal(buyer.isApproved('tdx', measurement), true);
 });
+
+test('seed-registry seeds approved binaries + launcher capabilities the buyer can use', () => {
+  const { publicKeyHex, privateKeyPem } = generateRegistryKeypair();
+  const { set } = buildSignedValidSet({
+    quote: loadSampleQuote(),
+    privateKeyPem,
+    nowSecs: NOW_SECS,
+    binaries: [{ digest: 'ab'.repeat(32), version: '1.2.0', tag: 'stable', status: 'active' }],
+    entryCapabilities: ['mem-enc'],
+    launcherVersion: '1.0.0',
+  });
+
+  const buyer = new RegistryClient({ pinnedSigner: publicKeyHex, policy: { nowSecs: NOW_SECS } });
+  buyer.loadFromObject(set);
+
+  // approved binary visible + governance-vouched launcher capability/version on the entry
+  assert.equal(buyer.approveBinary({ digest: 'ab'.repeat(32) }).approved, true);
+  assert.equal(buyer.approveBinary({ digest: 'ff'.repeat(32) }).approved, false);
+  const entry = buyer.findApprovedEntry('tdx', set.entries[0]!.measurement);
+  assert.ok(entry?.capabilities?.includes('mem-enc'));
+  assert.equal(entry?.launcherVersion, '1.0.0');
+});

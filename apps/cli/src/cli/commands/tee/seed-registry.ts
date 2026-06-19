@@ -9,6 +9,7 @@ import {
   verifyValidSetSignature,
   type ValidSet,
   type ValidSetEntry,
+  type ApprovedBinary,
 } from '@antseed/tee/registry';
 import type { AttestationQuote } from '@antseed/tee/attestation';
 
@@ -56,6 +57,9 @@ export function registerTeeSeedRegistryCommand(teeCmd: Command): void {
     .option('--version <n>', 'ValidSet version number to stamp (default: bump existing or 1)', (v) => parseInt(v, 10))
     .option('--validity-days <n>', 'days until the seeded set expires (notAfter)', (v) => parseInt(v, 10))
     .option('--audit-url <url>', 'published audit URL to bind into the signed set')
+    .option('--binary <digest:version:tag>', 'governance-approved AntSeed binary (repeatable)', collect, [] as string[])
+    .option('--capability <cap>', 'capability for the seeded launcher entry, e.g. mem-enc (repeatable)', collect, [] as string[])
+    .option('--launcher-version <v>', 'launcher/runtime version for the seeded entry')
     .option('--fetch-timeout-ms <n>', 'per-request fetch timeout (ms)', (v) => parseInt(v, 10), 8000)
     .action(async (options) => {
       try {
@@ -111,11 +115,19 @@ async function runSeed(options: Record<string, unknown>): Promise<void> {
   // 4-6. DCAP-verify the quote, derive the measurement, merge + sign the set.
   const existing = await readExistingSet(outPath);
   const privateKeyPem = await fs.readFile(keyPath, 'utf8');
+  const binaries = ((options.binary as string[] | undefined) ?? []).map(parseBinarySpec);
+  const entryCapabilities = (options.capability as string[] | undefined) ?? [];
+  const launcherVersion = options.launcherVersion as string | undefined;
   const { set: signed, tcbStatus, tcbVerdict, measurement } = buildSignedValidSet({
     quote,
     privateKeyPem,
     existing,
     version: versionOpt,
+    ...(binaries.length ? { binaries } : {}),
+    ...(entryCapabilities.length ? { entryCapabilities } : {}),
+    ...(launcherVersion ? { launcherVersion } : {}),
+    ...(options.validityDays !== undefined ? { validityDays: options.validityDays as number } : {}),
+    ...(options.auditUrl ? { auditUrl: options.auditUrl as string } : {}),
   });
 
   console.log(chalk.green(`✓ Genuine Intel TDX quote (TCB ${tcbStatus})`));
@@ -127,7 +139,8 @@ async function runSeed(options: Record<string, unknown>): Promise<void> {
   await fs.writeFile(outPath, JSON.stringify(signed, null, 2) + '\n');
 
   console.log('');
-  console.log(chalk.green(`Wrote signed ValidSet (version ${signed.version}, ${signed.entries.length} entr${signed.entries.length === 1 ? 'y' : 'ies'}) to ${outPath}`));
+  const nBin = signed.binaries?.length ?? 0;
+  console.log(chalk.green(`Wrote signed ValidSet (version ${signed.version}, ${signed.entries.length} launcher entr${signed.entries.length === 1 ? 'y' : 'ies'}, ${nBin} approved binar${nBin === 1 ? 'y' : 'ies'}) to ${outPath}`));
   console.log(chalk.bold(`  Signer (pin in buyers): ${signed.signer}`));
 }
 
@@ -165,6 +178,12 @@ export function buildSignedValidSet(opts: {
   validityDays?: number;
   /** Audit URL to stamp (overrides any inherited one). NOW part of the signed payload. */
   auditUrl?: string;
+  /** Governance-approved AntSeed binaries to merge in (digest/version/tag/status). */
+  binaries?: ApprovedBinary[];
+  /** Capabilities to attach to the seeded launcher entry (e.g. ["mem-enc"]). */
+  entryCapabilities?: string[];
+  /** Launcher/runtime version for the seeded entry. */
+  launcherVersion?: string;
 }): SeedResult {
   const { quote, privateKeyPem, existing, version } = opts;
 
@@ -177,12 +196,23 @@ export function buildSignedValidSet(opts: {
     throw new Error(`TCB status '${v.tcbStatus}' is not acceptable — refusing to seed`);
   }
 
-  const newEntry: ValidSetEntry = { platform: 'tdx', measurement: v.measurement, status: 'active' };
+  // The seeded measurement is the LAUNCHER measurement; attach the governance-
+  // vouched capabilities / version the buyer's launcher claims read.
+  const newEntry: ValidSetEntry = {
+    platform: 'tdx',
+    measurement: v.measurement,
+    status: 'active',
+    ...(opts.launcherVersion ? { launcherVersion: opts.launcherVersion } : {}),
+    ...(opts.entryCapabilities && opts.entryCapabilities.length
+      ? { capabilities: opts.entryCapabilities }
+      : {}),
+  };
   const merged = mergeEntries(existing?.entries ?? [], newEntry);
+  const mergedBinaries = mergeBinaries(existing?.binaries ?? [], opts.binaries ?? []);
   const nextVersion = version ?? (existing ? existing.version + 1 : 1);
 
   // Governance fields: stamp a fresh expiry window; inherit minVersion /
-  // revocationEpoch / auditUrl from the existing set unless overridden.
+  // revocationEpoch / auditUrl / revokedBinaries from the existing set unless overridden.
   const nowSecs = opts.nowSecs ?? Math.floor(Date.now() / 1000);
   const validityDays = opts.validityDays ?? DEFAULT_VALIDITY_DAYS;
   const notAfter = nowSecs + validityDays * 86400;
@@ -193,11 +223,13 @@ export function buildSignedValidSet(opts: {
     entries: merged,
     notAfter,
     ...(auditUrl ? { auditUrl } : {}),
+    ...(mergedBinaries.length ? { binaries: mergedBinaries } : {}),
     ...(existing?.minVersion !== undefined ? { minVersion: existing.minVersion } : {}),
     ...(existing?.revocationEpoch !== undefined ? { revocationEpoch: existing.revocationEpoch } : {}),
     ...(existing?.revokedMeasurements !== undefined
       ? { revokedMeasurements: existing.revokedMeasurements }
       : {}),
+    ...(existing?.revokedBinaries !== undefined ? { revokedBinaries: existing.revokedBinaries } : {}),
   });
 
   // Self-check: the produced set must verify under its own embedded signer.
@@ -266,6 +298,27 @@ function mergeEntries(existing: ValidSetEntry[], entry: ValidSetEntry): ValidSet
     (e) => !(e.platform === entry.platform && e.measurement.toLowerCase() === m),
   );
   return [...kept, entry];
+}
+
+/** Merge approved binaries by digest: an incoming digest replaces a same-digest entry. */
+function mergeBinaries(existing: ApprovedBinary[], incoming: ApprovedBinary[]): ApprovedBinary[] {
+  const byDigest = new Map<string, ApprovedBinary>();
+  const key = (d: string) => d.toLowerCase().replace(/^0x/, '');
+  for (const b of existing) byDigest.set(key(b.digest), b);
+  for (const b of incoming) byDigest.set(key(b.digest), b);
+  return [...byDigest.values()];
+}
+
+/** Parse a `digest[:version[:tag]]` CLI spec into an active ApprovedBinary. */
+function parseBinarySpec(spec: string): ApprovedBinary {
+  const [digest, version, tag] = spec.split(':');
+  if (!digest) throw new Error(`--binary '${spec}' is missing a digest`);
+  return { digest, version: version || '0.0.0', tag: tag || 'stable', status: 'active' };
+}
+
+/** commander accumulator for repeatable string options. */
+function collect(value: string, acc: string[]): string[] {
+  return [...acc, value];
 }
 
 async function fetchJson<T>(url: string, timeoutMs: number): Promise<T> {
