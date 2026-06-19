@@ -187,10 +187,14 @@ function pollAndStage(root: string, outblob: Uint8Array, auxblob?: string): () =
           continue;
         }
         seen.add(name);
-        await fs.writeFile(join(dir, "outblob"), outblob);
+        // Stage the sidecar blobs first and write `outblob` LAST: the consumer
+        // keys off outblob (readOutblobWithRetry), so writing it last guarantees
+        // auxblob/provider/generation are already present when the quote read
+        // proceeds — deterministic, no staging race.
+        if (auxblob !== undefined) await fs.writeFile(join(dir, "auxblob"), auxblob);
         await fs.writeFile(join(dir, "provider"), "tdx_guest\n");
         await fs.writeFile(join(dir, "generation"), "1\n");
-        if (auxblob !== undefined) await fs.writeFile(join(dir, "auxblob"), auxblob);
+        await fs.writeFile(join(dir, "outblob"), outblob);
       }
     } catch {
       /* root may not exist yet */

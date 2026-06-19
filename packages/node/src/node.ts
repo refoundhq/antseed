@@ -837,41 +837,6 @@ export class AntseedNode extends EventEmitter {
   }
 
   /**
-   * Resolve a known seller directly by `host:port`, bypassing DHT discovery.
-   * Fetches the seller's signed `/metadata` from the supplied endpoint and runs
-   * the same validation + on-chain enrichment as `findPeer`. The returned
-   * `PeerInfo` carries `publicAddress` set to the supplied endpoint, so both
-   * `connectToPeer` and the buyer's TEE evidence fetch reach the seller over
-   * the direct path without any successful DHT lookup.
-   *
-   * When `expectedPeerId` is provided, the endpoint must serve metadata for
-   * that exact peerId or `null` is returned — an endpoint cannot impersonate
-   * another seller's identity. Returns `null` if the endpoint is unreachable
-   * or serves invalid / stale / mismatched metadata.
-   */
-  async findPeerByAddress(host: string, port: number, expectedPeerId?: string): Promise<PeerInfo | null> {
-    if (!this._peerLookup) {
-      throw new Error("Node not started or not in buyer mode");
-    }
-    debugLog(`[Node] findPeerByAddress(${host}:${port}) direct metadata resolve (no DHT)`);
-    const result = await this._peerLookup.resolveEndpointDirect({ host, port }, expectedPeerId);
-    if (result === null) {
-      debugLog(`[Node]   direct resolve of ${host}:${port} returned no usable metadata`);
-      return null;
-    }
-    const peer = this._lookupResultToPeerInfo(result);
-    // The buyer explicitly supplied this endpoint as the way to reach the
-    // seller, so it is authoritative for connection + TEE evidence fetch —
-    // override any (possibly NAT-internal) publicAddress in the served
-    // metadata with the host:port the buyer can actually reach.
-    peer.publicAddress = `${host}:${port}`;
-    this._attachCachedExternalVerificationResults([peer]);
-    this._queueExternalVerification([peer]);
-    await this._enrichPeersWithOnChainStats([peer]);
-    return peer;
-  }
-
-  /**
    * Verify claimed on-chain stats against actual contract data, and
    * populate volume / last-settled which are never announced by sellers.
    *

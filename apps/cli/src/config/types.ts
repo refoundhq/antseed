@@ -185,14 +185,6 @@ export interface BuyerCLIConfig {
    * `--tee-registry-signer`.
    */
   teeRegistrySignerPubkey?: string;
-  /**
-   * Direct seller endpoint (`host:port`) for a known peer, paired with a pinned
-   * peerId. When set, the buyer resolves this seller's metadata directly from
-   * the endpoint and seeds its peer cache, so connection + TEE evidence fetch
-   * work without waiting for DHT discovery. Additive bypass for known-peer E2E;
-   * DHT discovery still runs for all other peers.
-   */
-  sellerAddress?: string;
 }
 
 /**

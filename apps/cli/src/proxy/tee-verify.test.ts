@@ -116,10 +116,10 @@ const baseOpts = (over: Partial<TeeVerifyOptions>): TeeVerifyOptions => ({
   ...over,
 })
 
-test('resolveEvidenceBaseUrl derives the evidence base from a directly-supplied publicAddress', () => {
-  // Direct-connect E2E: the buyer seeds a known seller with publicAddress set
-  // to the supplied host:port. The TEE evidence fetch derives its base URL from
-  // that same field, so it reaches the seller over the direct path with no DHT.
+test('resolveEvidenceBaseUrl derives the evidence base from a DHT-announced publicAddress', () => {
+  // The TEE evidence fetch derives its base URL from the seller's
+  // DHT-announced publicAddress, so it reaches the discovered seller for
+  // attestation evidence.
   assert.equal(resolveEvidenceBaseUrl(teePeer('34.10.10.10:6882')), 'http://34.10.10.10:6882')
 
   // No publicAddress (e.g. unresolved peer) yields null — nothing to fetch from.
