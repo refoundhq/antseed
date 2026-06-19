@@ -59,6 +59,7 @@ export function registerTeeSeedRegistryCommand(teeCmd: Command): void {
     .option('--audit-url <url>', 'published audit URL to bind into the signed set')
     .option('--binary <digest:version:tag>', 'governance-approved AntSeed binary (repeatable)', collect, [] as string[])
     .option('--capability <cap>', 'capability for the seeded launcher entry, e.g. mem-enc (repeatable)', collect, [] as string[])
+    .option('--known-binary <hash>', 'approved IMA content hash for known-binaries-only (repeatable)', collect, [] as string[])
     .option('--launcher-version <v>', 'launcher/runtime version for the seeded entry')
     .option('--fetch-timeout-ms <n>', 'per-request fetch timeout (ms)', (v) => parseInt(v, 10), 8000)
     .action(async (options) => {
@@ -117,6 +118,7 @@ async function runSeed(options: Record<string, unknown>): Promise<void> {
   const privateKeyPem = await fs.readFile(keyPath, 'utf8');
   const binaries = ((options.binary as string[] | undefined) ?? []).map(parseBinarySpec);
   const entryCapabilities = (options.capability as string[] | undefined) ?? [];
+  const knownBinaries = (options.knownBinary as string[] | undefined) ?? [];
   const launcherVersion = options.launcherVersion as string | undefined;
   const { set: signed, tcbStatus, tcbVerdict, measurement } = buildSignedValidSet({
     quote,
@@ -125,6 +127,7 @@ async function runSeed(options: Record<string, unknown>): Promise<void> {
     version: versionOpt,
     ...(binaries.length ? { binaries } : {}),
     ...(entryCapabilities.length ? { entryCapabilities } : {}),
+    ...(knownBinaries.length ? { knownBinaries } : {}),
     ...(launcherVersion ? { launcherVersion } : {}),
     ...(options.validityDays !== undefined ? { validityDays: options.validityDays as number } : {}),
     ...(options.auditUrl ? { auditUrl: options.auditUrl as string } : {}),
@@ -184,6 +187,8 @@ export function buildSignedValidSet(opts: {
   entryCapabilities?: string[];
   /** Launcher/runtime version for the seeded entry. */
   launcherVersion?: string;
+  /** Approved IMA content hashes for known-binaries-only (union into the signed set). */
+  knownBinaries?: string[];
 }): SeedResult {
   const { quote, privateKeyPem, existing, version } = opts;
 
@@ -209,6 +214,13 @@ export function buildSignedValidSet(opts: {
   };
   const merged = mergeEntries(existing?.entries ?? [], newEntry);
   const mergedBinaries = mergeBinaries(existing?.binaries ?? [], opts.binaries ?? []);
+  const mergedKnown = [
+    ...new Set(
+      [...(existing?.knownBinaries ?? []), ...(opts.knownBinaries ?? [])].map((h) =>
+        h.toLowerCase().replace(/^0x/, ''),
+      ),
+    ),
+  ];
   const nextVersion = version ?? (existing ? existing.version + 1 : 1);
 
   // Governance fields: stamp a fresh expiry window; inherit minVersion /
@@ -224,6 +236,7 @@ export function buildSignedValidSet(opts: {
     notAfter,
     ...(auditUrl ? { auditUrl } : {}),
     ...(mergedBinaries.length ? { binaries: mergedBinaries } : {}),
+    ...(mergedKnown.length ? { knownBinaries: mergedKnown } : {}),
     ...(existing?.minVersion !== undefined ? { minVersion: existing.minVersion } : {}),
     ...(existing?.revocationEpoch !== undefined ? { revocationEpoch: existing.revocationEpoch } : {}),
     ...(existing?.revokedMeasurements !== undefined

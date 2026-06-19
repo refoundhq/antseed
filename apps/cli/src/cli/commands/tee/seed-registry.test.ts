@@ -146,6 +146,7 @@ test('seed-registry seeds approved binaries + launcher capabilities the buyer ca
     binaries: [{ digest: 'ab'.repeat(32), version: '1.2.0', tag: 'stable', status: 'active' }],
     entryCapabilities: ['mem-enc'],
     launcherVersion: '1.0.0',
+    knownBinaries: ['Aa'.repeat(32), 'bb'.repeat(32)],
   });
 
   const buyer = new RegistryClient({ pinnedSigner: publicKeyHex, policy: { nowSecs: NOW_SECS } });
@@ -157,4 +158,9 @@ test('seed-registry seeds approved binaries + launcher capabilities the buyer ca
   const entry = buyer.findApprovedEntry('tdx', set.entries[0]!.measurement);
   assert.ok(entry?.capabilities?.includes('mem-enc'));
   assert.equal(entry?.launcherVersion, '1.0.0');
+
+  // known-binary IMA allowlist is signed + normalized (lowercase) for known-binaries-only
+  const known = buyer.approvedImaHashes();
+  assert.ok(known.has('aa'.repeat(32)));
+  assert.ok(known.has('bb'.repeat(32)));
 });
