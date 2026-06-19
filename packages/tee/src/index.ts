@@ -72,6 +72,8 @@ export type {
   StoragePolicy,
   NetworkPolicy,
 } from "./evidence/document.js";
+export { buildLauncherEvidence } from "./evidence/builder.js";
+export type { LauncherEvidenceContext } from "./evidence/builder.js";
 
 // v2 (interface only) — model-call transcript decorator.
 // `TeeAttestingProvider` is a type-only `declare class` (no runtime body yet),
