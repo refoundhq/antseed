@@ -624,6 +624,7 @@ export function registerSellerStartCommand(sellerCmd: Command): void {
           node.setTeeEvidence({ teeAttestationUrl: tee.teeAttestationUrl, handler: tee.handler })
           teeSpinner.succeed(chalk.green(`TEE attestation active (platform: ${tee.platform})`))
           console.log(chalk.dim(`  evidence endpoint: ${tee.teeAttestationUrl} (served on signaling port)`))
+          console.log(chalk.dim(`  schema: ${tee.schema}${tee.schema === 'launcher' ? ` — claims: ${tee.claims.join(', ')}` : ''}`))
           console.log(chalk.dim(`  enclave signing pubkey: ${tee.enclaveSigningPubkey.slice(0, 24)}...`))
           if (tee.platform === 'mock') {
             console.log(chalk.yellow('  Warning: mock platform — quotes are NOT genuine (dev/test only).'))
