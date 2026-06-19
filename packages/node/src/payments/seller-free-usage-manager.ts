@@ -67,7 +67,7 @@ const FREE_USAGE_METADATA_ABI = [
 ] as const;
 
 const DEFAULT_RECORD_BATCH_SIZE = 16;
-const DEFAULT_RECORD_FLUSH_INTERVAL_MS = 10_000;
+const DEFAULT_RECORD_FLUSH_INTERVAL_MS = 5 * 60_000;
 
 function normalizeTokenCount(value: number): bigint {
   if (!Number.isFinite(value) || value <= 0) return 0n;
