@@ -90,9 +90,17 @@ the event log, reads the IMA log, and writes the measured-evidence the seller se
 The buyer's `verifyLauncherEvidence` replays the log (`rtmr.ts`) against the genuine
 quote — a log that doesn't anchor is rejected. This is **Tier A** for these specific
 properties without a flat locked image; it depends on the approved launcher honestly
-applying what it measures (the `approved-launcher` claim) — its two hardware
-validation points (runtime RTMR-extend interface, IMA-into-RTMR) are flagged in the
-launcher script and gate enabling it by default.
+applying what it measures (the `approved-launcher` claim).
+
+**Hardware-validated** (GCP TDX c3-standard-4, Ubuntu 24.04, kernel 6.17, 2026-06):
+the runtime RTMR-extend — the kernel `tsm_mr` sysfs interface
+(`/sys/devices/virtual/misc/tdx_guest/measurements/rtmr3:sha384`) — is confirmed
+`SHA-384(prev‖digest)`, bit-for-bit identical to the verifier's `replayRtmr`, so
+`egress-allowlisted` and `no-buyer-data-at-rest` are hardware-rooted on **stock** GCP
+TDX (`tdx-rtmr-extend` wires it). `known-binaries-only` additionally needs IMA to
+extend an **RTMR**; stock IMA exec-measurement works but extends **PCR 10 (TPM)**, not
+an RTMR, so it is gated behind a native-IMA-into-RTMR image
+(`ANTSEED_IMA_RTMR_NATIVE=1`) and otherwise not attested — fail-closed.
 
 ## 3. Review → sign (governance-asserted, today)
 
