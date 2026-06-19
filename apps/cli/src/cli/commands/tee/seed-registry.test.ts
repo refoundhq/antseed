@@ -51,7 +51,7 @@ test('seed-registry seeds a signed ValidSet the buyer RegistryClient accepts', (
   assert.deepEqual(set.entries, [{ platform: 'tdx', measurement, status: 'active' }]);
 
   // Buyer pins the seeding authority and accepts the seeded measurement.
-  const buyer = new RegistryClient({ pinnedSigner: publicKeyHex });
+  const buyer = new RegistryClient({ pinnedSigner: publicKeyHex, policy: { nowSecs: NOW_SECS } });
   buyer.loadFromObject(set);
   assert.equal(buyer.isApproved('tdx', measurement), true);
 });
@@ -65,7 +65,7 @@ test('seed-registry: a buyer pinned to a DIFFERENT signer rejects the set (fail-
   });
 
   const otherSigner = generateRegistryKeypair().publicKeyHex;
-  const buyer = new RegistryClient({ pinnedSigner: otherSigner });
+  const buyer = new RegistryClient({ pinnedSigner: otherSigner, policy: { nowSecs: NOW_SECS } });
   assert.throws(() => buyer.loadFromObject(set));
   assert.equal(buyer.isApproved('tdx', measurement), false);
 });
@@ -87,7 +87,7 @@ test('seed-registry merges a re-seed into an existing set and bumps the version'
   assert.equal(second.set.entries.length, 1); // de-duped on (platform, measurement)
   assert.equal(second.set.signer, first.set.signer);
 
-  const buyer = new RegistryClient({ pinnedSigner: second.set.signer });
+  const buyer = new RegistryClient({ pinnedSigner: second.set.signer, policy: { nowSecs: NOW_SECS } });
   buyer.loadFromObject(second.set);
   assert.equal(buyer.isApproved('tdx', second.measurement), true);
 });
@@ -132,7 +132,7 @@ test('seed-registry consumes collateral from the evidence bundle (no --collatera
 
   assert.equal(tcbVerdict, 'current');
   assert.deepEqual(set.entries, [{ platform: 'tdx', measurement, status: 'active' }]);
-  const buyer = new RegistryClient({ pinnedSigner: publicKeyHex });
+  const buyer = new RegistryClient({ pinnedSigner: publicKeyHex, policy: { nowSecs: NOW_SECS } });
   buyer.loadFromObject(set);
   assert.equal(buyer.isApproved('tdx', measurement), true);
 });

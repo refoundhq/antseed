@@ -1,6 +1,12 @@
 import { randomBytes } from 'node:crypto'
 import type { PeerInfo } from '@antseed/node'
-import { verifySeller, type VerifySellerResult } from '@antseed/tee/verifier'
+import {
+  verifySeller,
+  defaultProductionPolicy,
+  type VerifySellerResult,
+  type VerificationPolicy,
+  type TcbPolicy,
+} from '@antseed/tee/verifier'
 import { RegistryClient } from '@antseed/tee/registry'
 import type { AttestationPlatform, AttestationQuote } from '@antseed/tee/attestation'
 import { log } from './request-utils.js'
@@ -20,6 +26,23 @@ export interface TeeVerifyOptions {
   registryUrl?: string
   /** Pinned governance signer (hex ed25519 pubkey). Loads must match it when set. */
   pinnedRegistrySigner?: string
+  /**
+   * Dev-only escape hatch: permit verification WITHOUT a pinned registry signer.
+   * Production posture requires a pinned signer whenever `requireTee`; without
+   * this flag, a missing pin under `requireTee` fails closed.
+   */
+  allowUnpinnedSigner?: boolean
+  /** Allowed attestation platforms. PRODUCTION DEFAULT: ['tdx']. */
+  platforms?: AttestationPlatform[]
+  /**
+   * TCB posture: 'uptodate-only' (strict) or 'allow-swhardening' (default —
+   * UpToDate passes, SW-hardening/configuration states pass with a warning).
+   */
+  tcbPolicy?: TcbPolicy
+  /** Minimum acceptable registry ValidSet version (rollback floor). */
+  registryMinVersion?: number
+  /** Minimum acceptable registry revocationEpoch. */
+  registryMinRevocationEpoch?: number
   /** Allow the dev/test `mock` platform to reach a verified verdict. Default false. */
   allowMock?: boolean
   /** Per-fetch timeout (ms). Default 4000. */
@@ -63,6 +86,10 @@ interface EvidenceBundle {
   quote: string
   reportDataHex: string
   measurements: Record<string, string>
+  /** Optional seller-bundle digest D (two-tier deployments); a policy input. */
+  bundleDigest?: string
+  /** Optional effective-config hash; a policy input. */
+  configHash?: string
   /** DCAP collateral the seller embedded; consumed by the verifier (no Intel call here). */
   collateral?: Record<string, string>
   timestamp: number
@@ -251,24 +278,61 @@ export async function verifyTeeSeller(
     return fail(`failed to fetch evidence: ${errText(err)}`)
   }
 
-  // 4. Load the approved-set registry (fail-closed inside RegistryClient).
-  const registry = new RegistryClient(
-    opts.pinnedRegistrySigner ? { pinnedSigner: opts.pinnedRegistrySigner } : {},
-  )
+  // 4. Production posture: a pinned registry signer is MANDATORY under
+  //    --require-tee. Without it (and without the dev escape hatch), fail closed
+  //    before loading anything — an unpinned registry is not trusted.
+  if (opts.requireTee && !opts.pinnedRegistrySigner && !opts.allowUnpinnedSigner) {
+    return fail(
+      'a pinned registry signer (--tee-registry-signer) is REQUIRED under --require-tee; ' +
+        'pass --tee-allow-unpinned to override (dev only)',
+    )
+  }
+
+  // 5. Load the approved-set registry (fail-closed inside RegistryClient).
+  const registry = new RegistryClient({
+    ...(opts.pinnedRegistrySigner ? { pinnedSigner: opts.pinnedRegistrySigner } : {}),
+    ...(opts.allowUnpinnedSigner ? { allowUnpinnedSigner: true } : {}),
+    policy: {
+      ...(opts.registryMinVersion !== undefined ? { minVersion: opts.registryMinVersion } : {}),
+      ...(opts.registryMinRevocationEpoch !== undefined
+        ? { minRevocationEpoch: opts.registryMinRevocationEpoch }
+        : {}),
+    },
+  })
   try {
     await registry.load(opts.registryUrl ?? DEFAULT_TEE_REGISTRY_URL)
   } catch (err) {
     return fail(`failed to load TEE approved-set registry: ${errText(err)}`)
   }
 
-  // 5. Verify (the package's verifier — never reimplemented here).
+  // 6. Build the buyer's VerificationPolicy from config/flags. The registry's
+  //    active approved measurements (image freedom — possibly MANY images) are
+  //    folded in as the policy's measurementSet so any governed-approved image
+  //    on an allowed platform verifies with the same guarantee semantics.
+  const policy: VerificationPolicy = defaultProductionPolicy({
+    ...(opts.platforms ? { platforms: opts.platforms } : {}),
+    ...(opts.tcbPolicy ? { tcbPolicy: opts.tcbPolicy } : {}),
+    allowMock: opts.allowMock ?? false,
+    measurementSet: registry.approvedMeasurements(),
+    registry: {
+      requireSignerPin: !opts.allowUnpinnedSigner,
+      ...(opts.registryMinVersion !== undefined ? { minVersion: opts.registryMinVersion } : {}),
+      ...(opts.registryMinRevocationEpoch !== undefined
+        ? { revocationEpoch: opts.registryMinRevocationEpoch }
+        : {}),
+    },
+  })
+
+  // 7. Verify (the package's verifier — never reimplemented here).
   const result = verifySeller({
     quote: quoteFromBundle(bundle),
     connectedPeerPubkey,
     enclavePubkey,
     nonce,
     registry,
-    allowMock: opts.allowMock ?? false,
+    policy,
+    ...(bundle.bundleDigest ? { bundleDigest: bundle.bundleDigest } : {}),
+    ...(bundle.configHash ? { configHash: bundle.configHash } : {}),
   })
 
   const verified = result.verdict === 'verified'

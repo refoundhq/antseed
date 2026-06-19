@@ -114,11 +114,11 @@ describe("evidence bundle carries DCAP collateral (buyer verifies offline)", () 
       { platform: "tdx", quote: raw, reportData: new Uint8Array(0), measurements: {}, collateral },
       NOW_SECS,
     ).measurement;
-    const { set } = signValidSet({
+    const { set, signerHex } = signValidSet({
       version: 1,
       entries: [{ platform: "tdx", measurement, status: "active" }],
     });
-    const registry = new RegistryClient();
+    const registry = new RegistryClient({ pinnedSigner: signerHex });
     registry.loadFromObject(set);
 
     // Seller → /evidence bundle (with collateral) → buyer reconstruct.

@@ -4,6 +4,7 @@ import type { AttestationPlatform } from "../attestation/types.js";
 import type { ValidSet, ValidSetEntry, ValidSetSignedPayload } from "./types.js";
 
 export type { ValidSet, ValidSetEntry, ValidSetSignedPayload } from "./types.js";
+export type { EntryTcbPolicy } from "./types.js";
 export {
   generateRegistryKeypair,
   loadRegistrySigner,
@@ -12,15 +13,35 @@ export {
 } from "./sign.js";
 
 /**
- * Canonical serialization of the signed payload. Stable key order so signer and
- * verifier hash identical bytes. (Entries are serialized in document order; the
- * signer is responsible for the order they intend to sign.)
+ * Governance constraints a buyer applies when loading a ValidSet. All are
+ * fail-closed: a violation throws and leaves NO usable set cached.
+ */
+export interface RegistryLoadPolicy {
+  /** Minimum acceptable `version` (rollback floor on top of the set's own minVersion). */
+  minVersion?: number;
+  /** Minimum acceptable `revocationEpoch`; a set below this is treated as revoked. */
+  minRevocationEpoch?: number;
+  /** Verification time (unix seconds) for `notAfter` expiry. Defaults to wall clock. */
+  nowSecs?: number;
+}
+
+/**
+ * Canonical serialization of the FULL signed payload. Stable key order so signer
+ * and verifier hash identical bytes. Covers version, governance fields,
+ * `auditUrl`, and entries — nothing signable is left out.
  */
 export function canonicalizeSignedPayload(set: ValidSet): Uint8Array {
   const payload: ValidSetSignedPayload = {
     version: set.version,
     entries: set.entries.map((e) => normalizeEntry(e)),
   };
+  if (set.auditUrl !== undefined) payload.auditUrl = set.auditUrl;
+  if (set.notAfter !== undefined) payload.notAfter = set.notAfter;
+  if (set.minVersion !== undefined) payload.minVersion = set.minVersion;
+  if (set.revocationEpoch !== undefined) payload.revocationEpoch = set.revocationEpoch;
+  if (set.revokedMeasurements !== undefined) {
+    payload.revokedMeasurements = set.revokedMeasurements;
+  }
   return new TextEncoder().encode(stableStringify(payload));
 }
 
@@ -32,6 +53,8 @@ function normalizeEntry(e: ValidSetEntry): ValidSetEntry {
     status: e.status,
   };
   if (e.bundleDigest !== undefined) out.bundleDigest = e.bundleDigest;
+  if (e.configHash !== undefined) out.configHash = e.configHash;
+  if (e.tcbPolicy !== undefined) out.tcbPolicy = e.tcbPolicy;
   return out;
 }
 
@@ -48,7 +71,7 @@ function stableStringify(value: unknown): string {
   return `{${parts.join(",")}}`;
 }
 
-/** Verify an ed25519 signature over the canonical payload. Returns false on any error. */
+/** Verify an ed25519 signature over the canonical full payload. Returns false on any error. */
 export function verifyValidSetSignature(set: ValidSet): boolean {
   if (!set.signer || !set.signature) return false;
   try {
@@ -68,20 +91,45 @@ export function verifyValidSetSignature(set: ValidSet): boolean {
 /**
  * Loads, verifies, and caches the approved-version {@link ValidSet}.
  *
- * Fail-closed: if a fresh, signature-valid set cannot be obtained, the client
- * holds NO usable set and `isApproved` returns false. It never silently falls
- * back to an empty or last-known-good set to produce a green verdict.
+ * Fail-closed: if a fresh, signature-valid, governance-passing set cannot be
+ * obtained, the client holds NO usable set and `isApproved` returns false. It
+ * never silently falls back to an empty or last-known-good set to produce a
+ * green verdict.
  *
- * Two-tier-ready: `isApproved` matches on `(platform, measurement)`; a future
- * bundle-digest check layers on the same entry shape via `bundleDigest`.
+ * Production posture (signer pinning MANDATORY): unless `allowUnpinnedSigner` is
+ * explicitly set (a dev opt-in), a client constructed WITHOUT `pinnedSigner`
+ * refuses to load any set — an unpinned registry is rejected fail-closed.
+ *
+ * Governance enforced at load:
+ *   - signature over the FULL payload (auditUrl + governance fields included);
+ *   - `signer == pinnedSigner` (when pinned);
+ *   - not expired (`notAfter`);
+ *   - `version >= max(set.minVersion, policy.minVersion)`;
+ *   - not rolled back (version >= last-seen version);
+ *   - `revocationEpoch >= policy.minRevocationEpoch`;
+ *   - measurements on `revokedMeasurements` are never approved.
  */
 export class RegistryClient {
   private set: ValidSet | undefined;
   /** Pinned governance signer (hex ed25519 pubkey). If set, loads must match it. */
   private readonly pinnedSigner: string | undefined;
+  /** Dev-only opt-in: permit loading a set without a pinned signer. */
+  private readonly allowUnpinnedSigner: boolean;
+  /** Buyer governance constraints applied at load. */
+  private readonly policy: RegistryLoadPolicy;
+  /** Highest version ever accepted by this client (rollback protection). */
+  private lastSeenVersion = 0;
 
-  constructor(opts: { pinnedSigner?: string } = {}) {
+  constructor(
+    opts: {
+      pinnedSigner?: string;
+      allowUnpinnedSigner?: boolean;
+      policy?: RegistryLoadPolicy;
+    } = {},
+  ) {
     this.pinnedSigner = opts.pinnedSigner?.toLowerCase();
+    this.allowUnpinnedSigner = opts.allowUnpinnedSigner ?? false;
+    this.policy = opts.policy ?? {};
   }
 
   /** Load from a URL (fetch) or a local JSON file path, verify, and cache. */
@@ -93,31 +141,102 @@ export class RegistryClient {
 
   /** Load from an in-memory object (e.g. tests), verify, and cache. */
   loadFromObject(set: ValidSet): void {
+    // 0. Production posture: signer pinning is mandatory unless explicitly opted out.
+    if (!this.pinnedSigner && !this.allowUnpinnedSigner) {
+      throw new Error(
+        "RegistryClient: signer pinning is mandatory in production — construct with " +
+          "{ pinnedSigner } (or { allowUnpinnedSigner: true } for dev only).",
+      );
+    }
+    // 1. Signer pin.
     if (this.pinnedSigner && set.signer.toLowerCase() !== this.pinnedSigner) {
-      // Fail-closed: signer is not the pinned governance key.
       this.set = undefined;
       throw new Error(
         "RegistryClient: ValidSet signer does not match the pinned governance key.",
       );
     }
+    // 2. Signature over the full payload.
     if (!verifyValidSetSignature(set)) {
-      // Fail-closed: do not cache an unverified set.
       this.set = undefined;
       throw new Error("RegistryClient: ValidSet signature verification failed.");
     }
+    // 3. Expiry.
+    const now = this.policy.nowSecs ?? Math.floor(Date.now() / 1000);
+    if (typeof set.notAfter === "number" && now >= set.notAfter) {
+      this.set = undefined;
+      throw new Error(
+        `RegistryClient: ValidSet expired (notAfter ${set.notAfter} <= now ${now}).`,
+      );
+    }
+    // 4. minVersion floor (the set's own AND the buyer policy's).
+    const floor = Math.max(set.minVersion ?? 0, this.policy.minVersion ?? 0);
+    if (set.version < floor) {
+      this.set = undefined;
+      throw new Error(
+        `RegistryClient: ValidSet version ${set.version} is below the minimum ${floor}.`,
+      );
+    }
+    // 5. Rollback protection: never accept a lower version than already seen.
+    if (set.version < this.lastSeenVersion) {
+      this.set = undefined;
+      throw new Error(
+        `RegistryClient: rollback rejected — version ${set.version} < last-seen ${this.lastSeenVersion}.`,
+      );
+    }
+    // 6. Revocation epoch floor.
+    if (
+      typeof this.policy.minRevocationEpoch === "number" &&
+      (set.revocationEpoch ?? 0) < this.policy.minRevocationEpoch
+    ) {
+      this.set = undefined;
+      throw new Error(
+        `RegistryClient: ValidSet revocationEpoch ${set.revocationEpoch ?? 0} ` +
+          `is below the required minimum ${this.policy.minRevocationEpoch}.`,
+      );
+    }
+
     this.set = set;
+    this.lastSeenVersion = Math.max(this.lastSeenVersion, set.version);
   }
 
-  /** True only if a verified set is cached and `(platform, measurement)` is active. */
+  /**
+   * True only if a verified set is cached and `(platform, measurement)` is active
+   * AND not on the explicit revocation list.
+   */
   isApproved(platform: AttestationPlatform, measurement: string): boolean {
     if (!this.set) return false; // fail-closed: no verified set loaded
     const m = measurement.toLowerCase();
+    if (this.set.revokedMeasurements?.some((r) => r.toLowerCase() === m)) {
+      return false; // explicit kill switch
+    }
     return this.set.entries.some(
       (e) =>
         e.platform === platform &&
         e.measurement.toLowerCase() === m &&
         e.status === "active",
     );
+  }
+
+  /**
+   * The set of active, non-revoked approved measurements (lowercase hex) for a
+   * platform. This is what the verifier folds into a buyer's policy
+   * `measurementSet` — image freedom is realized here: it returns EVERY approved
+   * measurement, not a single pinned image.
+   */
+  approvedMeasurements(platform?: AttestationPlatform): Set<string> {
+    const out = new Set<string>();
+    if (!this.set) return out;
+    const revoked = new Set(
+      (this.set.revokedMeasurements ?? []).map((r) => r.toLowerCase()),
+    );
+    for (const e of this.set.entries) {
+      if (e.status !== "active") continue;
+      if (platform && e.platform !== platform) continue;
+      const m = e.measurement.toLowerCase();
+      if (revoked.has(m)) continue;
+      out.add(m);
+    }
+    return out;
   }
 
   /** The verified set, or undefined if none is loaded. */

@@ -1,6 +1,7 @@
 import {
   generateKeyPairSync,
   sign as cryptoSign,
+  createPublicKey,
   type KeyObject,
 } from "node:crypto";
 import { canonicalizeSignedPayload } from "./client.js";
@@ -21,15 +22,25 @@ export function newSigner() {
     const message = canonicalizeSignedPayload(set);
     return cryptoSign(null, Buffer.from(message), privateKey).toString("hex");
   };
-  return { signerHex, sign };
+  return { signerHex, sign, privateKey };
 }
 
-/** Build a fully-signed ValidSet from entries using a fresh signer. */
+/**
+ * Build a fully-signed ValidSet from entries. Pass an existing `privateKey` to
+ * sign with the SAME governance key (e.g. rollback tests that need two versions
+ * from one signer); otherwise a fresh keypair is minted.
+ */
 export function signValidSet(
   partial: Omit<ValidSet, "signer" | "signature">,
-): { set: ValidSet; signerHex: string } {
-  const { signerHex, sign } = newSigner();
+  privateKey?: KeyObject,
+): { set: ValidSet; signerHex: string; privateKey: KeyObject } {
+  const key = privateKey ?? generateKeyPairSync("ed25519").privateKey;
+  const signerHex = rawEd25519PublicKeyHex(createPublicKey(key));
   const unsigned: ValidSet = { ...partial, signer: signerHex, signature: "" };
-  const signature = sign(unsigned);
-  return { set: { ...unsigned, signature }, signerHex };
+  const signature = cryptoSign(
+    null,
+    Buffer.from(canonicalizeSignedPayload(unsigned)),
+    key,
+  ).toString("hex");
+  return { set: { ...unsigned, signature }, signerHex, privateKey: key };
 }

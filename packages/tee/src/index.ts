@@ -66,6 +66,7 @@ export {
   verifyValidSetSignature,
   canonicalizeSignedPayload,
 } from "./registry/client.js";
+export type { RegistryLoadPolicy } from "./registry/client.js";
 export {
   generateRegistryKeypair,
   loadRegistrySigner,
@@ -76,17 +77,27 @@ export type {
   ValidSet,
   ValidSetEntry,
   ValidSetSignedPayload,
+  EntryTcbPolicy,
 } from "./registry/types.js";
 
-export { verifySeller, NOT_PROVEN } from "./verifier/verify.js";
+export { verifySeller, NOT_PROVEN, defaultProductionPolicy } from "./verifier/verify.js";
 export type {
   VerifySellerInput,
   VerifySellerResult,
   CheckResult,
   CheckStatus,
   QuoteValidity,
+  VerificationPolicy,
+  RegistryPolicy,
+  TcbPolicy,
 } from "./verifier/verify.js";
 export { validateQuote } from "./verifier/checks.js";
+export {
+  verifyQuoteGenuineness,
+  QUOTE_VERIFIERS,
+  isPlatformImplemented,
+} from "./verifier/quote-verifiers.js";
+export type { QuoteGenuineness, QuoteVerifierFn } from "./verifier/quote-verifiers.js";
 
 // Low-level DCAP entry points, surfaced for registry-seeding tooling that must
 // REAL-DCAP-verify a live seller's quote and derive its canonical measurement.

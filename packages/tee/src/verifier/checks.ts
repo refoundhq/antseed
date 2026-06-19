@@ -1,5 +1,5 @@
 import type { AttestationQuote } from "../attestation/types.js";
-import { verifyTdxQuote } from "./dcap.js";
+import { verifyQuoteGenuineness } from "./quote-verifiers.js";
 
 export type CheckStatus = "pass" | "fail" | "warn";
 
@@ -17,11 +17,10 @@ export interface CheckResult {
  * Result of CHECK 1: is the quote a genuine, debug-off, TCB-current TEE quote
  * with a fresh nonce?
  *
- * For `mock`, validation is purely structural (and never genuine — the verifier
- * rejects mock outside dev). For `tdx`, this runs REAL DCAP verification: parse
- * the quote, verify the ECDSA attestation-key signature + PCK chain to the Intel
- * SGX Root CA against Intel PCS collateral, assert debug-disabled, and evaluate
- * TCB status (see {@link ./dcap.ts}).
+ * Quote genuineness is platform-DISPATCHED (see {@link ./quote-verifiers.ts}):
+ * `tdx` runs REAL DCAP verification; `mock` is structural-only (never genuine);
+ * every other platform fails closed. This struct is the platform-agnostic shape
+ * the policy engine consumes — it never branches on the silicon vendor.
  */
 export interface QuoteValidity {
   genuine: boolean;
@@ -40,115 +39,24 @@ export interface QuoteValidity {
   detail: string;
 }
 
-const MOCK_BANNER = "ANTSEED-MOCK-QUOTE\0";
-
 /**
- * CHECK 1 backend — validate the quote per-platform and extract the fields the
- * other checks rely on (measurement + report_data).
+ * CHECK 1 backend — validate the quote on its platform and extract the fields
+ * the other checks rely on (measurement + report_data). Thin adapter over the
+ * platform-dispatched {@link verifyQuoteGenuineness}; kept as a stable export so
+ * existing callers/tests continue to work.
  */
 export function validateQuote(
   quote: AttestationQuote,
   nowSecs?: number,
 ): QuoteValidity {
-  switch (quote.platform) {
-    case "mock":
-      return validateMockQuote(quote);
-    case "tdx":
-      return validateTdxQuote(quote, nowSecs);
-    case "sev-snp":
-      return {
-        genuine: false,
-        debugDisabled: false,
-        tcbCurrent: false,
-        measurement: "",
-        reportData: new Uint8Array(0),
-        detail: "sev-snp quote verification not yet implemented",
-      };
-    default: {
-      const _exhaustive: never = quote.platform;
-      return {
-        genuine: false,
-        debugDisabled: false,
-        tcbCurrent: false,
-        measurement: "",
-        reportData: new Uint8Array(0),
-        detail: `unknown platform ${String(_exhaustive)}`,
-      };
-    }
-  }
-}
-
-/**
- * Structural validation for the mock platform. NEVER genuine — a mock quote can
- * never satisfy a production verifier. We still parse it so the end-to-end path
- * (report_data binding, measurement set, channel binding) runs without hardware.
- */
-function validateMockQuote(quote: AttestationQuote): QuoteValidity {
-  const banner = new TextEncoder().encode(MOCK_BANNER);
-  const hasBanner =
-    quote.quote.length >= banner.length + 64 &&
-    banner.every((b, i) => quote.quote[i] === b);
-  const reportData = hasBanner
-    ? quote.quote.slice(banner.length, banner.length + 64)
-    : new Uint8Array(0);
-  const measurement = quote.measurements.mrtd ?? "";
+  const g = verifyQuoteGenuineness(quote, nowSecs);
   return {
-    // `genuine` reflects structural validity here. The verifier separately
-    // treats platform 'mock' as non-production (warn) regardless of this flag.
-    genuine: hasBanner,
-    debugDisabled: true,
-    tcbCurrent: true,
-    measurement,
-    reportData,
-    detail: hasBanner
-      ? "mock quote structurally valid (NOT genuine — dev/test only)"
-      : "mock quote malformed",
+    genuine: g.genuine,
+    debugDisabled: g.debugDisabled,
+    tcbCurrent: g.tcbCurrent,
+    tcbWarn: g.tcbWarn,
+    measurement: g.measurement,
+    reportData: g.reportData,
+    detail: g.detail,
   };
-}
-
-/**
- * Real Intel TDX DCAP quote validation. Delegates to {@link verifyTdxQuote}
- * (`@phala/dcap-qvl`), which:
- *   - Parses the TDX quote header + TD report body.
- *   - Verifies the ECDSA-P256 attestation-key signature over header+report and
- *     validates the PCK cert chain to the Intel SGX Root CA, using the DCAP
- *     collateral supplied on `quote.collateral` (Intel PCS/PCCS TCB info + QE id).
- *   - Asserts the TD debug bit (TUD.DEBUG) is OFF.
- *   - Evaluates TCB status.
- * We then fold MRTD + RTMR0..RTMR3 into the canonical measurement and extract
- * the 64-byte report_data. Any non-genuine condition throws inside the library
- * and is reported here as genuine=false.
- */
-function validateTdxQuote(
-  quote: AttestationQuote,
-  nowSecs?: number,
-): QuoteValidity {
-  try {
-    const v = verifyTdxQuote(quote, nowSecs);
-    return {
-      genuine: v.genuine,
-      debugDisabled: v.debugDisabled,
-      tcbCurrent: v.tcbVerdict === "current",
-      tcbWarn: v.tcbVerdict === "warn",
-      measurement: v.measurement,
-      reportData: v.reportData,
-      detail:
-        v.advisoryIds.length > 0
-          ? `${v.detail}; advisories: ${v.advisoryIds.join(", ")}`
-          : v.detail,
-    };
-  } catch (err) {
-    // A throw means the quote is not genuine (bad signature / broken chain /
-    // debug-on / missing collateral / parse failure). Fail closed.
-    return {
-      genuine: false,
-      debugDisabled: false,
-      tcbCurrent: false,
-      measurement: "",
-      reportData: new Uint8Array(0),
-      detail: `TDX DCAP verification failed: ${
-        err instanceof Error ? err.message : String(err)
-      }`,
-    };
-  }
 }

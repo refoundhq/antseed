@@ -54,6 +54,8 @@ export function registerTeeSeedRegistryCommand(teeCmd: Command): void {
     .requiredOption('--key <path>', 'registry-signer private key (PKCS#8 PEM) from gen-registry-key')
     .requiredOption('-o, --out <path>', 'output ValidSet JSON file (created or merged into)')
     .option('--version <n>', 'ValidSet version number to stamp (default: bump existing or 1)', (v) => parseInt(v, 10))
+    .option('--validity-days <n>', 'days until the seeded set expires (notAfter)', (v) => parseInt(v, 10))
+    .option('--audit-url <url>', 'published audit URL to bind into the signed set')
     .option('--fetch-timeout-ms <n>', 'per-request fetch timeout (ms)', (v) => parseInt(v, 10), 8000)
     .action(async (options) => {
       try {
@@ -86,8 +88,14 @@ async function runSeed(options: Record<string, unknown>): Promise<void> {
 
   // 2. Fetch the evidence bundle.
   const bundle = await fetchJson<EvidenceBundle>(evidenceUrl, fetchTimeoutMs);
+  // Platform-aware: this command seeds an entry for the seller's ADVERTISED
+  // platform. Today only the real TDX DCAP path is implemented; any other
+  // platform fails clearly rather than mis-seeding.
   if (bundle.platform !== 'tdx') {
-    throw new Error(`seller advertises platform '${bundle.platform}', not 'tdx' — refusing to seed`);
+    throw new Error(
+      `seeding for platform '${bundle.platform}' is not yet supported — ` +
+        `only 'tdx' (real DCAP) can be seeded today`,
+    );
   }
 
   // 3. Assemble the AttestationQuote with DCAP collateral (inline or from file).
@@ -144,12 +152,19 @@ export interface SeedResult {
  * TDX quote fixture. Throws on any non-genuine / stale-TCB condition (refuses to
  * seed). `nowSecs` pins the DCAP verification time (defaults to wall clock).
  */
+/** Default validity window stamped into a freshly-seeded set (90 days). */
+export const DEFAULT_VALIDITY_DAYS = 90;
+
 export function buildSignedValidSet(opts: {
   quote: AttestationQuote;
   privateKeyPem: string;
   existing?: ValidSet | undefined;
   version?: number | undefined;
   nowSecs?: number;
+  /** Validity window in days; stamps `notAfter = now + days`. Default 90. */
+  validityDays?: number;
+  /** Audit URL to stamp (overrides any inherited one). NOW part of the signed payload. */
+  auditUrl?: string;
 }): SeedResult {
   const { quote, privateKeyPem, existing, version } = opts;
 
@@ -166,10 +181,23 @@ export function buildSignedValidSet(opts: {
   const merged = mergeEntries(existing?.entries ?? [], newEntry);
   const nextVersion = version ?? (existing ? existing.version + 1 : 1);
 
+  // Governance fields: stamp a fresh expiry window; inherit minVersion /
+  // revocationEpoch / auditUrl from the existing set unless overridden.
+  const nowSecs = opts.nowSecs ?? Math.floor(Date.now() / 1000);
+  const validityDays = opts.validityDays ?? DEFAULT_VALIDITY_DAYS;
+  const notAfter = nowSecs + validityDays * 86400;
+  const auditUrl = opts.auditUrl ?? existing?.auditUrl;
+
   const set = signValidSetWithPrivateKey(privateKeyPem, {
     version: nextVersion,
     entries: merged,
-    ...(existing?.auditUrl ? { auditUrl: existing.auditUrl } : {}),
+    notAfter,
+    ...(auditUrl ? { auditUrl } : {}),
+    ...(existing?.minVersion !== undefined ? { minVersion: existing.minVersion } : {}),
+    ...(existing?.revocationEpoch !== undefined ? { revocationEpoch: existing.revocationEpoch } : {}),
+    ...(existing?.revokedMeasurements !== undefined
+      ? { revokedMeasurements: existing.revokedMeasurements }
+      : {}),
   });
 
   // Self-check: the produced set must verify under its own embedded signer.
