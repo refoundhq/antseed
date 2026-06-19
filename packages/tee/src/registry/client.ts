@@ -1,9 +1,15 @@
 import { promises as fs } from "node:fs";
 import { createPublicKey, verify as cryptoVerify } from "node:crypto";
 import type { AttestationPlatform } from "../attestation/types.js";
-import type { ValidSet, ValidSetEntry, ValidSetSignedPayload } from "./types.js";
+import type {
+  ValidSet,
+  ValidSetEntry,
+  ValidSetSignedPayload,
+  ApprovedBinary,
+} from "./types.js";
+import { verifyApprovedBinary, type BinaryVerdict, type BinaryApprovalOptions } from "./binary.js";
 
-export type { ValidSet, ValidSetEntry, ValidSetSignedPayload } from "./types.js";
+export type { ValidSet, ValidSetEntry, ValidSetSignedPayload, ApprovedBinary } from "./types.js";
 export type { EntryTcbPolicy } from "./types.js";
 export {
   generateRegistryKeypair,
@@ -42,11 +48,14 @@ export function canonicalizeSignedPayload(set: ValidSet): Uint8Array {
   if (set.revokedMeasurements !== undefined) {
     payload.revokedMeasurements = set.revokedMeasurements;
   }
+  if (set.binaries !== undefined) payload.binaries = set.binaries.map((b) => normalizeBinary(b));
+  if (set.revokedBinaries !== undefined) payload.revokedBinaries = set.revokedBinaries;
   return new TextEncoder().encode(stableStringify(payload));
 }
 
 function normalizeEntry(e: ValidSetEntry): ValidSetEntry {
-  // Re-emit with a fixed key order; omit undefined optional fields.
+  // Re-emit with a fixed key set; omit undefined optionals. EVERY security-relevant
+  // field must be listed here, else it would be served but NOT signed (tamperable).
   const out: ValidSetEntry = {
     platform: e.platform,
     measurement: e.measurement,
@@ -55,6 +64,22 @@ function normalizeEntry(e: ValidSetEntry): ValidSetEntry {
   if (e.bundleDigest !== undefined) out.bundleDigest = e.bundleDigest;
   if (e.configHash !== undefined) out.configHash = e.configHash;
   if (e.tcbPolicy !== undefined) out.tcbPolicy = e.tcbPolicy;
+  if (e.launcherVersion !== undefined) out.launcherVersion = e.launcherVersion;
+  if (e.storagePolicyHash !== undefined) out.storagePolicyHash = e.storagePolicyHash;
+  if (e.networkPolicyHash !== undefined) out.networkPolicyHash = e.networkPolicyHash;
+  if (e.requireChannelBinding !== undefined) out.requireChannelBinding = e.requireChannelBinding;
+  if (e.capabilities !== undefined) out.capabilities = e.capabilities;
+  return out;
+}
+
+function normalizeBinary(b: ApprovedBinary): ApprovedBinary {
+  const out: ApprovedBinary = {
+    digest: b.digest,
+    version: b.version,
+    tag: b.tag,
+    status: b.status,
+  };
+  if (b.releaseSignature !== undefined) out.releaseSignature = b.releaseSignature;
   return out;
 }
 
@@ -237,6 +262,21 @@ export class RegistryClient {
       out.add(m);
     }
     return out;
+  }
+
+  /**
+   * Buyer-side mirror of the launcher's pre-exec gate: is the bound AntSeed seller
+   * binary digest approved by the verified set (active, not revoked, version/tag
+   * and optional release-signature satisfied)? Fail-closed if no set is loaded.
+   */
+  approveBinary(
+    binary: { digest: string; version?: string; tag?: string },
+    opts?: BinaryApprovalOptions,
+  ): BinaryVerdict {
+    if (!this.set) {
+      return { approved: false, reason: "no verified ValidSet loaded (fail-closed)" };
+    }
+    return verifyApprovedBinary(this.set, binary, opts);
   }
 
   /** The verified set, or undefined if none is loaded. */

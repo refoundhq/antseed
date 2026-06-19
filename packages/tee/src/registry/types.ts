@@ -37,6 +37,42 @@ export interface ValidSetEntry {
    * stricter buyer policy still wins.
    */
   tcbPolicy?: EntryTcbPolicy;
+
+  // --- launcher/runtime layer (the entry's `measurement` is the LAUNCHER's) ---
+  /** Launcher/runtime version this measurement corresponds to. */
+  launcherVersion?: string;
+  /** Storage-policy hash this entry vouches for (buyer matches it against evidence). */
+  storagePolicyHash?: string;
+  /** Network-policy hash this entry vouches for. */
+  networkPolicyHash?: string;
+  /** This launcher asserts an enclave-custodied channel key MUST be bound in evidence. */
+  requireChannelBinding?: boolean;
+  /**
+   * Attested runtime capabilities a buyer policy can require, e.g.
+   * "mem-enc", "no-operator-shell", "egress-locked", "ephemeral-storage".
+   * These back the confidentiality claims the launcher measurement attests.
+   */
+  capabilities?: string[];
+}
+
+/**
+ * One approved AntSeed seller binary. The launcher refuses to exec a binary whose
+ * digest is not an `active`, non-revoked entry here; the buyer mirrors the same
+ * check against the bound `antseedBinaryDigest` in evidence. Approval is rooted in
+ * the GOVERNANCE signature over the whole set; `releaseSignature` is an optional
+ * additional provenance proof a buyer can pin a release key to verify.
+ */
+export interface ApprovedBinary {
+  /** Lowercase hex digest of the approved seller bundle/binary. */
+  digest: string;
+  /** Semver of the release. */
+  version: string;
+  /** Release channel tag, e.g. "stable" / "beta". */
+  tag: string;
+  /** Optional hex ed25519 signature over the digest by the AntSeed release key. */
+  releaseSignature?: string;
+  /** `active` = trusted; `deprecated` = no longer trusted. */
+  status: "active" | "deprecated";
 }
 
 /**
@@ -82,6 +118,10 @@ export interface ValidSet {
    * of any `active` entry (belt-and-suspenders kill switch). Lowercase hex.
    */
   revokedMeasurements?: string[];
+  /** Optional approved AntSeed seller binaries (launcher + buyer both check these). */
+  binaries?: ApprovedBinary[];
+  /** Optional explicit binary-digest kill switch (revoked regardless of status). Lowercase hex. */
+  revokedBinaries?: string[];
 }
 
 /**
@@ -98,4 +138,6 @@ export interface ValidSetSignedPayload {
   minVersion?: number;
   revocationEpoch?: number;
   revokedMeasurements?: string[];
+  binaries?: ApprovedBinary[];
+  revokedBinaries?: string[];
 }

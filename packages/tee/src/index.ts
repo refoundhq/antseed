@@ -81,7 +81,19 @@ export type {
   ValidSetEntry,
   ValidSetSignedPayload,
   EntryTcbPolicy,
+  ApprovedBinary,
 } from "./registry/types.js";
+export {
+  verifyApprovedBinary,
+  verifyReleaseSignature,
+  RegistryBinaryVerifier,
+} from "./registry/binary.js";
+export type {
+  BinaryVerifier,
+  BinaryVerdict,
+  BinaryIdentity,
+  BinaryApprovalOptions,
+} from "./registry/binary.js";
 
 export { verifySeller, NOT_PROVEN, defaultProductionPolicy } from "./verifier/verify.js";
 export type {

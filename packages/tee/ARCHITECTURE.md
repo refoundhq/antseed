@@ -102,6 +102,7 @@ schema `antseed-tee/launcher` (the whole design).
 interface EvidenceDocument {
   schema: "antseed-tee/launcher";
   platform: AttestationPlatform;
+  claims: ClaimId[];             // the SUBSET of claims this seller attests to (§6)
 
   // hardware layer
   quote: string;                 // base64 raw vendor quote
@@ -158,18 +159,45 @@ instead by an **enclave-generated, enclave-custodied X25519 key**:
    **operationally** by the locked runtime (attested via launcher measurement) — and
    where that isn't attested, the buyer fails the confidentiality check (§9).
 
-## 6. Buyer checklist (design requirement E) — fail-closed
+## 6. Claims — à-la-carte attestation, buyer-decided policy (design requirement E)
 
-1. hardware quote genuine 2. debug off 3. TCB acceptable 4. fresh nonce
-5. peer pubkey bound 6. enclave key bound 7. **channel key bound** (enclave-signed)
-8. **launcher measurement approved** 9. **AntSeed binary digest approved**
-10. **binary version/tag active** (not deprecated/revoked) 11. **release signature valid**
-12. **storage policy satisfies buyer policy** 13. **network policy satisfies buyer policy**
-14. registry signer pinned/governed 15. registry not expired / not rolled back.
+**The protocol mandates no fixed attestation set.** A seller attests to ANY subset
+of named **claims** (or none). The evidence document lists exactly which claims it
+makes (`claims: ClaimId[]`) and carries the evidence for each. The buyer verifies
+each claimed property independently and reports, per claim, **{claimed, verdict}**
+with verdict ∈ `verified | failed | not-proven`. The buyer's OWN policy declares
+`requiredClaims`; routing is allowed iff every required claim is `claimed && verified`.
+A buyer with no required claims still receives the full, honest claim report — the
+point is **clarity** ("prompts are e2ee", "binary integrity is an official signed
+release", …) plus independent verification, not protocol-level coercion.
 
-Each is a tri-state check; a required check that is `fail` → `verdict:"failed"`,
-routing refused. Anything that cannot be cryptographically established on the given
-platform is emitted in `notProven`, never silently passed.
+Named claims (extensible):
+
+| Claim | Plain-language meaning | Verified by |
+|-------|------------------------|-------------|
+| `hardware-genuine` | runs in a real TEE, debug off, acceptable TCB | silicon quote + collateral |
+| `channel-key-bound` | buyer↔seller traffic is e2ee under an enclave-held key | enclave key (in `report_data`) signs the doc binding the channel key |
+| `approved-launcher` | the runtime is an approved AntSeed launcher build | launcher measurement ∈ signed set |
+| `approved-binary` | the seller binary is an official signed AntSeed release | bound digest ∈ signed binary set (+ release sig) |
+| `binary-active` | that release is current, not deprecated/revoked | binary status + revocation |
+| `storage-policy` | no persistent plaintext buyer data; writable state ephemeral | measured storage-policy hash ∈ approved + capabilities |
+| `network-policy` | egress locked to declared provider/attestation endpoints | measured network-policy hash ∈ approved + capabilities |
+| `no-operator-shell` | operator has no shell to read keys/plaintext | launcher capability attested by measurement |
+| `mem-encryption` | RAM encrypted by the platform | platform evidence |
+
+**Dependency lattice (keeps à-la-carte sound):** every claim except
+`hardware-genuine` is `verified` only if the **binding substrate** holds — quote
+genuine + `report_data` binds the served enclave key + nonce + peer + the
+`enclaveSignature` over the doc verifies. Otherwise the claimed field is
+unsigned/unrooted and the claim is `not-proven`. Registry-backed claims
+(`approved-launcher`, `approved-binary`, `binary-active`, policy claims) additionally
+require the governance checks (signer pinned, not expired, not rolled back); if the
+registry is unusable they are `not-proven`, never silently passed.
+
+So the buyer verdict is NOT "all 15 pass." It is: the substrate is sound, and every
+claim the **buyer requires** is present and verified. Everything the seller claims is
+shown with its verification status; everything the seller omits is simply absent —
+not a failure unless that buyer required it.
 
 ## 7. Registry / governance (design requirements B, J)
 
