@@ -38,8 +38,11 @@ export {
   assertProductionPlatform,
   TdxAttestation,
   parseTdxMeasurements,
+  fetchTdxCollateral,
+  normalizeCollateral,
+  clearCollateralCache,
 } from "./attestation/index.js";
-export type { TdxAttestationOptions } from "./attestation/index.js";
+export type { TdxAttestationOptions, WireCollateral } from "./attestation/index.js";
 
 export {
   handleEvidenceRequest,

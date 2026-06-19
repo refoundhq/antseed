@@ -20,8 +20,9 @@ import type { AttestationQuote } from "../attestation/types.js";
  * TUD.DEBUG-set TD by default). It then extracts MRTD + RTMR0..3 and the 64-byte
  * report_data from the parsed TD report.
  *
- * Collateral is NOT fetched here: it must be supplied on `quote.collateral`
- * (fetched out-of-band against Intel PCS/PCCS). This keeps verification a pure,
+ * Collateral is NOT fetched here: it must be supplied on `quote.collateral`.
+ * The seller fetches it (Intel PCS, by FMSPC) and embeds it in the evidence
+ * bundle (see `attestation/collateral.ts`), so verification stays a pure,
  * synchronous, network-free function — the verifier never makes an implicit
  * outbound call while deciding a verdict.
  */

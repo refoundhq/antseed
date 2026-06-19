@@ -46,6 +46,13 @@ export interface EvidenceBundle {
   /** 64-byte report_data, hex (verifier recomputes anyway; included for debugging). */
   reportDataHex: string;
   measurements: Record<string, string>;
+  /**
+   * DCAP verification collateral (Intel PCK cert chain/CRL + TCB info + QE
+   * identity), when the quote carries it. Including it here lets the buyer + the
+   * seeder verify a live quote's TCB status from this one fetch — no separate
+   * Intel-PCS call at verify time.
+   */
+  collateral?: Record<string, string>;
   timestamp: number;
 }
 
@@ -133,6 +140,7 @@ async function buildEvidence(
     measurements: quote.measurements,
     timestamp: Date.now(),
   };
+  if (quote.collateral !== undefined) bundle.collateral = quote.collateral;
   if (ctx.bundleDigest !== undefined) bundle.bundleDigest = ctx.bundleDigest;
   if (ctx.configHash !== undefined) bundle.configHash = ctx.configHash;
   return bundle;

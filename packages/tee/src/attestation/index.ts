@@ -11,6 +11,12 @@ export type {
 export { MockAttestation, MOCK_MEASUREMENTS, MOCK_MEASUREMENT, assertProductionPlatform } from "./mock.js";
 export { TdxAttestation, parseTdxMeasurements } from "./tdx.js";
 export type { TdxAttestationOptions } from "./tdx.js";
+export {
+  fetchTdxCollateral,
+  normalizeCollateral,
+  clearCollateralCache,
+} from "./collateral.js";
+export type { WireCollateral } from "./collateral.js";
 
 /**
  * Construct an attestation provider for the given platform.

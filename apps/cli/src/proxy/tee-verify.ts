@@ -63,6 +63,8 @@ interface EvidenceBundle {
   quote: string
   reportDataHex: string
   measurements: Record<string, string>
+  /** DCAP collateral the seller embedded; consumed by the verifier (no Intel call here). */
+  collateral?: Record<string, string>
   timestamp: number
 }
 
@@ -151,6 +153,9 @@ function quoteFromBundle(bundle: EvidenceBundle): AttestationQuote {
     quote: new Uint8Array(Buffer.from(bundle.quote, 'base64')),
     reportData: new Uint8Array(Buffer.from(bundle.reportDataHex, 'hex')),
     measurements: bundle.measurements,
+    // DCAP collateral travels in the bundle so the verifier checks TCB status
+    // offline — no Intel-PCS dependency at buyer verify time.
+    ...(bundle.collateral ? { collateral: bundle.collateral } : {}),
   }
 }
 

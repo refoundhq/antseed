@@ -47,6 +47,10 @@ describe("parseTdxMeasurements", () => {
   });
 });
 
+/** A stub DCAP collateral fetcher — no network. Mimics the embedded collateral. */
+const STUB_COLLATERAL = { tcb_info: "{}", qe_identity: "{}", pck_crl: "00" } as const;
+const stubFetcher = async (): Promise<Record<string, string>> => ({ ...STUB_COLLATERAL });
+
 describe("TdxAttestation configfs-tsm round-trip (fake configfs path)", () => {
   let root: string;
   let outblob: Uint8Array;
@@ -63,10 +67,11 @@ describe("TdxAttestation configfs-tsm round-trip (fake configfs path)", () => {
     await fs.rm(root, { recursive: true, force: true });
   });
 
-  it("writes report_data and returns a quote that binds it", async () => {
+  it("writes report_data and returns a quote that binds it, with DCAP collateral", async () => {
     const att = new TdxAttestation({
       configfsTsmDir: root,
       tdxGuestDev: "/nonexistent/tdx_guest",
+      collateralFetcher: stubFetcher, // no Intel-PCS network in tests
     });
 
     // Drive the kernel simulation: poll for the report node the provider creates,
@@ -83,8 +88,45 @@ describe("TdxAttestation configfs-tsm round-trip (fake configfs path)", () => {
       // Measurements parsed from the embedded TD body.
       expect(quote.measurements.mrtd).toBe("11".repeat(48));
       expect(quote.measurements.rtmr0).toBe("20".repeat(48));
-      // collateral surfaces provider/generation.
-      expect(quote.collateral?.provider).toBe("tdx_guest");
+      // DCAP collateral is fetched (here: stubbed) and attached to the quote so
+      // the evidence bundle can carry it for offline buyer verification.
+      expect(quote.collateral).toEqual(STUB_COLLATERAL);
+    } finally {
+      stop();
+    }
+  });
+
+  it("prefers a usable auxblob over fetching collateral", async () => {
+    const auxCollateral = { tcb_info: "{\"id\":\"TDX\"}", qe_identity: "{}", pck_crl: "ab" };
+    let fetched = false;
+    const att = new TdxAttestation({
+      configfsTsmDir: root,
+      tdxGuestDev: "/nonexistent/tdx_guest",
+      collateralFetcher: async () => {
+        fetched = true;
+        return { ...STUB_COLLATERAL };
+      },
+    });
+    const stop = pollAndStage(root, outblob, JSON.stringify(auxCollateral));
+    try {
+      const quote = await att.generateQuote({ peerPubkey: PEER_PUBKEY, enclavePubkey: ENCLAVE_PUBKEY, nonce: NONCE });
+      expect(quote.collateral).toEqual(auxCollateral);
+      expect(fetched).toBe(false); // auxblob was usable → no fetch
+    } finally {
+      stop();
+    }
+  });
+
+  it("omits collateral when skipCollateral is set", async () => {
+    const att = new TdxAttestation({
+      configfsTsmDir: root,
+      tdxGuestDev: "/nonexistent/tdx_guest",
+      skipCollateral: true,
+    });
+    const stop = pollAndStage(root, outblob);
+    try {
+      const quote = await att.generateQuote({ peerPubkey: PEER_PUBKEY, enclavePubkey: ENCLAVE_PUBKEY, nonce: NONCE });
+      expect(quote.collateral).toBeUndefined();
     } finally {
       stop();
     }
@@ -128,7 +170,7 @@ describe("TdxAttestation configfs-tsm round-trip (fake configfs path)", () => {
  * materializing a quote when inblob is written. Returns a stop() to clear the
  * timer.
  */
-function pollAndStage(root: string, outblob: Uint8Array): () => void {
+function pollAndStage(root: string, outblob: Uint8Array, auxblob?: string): () => void {
   let stopped = false;
   const seen = new Set<string>();
   const tick = async (): Promise<void> => {
@@ -148,6 +190,7 @@ function pollAndStage(root: string, outblob: Uint8Array): () => void {
         await fs.writeFile(join(dir, "outblob"), outblob);
         await fs.writeFile(join(dir, "provider"), "tdx_guest\n");
         await fs.writeFile(join(dir, "generation"), "1\n");
+        if (auxblob !== undefined) await fs.writeFile(join(dir, "auxblob"), auxblob);
       }
     } catch {
       /* root may not exist yet */

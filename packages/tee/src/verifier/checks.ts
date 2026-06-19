@@ -46,12 +46,15 @@ const MOCK_BANNER = "ANTSEED-MOCK-QUOTE\0";
  * CHECK 1 backend — validate the quote per-platform and extract the fields the
  * other checks rely on (measurement + report_data).
  */
-export function validateQuote(quote: AttestationQuote): QuoteValidity {
+export function validateQuote(
+  quote: AttestationQuote,
+  nowSecs?: number,
+): QuoteValidity {
   switch (quote.platform) {
     case "mock":
       return validateMockQuote(quote);
     case "tdx":
-      return validateTdxQuote(quote);
+      return validateTdxQuote(quote, nowSecs);
     case "sev-snp":
       return {
         genuine: false,
@@ -116,9 +119,12 @@ function validateMockQuote(quote: AttestationQuote): QuoteValidity {
  * the 64-byte report_data. Any non-genuine condition throws inside the library
  * and is reported here as genuine=false.
  */
-function validateTdxQuote(quote: AttestationQuote): QuoteValidity {
+function validateTdxQuote(
+  quote: AttestationQuote,
+  nowSecs?: number,
+): QuoteValidity {
   try {
-    const v = verifyTdxQuote(quote);
+    const v = verifyTdxQuote(quote, nowSecs);
     return {
       genuine: v.genuine,
       debugDisabled: v.debugDisabled,

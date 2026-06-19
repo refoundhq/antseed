@@ -99,3 +99,40 @@ test('seed-registry refuses to seed a tampered (non-genuine) quote', () => {
 
   assert.throws(() => buildSignedValidSet({ quote, privateKeyPem, nowSecs: NOW_SECS }));
 });
+
+test('seed-registry consumes collateral from the evidence bundle (no --collateral file)', () => {
+  // Simulate the seeder reading an evidence bundle whose `collateral` field the
+  // seller embedded: reconstruct the quote with that inline collateral and seed.
+  // No --collateral path is involved — the bundle is self-sufficient.
+  const { raw, collateral } = (() => {
+    const r = new Uint8Array(
+      Buffer.from(readFileSync(join(FIX, 'tdx_quote.b64'), 'utf8'), 'base64'),
+    );
+    const c = JSON.parse(
+      readFileSync(join(FIX, 'tdx_quote_collateral.json'), 'utf8'),
+    ) as Record<string, string>;
+    return { raw: r, collateral: c };
+  })();
+  const bundle = { platform: 'tdx', quote: Buffer.from(raw).toString('base64'), collateral };
+
+  const quoteFromBundle: AttestationQuote = {
+    platform: 'tdx',
+    quote: new Uint8Array(Buffer.from(bundle.quote, 'base64')),
+    reportData: new Uint8Array(0),
+    measurements: {},
+    collateral: bundle.collateral, // straight from the bundle, no file
+  };
+
+  const { publicKeyHex, privateKeyPem } = generateRegistryKeypair();
+  const { set, measurement, tcbVerdict } = buildSignedValidSet({
+    quote: quoteFromBundle,
+    privateKeyPem,
+    nowSecs: NOW_SECS,
+  });
+
+  assert.equal(tcbVerdict, 'current');
+  assert.deepEqual(set.entries, [{ platform: 'tdx', measurement, status: 'active' }]);
+  const buyer = new RegistryClient({ pinnedSigner: publicKeyHex });
+  buyer.loadFromObject(set);
+  assert.equal(buyer.isApproved('tdx', measurement), true);
+});

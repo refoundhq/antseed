@@ -1,6 +1,7 @@
 import { promises as fs } from "node:fs";
 import { openSync, closeSync } from "node:fs";
 import { packReportData } from "../report-data.js";
+import { fetchTdxCollateral, type WireCollateral } from "./collateral.js";
 import type {
   AttestationProvider,
   AttestationQuote,
@@ -55,6 +56,22 @@ export interface TdxAttestationOptions {
   configfsTsmDir?: string;
   /** Override the tdx_guest device path (defaults to /dev/tdx_guest). For tests. */
   tdxGuestDev?: string;
+  /**
+   * PCCS/Intel-PCS base URL for collateral fetching. Defaults to Intel PCS.
+   * Set to a PCCS mirror (e.g. Phala's) for better availability/rate limits.
+   */
+  pccsUrl?: string;
+  /**
+   * Skip the DCAP-collateral fetch entirely (quote ships without
+   * `collateral`). Default false — a TDX seller's evidence must carry collateral
+   * so the buyer verifies offline. For tests/diagnostics only.
+   */
+  skipCollateral?: boolean;
+  /**
+   * Override the collateral fetcher (tests). Defaults to {@link fetchTdxCollateral},
+   * which fetches from Intel PCS by FMSPC and caches in-process.
+   */
+  collateralFetcher?: (quote: Uint8Array) => Promise<WireCollateral>;
 }
 
 export class TdxAttestation implements AttestationProvider {
@@ -62,10 +79,15 @@ export class TdxAttestation implements AttestationProvider {
 
   private readonly configfsTsmDir: string;
   private readonly tdxGuestDev: string;
+  private readonly skipCollateral: boolean;
+  private readonly fetchCollateral: (quote: Uint8Array) => Promise<WireCollateral>;
 
   constructor(opts: TdxAttestationOptions = {}) {
     this.configfsTsmDir = opts.configfsTsmDir ?? DEFAULT_CONFIGFS_TSM_DIR;
     this.tdxGuestDev = opts.tdxGuestDev ?? DEFAULT_TDX_GUEST_DEV;
+    this.skipCollateral = opts.skipCollateral ?? false;
+    this.fetchCollateral =
+      opts.collateralFetcher ?? ((q) => fetchTdxCollateral(q, opts.pccsUrl));
   }
 
   async isAvailable(): Promise<boolean> {
@@ -121,16 +143,20 @@ export class TdxAttestation implements AttestationProvider {
         );
       }
 
-      const collateral = await this.readCollateral(dir, provider);
       const measurements = parseTdxMeasurements(quote);
       assertBindsReportData(quote, reportData);
+
+      // DCAP collateral: prefer a usable auxblob if the kernel/QGS already
+      // supplied one, else fetch from Intel PCS by FMSPC (cached).
+      const auxCollateral = await readAuxblobCollateral(dir);
+      const collateral = await this.resolveCollateral(quote, auxCollateral);
 
       return {
         platform: "tdx",
         quote,
         reportData,
         measurements,
-        ...(Object.keys(collateral).length > 0 ? { collateral } : {}),
+        ...(collateral ? { collateral } : {}),
       };
     } finally {
       await fs.rmdir(dir).catch(() => {
@@ -155,26 +181,66 @@ export class TdxAttestation implements AttestationProvider {
     }
     const measurements = parseTdxMeasurements(quote);
     assertBindsReportData(quote, reportData);
-    return { platform: "tdx", quote, reportData, measurements };
+    const collateral = await this.resolveCollateral(quote, null);
+    return {
+      platform: "tdx",
+      quote,
+      reportData,
+      measurements,
+      ...(collateral ? { collateral } : {}),
+    };
   }
 
-  private async readCollateral(
-    dir: string,
-    provider: string | null,
-  ): Promise<Record<string, string>> {
-    const collateral: Record<string, string> = {};
-    if (provider) collateral.provider = provider;
-    const generation = await readTextBestEffort(`${dir}/generation`);
-    if (generation) collateral.generation = generation;
-    // auxblob carries optional supplemental DCAP collateral; include when non-empty.
-    try {
-      const aux = await fs.readFile(`${dir}/auxblob`);
-      if (aux.length > 0) collateral.auxblob = Buffer.from(aux).toString("base64");
-    } catch {
-      /* auxblob absent or empty */
-    }
-    return collateral;
+  /**
+   * Resolve DCAP collateral for a quote: use the auxblob-supplied collateral when
+   * the kernel/QGS already produced a usable (structured) one, else fetch from
+   * Intel PCS by FMSPC. Returns null only when collateral fetching is disabled.
+   * A fetch failure throws — a TDX seller with no collateral cannot be verified
+   * offline by buyers, so failing here surfaces the problem at seed/serve time.
+   */
+  private async resolveCollateral(
+    quote: Uint8Array,
+    auxCollateral: WireCollateral | null,
+  ): Promise<WireCollateral | undefined> {
+    if (this.skipCollateral) return undefined;
+    if (auxCollateral) return auxCollateral;
+    return this.fetchCollateral(quote);
   }
+}
+
+/**
+ * Best-effort read of the configfs-tsm `auxblob` as structured DCAP collateral.
+ * Some QGS/kernel paths populate `auxblob` with the JSON `Collateral` shape the
+ * verifier needs; when present and parseable with the required fields, we use it
+ * and skip the Intel-PCS fetch. Anything else (raw binary blob, absent, partial)
+ * returns null so the caller fetches collateral instead.
+ */
+async function readAuxblobCollateral(dir: string): Promise<WireCollateral | null> {
+  let aux: Buffer;
+  try {
+    aux = await fs.readFile(`${dir}/auxblob`);
+  } catch {
+    return null; // auxblob absent
+  }
+  if (aux.length === 0) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(aux.toString("utf8"));
+  } catch {
+    return null; // not JSON — a raw binary blob we cannot map to Collateral
+  }
+  if (!parsed || typeof parsed !== "object") return null;
+  const obj = parsed as Record<string, unknown>;
+  const required = ["pck_crl", "tcb_info", "qe_identity"];
+  if (!required.every((k) => typeof obj[k] === "string" || Array.isArray(obj[k]))) {
+    return null;
+  }
+  const out: WireCollateral = {};
+  for (const [k, v] of Object.entries(obj)) {
+    if (typeof v === "string") out[k] = v;
+    else if (Array.isArray(v)) out[k] = Buffer.from(v as number[]).toString("hex");
+  }
+  return out;
 }
 
 /**

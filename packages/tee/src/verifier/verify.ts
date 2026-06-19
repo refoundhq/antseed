@@ -30,6 +30,11 @@ export interface VerifySellerInput {
    * Defaults to false — production rejects mock.
    */
   allowMock?: boolean;
+  /**
+   * Verification time (unix seconds) for DCAP cert/TCB validity bounds. Defaults
+   * to the wall clock; pinned in tests against a fixed-validity fixture.
+   */
+  nowSecs?: number;
 }
 
 export interface VerifySellerResult {
@@ -69,7 +74,7 @@ export function verifySeller(input: VerifySellerInput): VerifySellerResult {
   const checks: CheckResult[] = [];
 
   // --- CHECK 1: quote validity (genuine, debug-off, TCB-current, fresh) ---
-  const validity = validateQuote(quote);
+  const validity = validateQuote(quote, input.nowSecs);
   const isMock = quote.platform === "mock";
   const mockOk = isMock && allowMock;
 
