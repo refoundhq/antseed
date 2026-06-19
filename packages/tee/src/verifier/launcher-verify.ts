@@ -22,15 +22,18 @@ import {
 } from "../evidence/rtmr.js";
 import {
   registerClaimEvaluator,
+  sealClaimRegistry,
   claimEvaluators,
   type ClaimResult,
   type ClaimContext,
 } from "./claims.js";
 
-// ClaimResult / ClaimVerdict / ClaimContext + the pluggable evaluator registry are
-// defined in ./claims.ts; re-exported here for back-compat.
+// ClaimResult / ClaimVerdict / ClaimContext live in ./claims.ts; re-exported here.
+// `registerClaimEvaluator` is intentionally NOT re-exported: the protocol claim set
+// is SEALED at load, so claims can only be added via an attested @antseed/tee upgrade
+// (a new release), never runtime injection or override.
 export type { ClaimResult, ClaimVerdict, ClaimContext, ClaimEvaluator } from "./claims.js";
-export { registerClaimEvaluator, claimEvaluators, claimInfo, CLAIM_INFO } from "./claims.js";
+export { claimEvaluators, claimInfo, CLAIM_INFO, isClaimRegistrySealed } from "./claims.js";
 export type { ClaimInfo } from "./claims.js";
 
 /**
@@ -537,3 +540,7 @@ registerClaimEvaluator("no-buyer-data-at-rest", (c) =>
 registerClaimEvaluator("known-binaries-only", (c) =>
   evalKnownBinariesOnly(c.doc, c.registry, c.docOk, c.measurement),
 );
+
+// Seal the protocol claim set: no runtime additions/overrides past this point. A new
+// claim ships in a new (attested) @antseed/tee release — a protocol upgrade.
+sealClaimRegistry();

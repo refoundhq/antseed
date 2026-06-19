@@ -148,10 +148,10 @@ export type { QuoteGenuineness, QuoteVerifierFn } from "./verifier/quote-verifie
 // Launcher claims verifier — the à-la-carte BuyerPolicyVerifier (ARCHITECTURE.md §6).
 export {
   verifyLauncherEvidence,
-  registerClaimEvaluator,
   claimEvaluators,
   claimInfo,
   CLAIM_INFO,
+  isClaimRegistrySealed,
 } from "./verifier/launcher-verify.js";
 export type {
   LauncherVerifyInput,

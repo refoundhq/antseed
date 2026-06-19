@@ -45,17 +45,41 @@ export interface ClaimContext {
 export type ClaimEvaluator = (ctx: ClaimContext) => ClaimResult;
 
 const REGISTRY = new Map<string, ClaimEvaluator>();
+let sealed = false;
 
 /**
- * Register (or override) a claim evaluator. Built-ins register at module load; add a
- * new claim by calling this + having sellers attest the id + (optionally) a
- * {@link CLAIM_INFO} label. No change to the core verifier loop is required.
+ * Register a claim evaluator. INTERNAL + protocol-only: the built-in claims register
+ * at module load, then {@link sealClaimRegistry} is called and no further (or
+ * overriding) registration is possible — a runtime call throws. Claims are therefore
+ * fixed by the `@antseed/tee` protocol VERSION (itself attested via approved-binary /
+ * known-binaries-only); adding a claim is a protocol-attested upgrade (a new release),
+ * never runtime injection. NOT re-exported from the package's public surface.
  */
 export function registerClaimEvaluator(claim: string, evaluator: ClaimEvaluator): void {
+  if (sealed) {
+    throw new Error(
+      `claim registry is SEALED: "${claim}" cannot be added/overridden at runtime. ` +
+        `Claims are fixed by the @antseed/tee protocol version — add one via a protocol ` +
+        `upgrade (a new, attested release), not runtime registration.`,
+    );
+  }
+  if (REGISTRY.has(claim)) {
+    throw new Error(`claim "${claim}" is already registered (no overrides)`);
+  }
   REGISTRY.set(claim, evaluator);
 }
 
-/** The registered evaluators, in registration order (the report order). */
+/** Seal the registry after the built-in protocol claims register. Idempotent. */
+export function sealClaimRegistry(): void {
+  sealed = true;
+}
+
+/** True once the protocol claim set is sealed. */
+export function isClaimRegistrySealed(): boolean {
+  return sealed;
+}
+
+/** The registered (sealed) protocol claims, in registration order (the report order). */
 export function claimEvaluators(): ReadonlyMap<string, ClaimEvaluator> {
   return REGISTRY;
 }
@@ -69,7 +93,7 @@ export interface ClaimInfo {
   blurb: string;
 }
 
-export const CLAIM_INFO: Record<string, ClaimInfo> = {
+export const CLAIM_INFO: Readonly<Record<string, ClaimInfo>> = Object.freeze({
   "hardware-genuine": {
     label: "Genuine secure enclave",
     blurb: "Runs in a real hardware TEE — debug off, trusted-computing-base up to date.",
@@ -118,7 +142,7 @@ export const CLAIM_INFO: Record<string, ClaimInfo> = {
     label: "Only approved binaries run (measured)",
     blurb: "Only approved binaries have executed — anchored to the hardware measurement log.",
   },
-};
+});
 
 /** Plain-English info for a claim id; falls back to the raw id for custom claims. */
 export function claimInfo(id: ClaimId): ClaimInfo {

@@ -23,12 +23,8 @@ import {
   type ImaEntry,
 } from "../evidence/rtmr.js";
 import type { AttestationPlatform } from "../attestation/types.js";
-import {
-  verifyLauncherEvidence,
-  registerClaimEvaluator,
-  claimInfo,
-  CLAIM_INFO,
-} from "./launcher-verify.js";
+import { verifyLauncherEvidence, claimInfo, CLAIM_INFO } from "./launcher-verify.js";
+import { registerClaimEvaluator, isClaimRegistrySealed } from "./claims.js";
 import { defaultProductionPolicy, type VerificationPolicy } from "./policy.js";
 
 const PEER = "aa".repeat(33);
@@ -353,21 +349,27 @@ test('measured claims fall to not-proven when the launcher measurement is unappr
 
 // ---- pluggable claim registry + user-facing labels ----
 
-test("pluggable: a registered custom claim is evaluated and can gate routing", async () => {
-  registerClaimEvaluator("x-fresh-build", (c) =>
-    !c.doc.claims.includes("x-fresh-build")
-      ? { claim: "x-fresh-build", claimed: false, verdict: "not-claimed", detail: "not attested" }
-      : c.docOk
-        ? { claim: "x-fresh-build", claimed: true, verdict: "verified", detail: "custom check passed" }
-        : { claim: "x-fresh-build", claimed: true, verdict: "not-proven", detail: "substrate failed" },
-  );
-  const { doc, registry } = await scenario({ claims: ["hardware-genuine", "x-fresh-build"], channelPubkey: null });
+test("the protocol claim registry is SEALED — runtime registration/override throws", () => {
+  expect(isClaimRegistrySealed()).toBe(true);
+  // cannot inject a new claim that always 'verifies'
+  expect(() =>
+    registerClaimEvaluator("x-injected", () => ({ claim: "x-injected", claimed: true, verdict: "verified", detail: "evil" })),
+  ).toThrow(/sealed/i);
+  // cannot OVERRIDE a built-in to force a pass
+  expect(() =>
+    registerClaimEvaluator("egress-allowlisted", () => ({ claim: "egress-allowlisted", claimed: true, verdict: "verified", detail: "evil" })),
+  ).toThrow(/sealed/i);
+});
+
+test("a seller-attested but unknown claim cannot pass (no evaluator → fail closed)", async () => {
+  // a bogus claim id the protocol does not define is never verifiable
+  const { doc, registry } = await scenario({ claims: ["hardware-genuine", "x-made-up"], channelPubkey: null });
   const r = verifyLauncherEvidence({
     evidence: doc, connectedPeerPubkey: PEER, nonce: NONCE, registry,
-    policy: devPolicy({ requiredClaims: ["x-fresh-build"] }),
+    policy: devPolicy({ requiredClaims: ["x-made-up"] }),
   });
-  expect(r.claims.find((c) => c.claim === "x-fresh-build")!.verdict).toBe("verified");
-  expect(r.verdict).toBe("verified");
+  expect(r.claims.find((c) => c.claim === "x-made-up")!.verdict).toBe("not-proven");
+  expect(r.verdict).toBe("failed");
 });
 
 test("a required claim with NO registered evaluator fails closed", async () => {
