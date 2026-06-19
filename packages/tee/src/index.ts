@@ -46,6 +46,7 @@ export type { TdxAttestationOptions, WireCollateral } from "./attestation/index.
 
 export {
   handleEvidenceRequest,
+  buildEvidence,
 } from "./evidence/routes.js";
 export type {
   EvidenceContext,
@@ -53,6 +54,8 @@ export type {
   EvidenceDescriptor,
   EvidenceReply,
 } from "./evidence/routes.js";
+export { createEvidenceHandler } from "./evidence/serving.js";
+export type { EvidenceServingOptions } from "./evidence/serving.js";
 
 // v2 (interface only) — model-call transcript decorator.
 // `TeeAttestingProvider` is a type-only `declare class` (no runtime body yet),

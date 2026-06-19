@@ -1,7 +1,7 @@
 import { generateKeyPairSync } from 'node:crypto'
 import {
   resolveSellerAttestation,
-  handleEvidenceRequest,
+  createEvidenceHandler,
   assertProductionPlatform,
   type EvidenceContext,
 } from '@antseed/tee'
@@ -65,8 +65,32 @@ export async function buildSellerTeeWiring(
     enclavePubkey: enclaveSigningPubkey,
   }
 
+  // Startup self-test: generate one real quote NOW so a seller that advertises a
+  // platform it cannot actually attest fails fast at boot, instead of looking
+  // healthy and only erroring when the first buyer requests evidence. The probe
+  // nonce is fixed (not buyer-supplied) and the bundle is discarded.
+  try {
+    const probe = await provider.generateQuote({
+      peerPubkey,
+      enclavePubkey: enclaveSigningPubkey,
+      nonce: '00'.repeat(32),
+    })
+    if (!probe.quote || probe.quote.length === 0) {
+      throw new Error('attestation provider returned an empty quote')
+    }
+  } catch (err) {
+    throw new Error(
+      `TEE startup self-test failed for platform '${platform}': ${(err as Error).message}. ` +
+        'Refusing to advertise a TEE seller that cannot produce a valid quote.',
+    )
+  }
+
+  // The evidence endpoint is public + unauthenticated and each /evidence request
+  // triggers a real quote generation, so serve it through the hardened handler
+  // (rate limit + bounded quote concurrency + short per-nonce response cache).
+  const evidence = createEvidenceHandler(ctx)
   const handler = async (url: string): Promise<{ status: number; body: unknown } | null> => {
-    const reply = await handleEvidenceRequest(url, ctx)
+    const reply = await evidence(url)
     return reply ? { status: reply.status, body: reply.body } : null
   }
 

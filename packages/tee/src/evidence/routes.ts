@@ -117,7 +117,7 @@ export async function handleEvidenceRequest(
   return null; // not our path
 }
 
-async function buildEvidence(
+export async function buildEvidence(
   ctx: EvidenceContext,
   nonce: string,
 ): Promise<EvidenceBundle> {
