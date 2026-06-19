@@ -9,6 +9,7 @@ import {
 import type { PeerInfo } from '@antseed/node'
 import { MockAttestation, MOCK_MEASUREMENT } from '@antseed/tee/attestation'
 import { handleEvidenceRequest, type EvidenceContext } from '@antseed/tee/evidence'
+import { createLauncherEvidenceHandler, type ClaimId } from '@antseed/tee'
 import { canonicalizeSignedPayload } from '@antseed/tee/registry'
 import type { ValidSet } from '@antseed/tee/registry'
 import { verifyTeeSeller, isTeeSeller, resolveEvidenceBaseUrl, type TeeVerifyOptions } from './tee-verify.js'
@@ -38,6 +39,24 @@ function approvedRegistryFile(): { set: ValidSet } {
 
 function emptyRegistryFile(): { set: ValidSet } {
   return signValidSet({ version: 1, entries: [] })
+}
+
+const LAUNCHER_BINARY_DIGEST = 'ab'.repeat(32)
+
+/** A signed ValidSet approving the mock launcher measurement + the seller binary. */
+function launcherRegistryFile(): { set: ValidSet } {
+  return signValidSet({
+    version: 1,
+    entries: [
+      {
+        platform: 'mock',
+        measurement: String(MOCK_MEASUREMENT),
+        status: 'active',
+        capabilities: ['no-operator-shell'],
+      },
+    ],
+    binaries: [{ digest: LAUNCHER_BINARY_DIGEST, version: '1.2.0', tag: 'stable', status: 'active' }],
+  })
 }
 
 const SELLER_PUBKEY = 'aa'.repeat(33) // 66-hex compressed-key-shaped placeholder
@@ -76,6 +95,44 @@ async function startMockSeller(opts: {
       }
       res.writeHead(reply.status, { 'content-type': 'application/json' })
       res.end(JSON.stringify(body))
+    })()
+  })
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const addr = server.address()
+  const port = typeof addr === 'object' && addr ? addr.port : 0
+  return { server, baseUrl: `127.0.0.1:${port}` }
+}
+
+/** A mock seller serving the LAUNCHER evidence schema (enclave-signed document). */
+async function startMockLauncherSeller(
+  opts: { binaryDigest?: string } = {},
+): Promise<{ server: Server; baseUrl: string }> {
+  const { publicKey, privateKey } = generateKeyPairSync('ed25519')
+  const enclavePubkey = publicKey.export({ type: 'spki', format: 'der' }).toString('hex')
+  const claims: ClaimId[] = [
+    'hardware-genuine', 'channel-key-bound', 'approved-launcher', 'approved-binary', 'binary-active',
+  ]
+  const handler = createLauncherEvidenceHandler({
+    platform: 'mock',
+    attestation: new MockAttestation(),
+    claims,
+    peerPubkey: SELLER_PUBKEY,
+    enclavePubkey,
+    enclavePrivateKey: privateKey,
+    channelPubkey: 'cc'.repeat(32),
+    launcherMeasurement: String(MOCK_MEASUREMENT),
+    antseedBinary: { digest: opts.binaryDigest ?? LAUNCHER_BINARY_DIGEST, version: '1.2.0', tag: 'stable' },
+  })
+  const server = createServer((req, res) => {
+    void (async () => {
+      const reply = await handler(req.url ?? '/')
+      if (!reply) {
+        res.writeHead(404)
+        res.end('not found')
+        return
+      }
+      res.writeHead(reply.status, { 'content-type': 'application/json' })
+      res.end(JSON.stringify(reply.body))
     })()
   })
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
@@ -285,4 +342,45 @@ async function writeTmpRegistry(set: ValidSet): Promise<string> {
 
 test.after(async () => {
   await Promise.all(tmpDirs.map((d) => rm(d, { recursive: true, force: true }).catch(() => {})))
+})
+
+test('launcher seller over HTTP: buyer dispatches to the claims verifier and accepts an approved binary', async () => {
+  const { server, baseUrl } = await startMockLauncherSeller({})
+  const reg = launcherRegistryFile()
+  const regFile = await writeTmpRegistry(reg.set)
+  try {
+    const outcome = await verifyTeeSeller(
+      teePeer(baseUrl),
+      baseOpts({ requireTee: true, registryUrl: regFile, pinnedRegistrySigner: reg.set.signer }),
+    )
+    assert.equal(outcome.schema, 'launcher')
+    assert.ok(outcome.launcherResult, 'launcherResult present')
+    assert.equal(outcome.launcherResult!.verdict, 'verified')
+    assert.equal(outcome.allowed, true)
+    const byId = (id: string) => outcome.launcherResult!.claims.find((c) => c.claim === id)!
+    assert.equal(byId('hardware-genuine').verdict, 'verified')
+    assert.equal(byId('approved-binary').verdict, 'verified')
+    assert.equal(byId('binary-active').verdict, 'verified')
+    assert.equal(byId('approved-launcher').verdict, 'verified')
+  } finally {
+    server.close()
+  }
+})
+
+test('launcher seller with an UNAPPROVED binary is refused under --require-tee', async () => {
+  const { server, baseUrl } = await startMockLauncherSeller({ binaryDigest: 'dd'.repeat(32) })
+  const reg = launcherRegistryFile()
+  const regFile = await writeTmpRegistry(reg.set)
+  try {
+    const outcome = await verifyTeeSeller(
+      teePeer(baseUrl),
+      baseOpts({ requireTee: true, registryUrl: regFile, pinnedRegistrySigner: reg.set.signer }),
+    )
+    assert.equal(outcome.schema, 'launcher')
+    assert.equal(outcome.launcherResult!.verdict, 'failed')
+    assert.equal(outcome.allowed, false)
+    assert.ok(outcome.launcherResult!.unmetRequired.includes('approved-binary'))
+  } finally {
+    server.close()
+  }
 })
