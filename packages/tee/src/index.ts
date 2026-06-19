@@ -56,6 +56,22 @@ export type {
 } from "./evidence/routes.js";
 export { createEvidenceHandler } from "./evidence/serving.js";
 export type { EvidenceServingOptions } from "./evidence/serving.js";
+export {
+  signEvidenceDocument,
+  verifyEvidenceSignature,
+  hashPolicy,
+  canonicalizeEvidenceDocument,
+  stableStringify,
+  ALL_CLAIMS,
+  EVIDENCE_SCHEMA_LAUNCHER,
+  EVIDENCE_SCHEMA_V1,
+} from "./evidence/document.js";
+export type {
+  EvidenceDocument,
+  ClaimId,
+  StoragePolicy,
+  NetworkPolicy,
+} from "./evidence/document.js";
 
 // v2 (interface only) — model-call transcript decorator.
 // `TeeAttestingProvider` is a type-only `declare class` (no runtime body yet),
