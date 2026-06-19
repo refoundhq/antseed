@@ -4,6 +4,12 @@ import type { AttestationPlatform } from "../attestation/types.js";
 import type { ValidSet, ValidSetEntry, ValidSetSignedPayload } from "./types.js";
 
 export type { ValidSet, ValidSetEntry, ValidSetSignedPayload } from "./types.js";
+export {
+  generateRegistryKeypair,
+  loadRegistrySigner,
+  signValidSetWithPrivateKey,
+  type RegistryKeypair,
+} from "./sign.js";
 
 /**
  * Canonical serialization of the signed payload. Stable key order so signer and

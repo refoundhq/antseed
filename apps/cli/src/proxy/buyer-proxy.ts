@@ -83,6 +83,14 @@ export interface BuyerProxyConfig {
    */
   pinnedPeerId?: string
   /**
+   * Direct seller endpoint for a known peer (paired with `pinnedPeerId`). When
+   * set, the proxy resolves the seller's signed metadata straight from this
+   * `host:port` at startup and seeds it into the peer cache, so connection +
+   * TEE evidence fetch work without depending on DHT discovery. Additive
+   * bypass — DHT discovery still runs for everything else.
+   */
+  directSeller?: { peerId: string; host: string; port: number }
+  /**
    * Opt-in buyer-side TEE verification. When present, any seller advertising
    * TEE attestation is verified before routing. With `requireTee`, a failed
    * verification refuses the seller; otherwise the result is advisory.
@@ -372,6 +380,7 @@ export class BuyerProxy {
   private readonly _stateFile: string
   private _stateFileWatching = false
   private _pinnedPeer: string | null
+  private readonly _directSeller: { peerId: string; host: string; port: number } | null
   private _stateWatchDebounce: ReturnType<typeof setTimeout> | null = null
 
   private _stateWriteChain: Promise<void> = Promise.resolve()
@@ -398,6 +407,9 @@ export class BuyerProxy {
     this._stateDir = config.dataDir
     this._stateFile = join(config.dataDir, 'buyer.state.json')
     this._pinnedPeer = config.pinnedPeerId?.toLowerCase() ?? null
+    this._directSeller = config.directSeller
+      ? { ...config.directSeller, peerId: config.directSeller.peerId.toLowerCase() }
+      : null
     this._teeVerify = config.teeVerify ?? null
     this._server = createServer((req, res) => {
       this._handleRequest(req, res).catch((err) => {
@@ -433,6 +445,10 @@ export class BuyerProxy {
     if (this._pinnedPeer === null) {
       await this._reloadSessionOverrides()
     }
+    // Seed a directly-supplied known seller into the cache before the server
+    // accepts requests, so the first request routes over the direct path
+    // without waiting for DHT discovery.
+    await this._seedDirectSeller()
     await new Promise<void>((resolve, reject) => {
       this._server.once('error', reject)
       this._server.listen(this._port, '127.0.0.1', () => {
@@ -470,6 +486,30 @@ export class BuyerProxy {
     } catch {
       // File missing, unreadable, or malformed — non-fatal. The background
       // refresh will populate the cache shortly.
+    }
+  }
+
+  /**
+   * Resolve a directly-supplied known seller (host:port + peerId) straight from
+   * its `/metadata` endpoint and merge it into the peer cache, bypassing DHT
+   * discovery. The resolved PeerInfo carries `publicAddress` set to the
+   * supplied endpoint, so both the P2P connection and the TEE evidence fetch
+   * reach the seller over the direct path. Best-effort: a failure here is
+   * non-fatal — background DHT discovery still runs as a fallback.
+   */
+  private async _seedDirectSeller(): Promise<void> {
+    if (!this._directSeller) return
+    const { peerId, host, port } = this._directSeller
+    try {
+      const peer = await this._node.findPeerByAddress(host, port, peerId)
+      if (!peer) {
+        log(`Direct seller ${peerId.slice(0, 12)}... at ${host}:${port} did not return usable metadata; relying on DHT discovery.`)
+        return
+      }
+      this._replacePeers([peer])
+      log(`Seeded direct seller ${peerId.slice(0, 12)}... at ${peer.publicAddress} (DHT bypassed)`)
+    } catch (err) {
+      log(`Direct seller seed failed for ${peerId.slice(0, 12)}... at ${host}:${port}: ${err instanceof Error ? err.message : String(err)}`)
     }
   }
 

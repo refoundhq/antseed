@@ -11,7 +11,7 @@ import { MockAttestation, MOCK_MEASUREMENT } from '@antseed/tee/attestation'
 import { handleEvidenceRequest, type EvidenceContext } from '@antseed/tee/evidence'
 import { canonicalizeSignedPayload } from '@antseed/tee/registry'
 import type { ValidSet } from '@antseed/tee/registry'
-import { verifyTeeSeller, isTeeSeller, type TeeVerifyOptions } from './tee-verify.js'
+import { verifyTeeSeller, isTeeSeller, resolveEvidenceBaseUrl, type TeeVerifyOptions } from './tee-verify.js'
 
 // --- ed25519 signer (mirrors @antseed/tee registry/test-helpers, which is not
 // part of the package's public exports) ---
@@ -114,6 +114,21 @@ const baseOpts = (over: Partial<TeeVerifyOptions>): TeeVerifyOptions => ({
   // failure path override this with a rejecting resolver.)
   authenticatePeerPubkey: (_peerId, candidate) => candidate,
   ...over,
+})
+
+test('resolveEvidenceBaseUrl derives the evidence base from a directly-supplied publicAddress', () => {
+  // Direct-connect E2E: the buyer seeds a known seller with publicAddress set
+  // to the supplied host:port. The TEE evidence fetch derives its base URL from
+  // that same field, so it reaches the seller over the direct path with no DHT.
+  assert.equal(resolveEvidenceBaseUrl(teePeer('34.10.10.10:6882')), 'http://34.10.10.10:6882')
+
+  // No publicAddress (e.g. unresolved peer) yields null — nothing to fetch from.
+  const noAddr: PeerInfo = {
+    peerId: ('ef'.repeat(20)) as PeerInfo['peerId'],
+    lastSeen: Date.now(),
+    providers: [],
+  }
+  assert.equal(resolveEvidenceBaseUrl(noAddr), null)
 })
 
 test('verified TEE seller is accepted (verdict verified, allowed)', async () => {

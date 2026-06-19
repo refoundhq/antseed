@@ -178,6 +178,21 @@ export interface BuyerCLIConfig {
    * file path. Defaults to the AntSeed well-known governance endpoint.
    */
   teeRegistryUrl?: string;
+  /**
+   * Pinned approved-code registry signer (hex ed25519 pubkey from
+   * `antseed tee gen-registry-key`). When set, a loaded ValidSet whose signer
+   * does not match is rejected fail-closed. Overridable with
+   * `--tee-registry-signer`.
+   */
+  teeRegistrySignerPubkey?: string;
+  /**
+   * Direct seller endpoint (`host:port`) for a known peer, paired with a pinned
+   * peerId. When set, the buyer resolves this seller's metadata directly from
+   * the endpoint and seeds its peer cache, so connection + TEE evidence fetch
+   * work without waiting for DHT discovery. Additive bypass for known-peer E2E;
+   * DHT discovery still runs for all other peers.
+   */
+  sellerAddress?: string;
 }
 
 /**

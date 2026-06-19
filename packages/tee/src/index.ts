@@ -63,6 +63,12 @@ export {
   verifyValidSetSignature,
   canonicalizeSignedPayload,
 } from "./registry/client.js";
+export {
+  generateRegistryKeypair,
+  loadRegistrySigner,
+  signValidSetWithPrivateKey,
+} from "./registry/sign.js";
+export type { RegistryKeypair } from "./registry/sign.js";
 export type {
   ValidSet,
   ValidSetEntry,
@@ -78,3 +84,8 @@ export type {
   QuoteValidity,
 } from "./verifier/verify.js";
 export { validateQuote } from "./verifier/checks.js";
+
+// Low-level DCAP entry points, surfaced for registry-seeding tooling that must
+// REAL-DCAP-verify a live seller's quote and derive its canonical measurement.
+export { verifyTdxQuote, canonicalTdxMeasurement } from "./verifier/dcap.js";
+export type { TdxVerification, TcbVerdict } from "./verifier/dcap.js";

@@ -280,6 +280,36 @@ export class PeerLookup {
     return this.resolveLookupResults(shuffle(peers), { metadataPeerId: normalized });
   }
 
+  /**
+   * Resolve a single seller endpoint directly by `host:port`, bypassing the
+   * DHT entirely. Used for known-peer connections (e.g. a pinned E2E seller on
+   * a fixed IP) where DHT discovery propagation is too slow or unreliable.
+   *
+   * The endpoint's served `/metadata` still passes the same signature,
+   * freshness, and (when `expectedPeerId` is given) peerId-match checks as a
+   * DHT-discovered result, so a hostile endpoint cannot impersonate another
+   * peer. Returns `null` if the endpoint is unreachable, serves invalid /
+   * stale metadata, or its peerId does not match `expectedPeerId`.
+   */
+  async resolveEndpointDirect(
+    endpoint: PeerEndpoint,
+    expectedPeerId?: string,
+  ): Promise<LookupResult | null> {
+    const result = await this._resolveSinglePeer(endpoint);
+    if (result === null) return null;
+    if (expectedPeerId) {
+      const normalized = expectedPeerId.trim().toLowerCase().replace(/^0x/, "");
+      if (result.metadata.peerId.toLowerCase() !== normalized) {
+        debugWarn(
+          `[PeerLookup] Direct endpoint ${endpoint.host}:${endpoint.port} served peerId `
+          + `${result.metadata.peerId.slice(0, 12)}... but expected ${normalized.slice(0, 12)}...`,
+        );
+        return null;
+      }
+    }
+    return result;
+  }
+
   private async resolveLookupResults(
     peers: PeerEndpoint[],
     options?: ResolveLookupResultsOptions,

@@ -144,6 +144,61 @@ test('BuyerProxy starts incremental discovery on startup', async (t) => {
   assert.equal(sweepCalls, 1)
 })
 
+test('BuyerProxy seeds a directly-supplied known seller without DHT discovery', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'antseed-buyer-proxy-'))
+  t.after(() => rm(dir, { recursive: true, force: true }))
+
+  const peerId = 'a'.repeat(40)
+  const host = '34.10.10.10'
+  const port = 6882
+
+  let findPeerByAddressArgs: { host: string; port: number; expected?: string } | null = null
+  let discoverPeersCalls = 0
+
+  const proxy = new BuyerProxy({
+    port: 0,
+    dataDir: dir,
+    pinnedPeerId: peerId,
+    directSeller: { peerId, host, port },
+    node: {
+      router: null,
+      on: () => undefined,
+      startBackgroundPeerDiscoverySweep: () => undefined,
+      // The direct path MUST use findPeerByAddress, never DHT discovery.
+      discoverPeers: async () => { discoverPeersCalls += 1; return [] },
+      findPeerByAddress: async (h: string, p: number, expected?: string) => {
+        findPeerByAddressArgs = { host: h, port: p, expected }
+        return {
+          peerId,
+          lastSeen: Date.now(),
+          providers: ['openai'],
+          // findPeerByAddress sets publicAddress to the supplied endpoint.
+          publicAddress: `${h}:${p}`,
+        } as PeerInfo
+      },
+    } as any,
+    backgroundRefreshIntervalMs: 60 * 60_000,
+  })
+  // Prevent the background-refresh interval from firing real DHT discovery.
+  ;(proxy as any)._refreshPeersNow = async () => (proxy as any)._cachedPeers
+
+  await proxy.start()
+  await proxy.stop()
+
+  // Resolution went through the direct endpoint, bound to the pinned peerId.
+  assert.deepEqual(findPeerByAddressArgs, { host, port, expected: peerId })
+  assert.equal(discoverPeersCalls, 0)
+
+  // The seller is now in the cache with publicAddress = supplied endpoint, so
+  // both the connection path (registerPeerEndpoint reads publicAddress) and the
+  // TEE evidence fetch (resolveEvidenceBaseUrl reads publicAddress) reach it
+  // directly — no DHT lookup required.
+  const cached = (proxy as any)._cachedPeers as PeerInfo[]
+  const seeded = cached.find((p) => p.peerId === peerId)
+  assert.ok(seeded, 'direct seller should be present in the peer cache')
+  assert.equal(seeded?.publicAddress, `${host}:${port}`)
+})
+
 test('selectCandidatePeersForRouting enforces explicit provider overrides even without request protocol', () => {
   const peers = [
     makePeer('a', ['anthropic']),

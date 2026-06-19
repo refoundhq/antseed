@@ -9,7 +9,7 @@ import { getGlobalOptions } from '../types.js'
 import { loadConfig } from '../../../config/loader.js'
 import { AntseedNode, DepositsClient, getInstance, resolveChainConfig } from '@antseed/node'
 import type { NodePaymentsConfig } from '@antseed/node'
-import { OFFICIAL_BOOTSTRAP_NODES, parseBootstrapList, toBootstrapConfig } from '@antseed/node/discovery'
+import { OFFICIAL_BOOTSTRAP_NODES, parseBootstrapList, parsePublicAddress, toBootstrapConfig } from '@antseed/node/discovery'
 import { setupShutdownHandler } from '../../shutdown.js'
 import { loadRouterPlugin, buildPluginConfig, getPackageVersions } from '../../../plugins/loader.js'
 import { ensurePluginsUpToDate } from '../../../plugins/drift.js'
@@ -195,8 +195,10 @@ export function registerBuyerStartCommand(buyerCmd: Command): void {
     .option('--max-output-usd-per-million <number>', 'runtime-only max output pricing override in USD per 1M tokens', parseFloat)
     .option('--metadata-fetch-timeout-ms <number>', 'runtime-only timeout for each peer metadata HTTP fetch during discovery', Number)
     .option('--peer <peerId>', 'pin all requests to a specific peer ID (40-char hex EVM address), bypassing the router')
+    .option('--seller-address <host:port>', 'direct seller endpoint for a known peer (use with --peer): resolves its metadata directly and bypasses DHT discovery for connection + TEE evidence')
     .option('--require-tee', 'refuse to route to a TEE-tagged seller unless it passes attestation verification')
     .option('--tee-registry-url <urlOrPath>', 'approved-set registry source (URL or local JSON file) for TEE verification')
+    .option('--tee-registry-signer <hex>', 'pinned approved-code registry signer (hex ed25519 pubkey); ValidSets signed by any other key are rejected')
     .option('--tee-allow-mock', 'allow the dev/test mock TEE platform to reach a verified verdict (dev only)')
     .action(async (options) => {
       const globalOpts = getGlobalOptions(buyerCmd)
@@ -206,6 +208,24 @@ export function registerBuyerStartCommand(buyerCmd: Command): void {
       if (pinnedPeerId !== undefined && !/^(0x)?[0-9a-f]{40}$/i.test(pinnedPeerId)) {
         console.error(chalk.red('Error: --peer must be a 40-character hex peer ID (EVM address).'))
         process.exit(1)
+      }
+
+      // Direct-connect to a known seller by host:port, bypassing DHT discovery.
+      // Flag wins over config; both require a pinned --peer to bind the address
+      // to a verified identity.
+      const sellerAddressRaw = (options.sellerAddress as string | undefined) ?? config.buyer?.sellerAddress
+      let directSeller: { peerId: string; host: string; port: number } | undefined
+      if (sellerAddressRaw !== undefined) {
+        if (pinnedPeerId === undefined) {
+          console.error(chalk.red('Error: --seller-address requires --peer <peerId> so the direct endpoint binds to a verified identity.'))
+          process.exit(1)
+        }
+        const parsed = parsePublicAddress(sellerAddressRaw)
+        if (parsed === null) {
+          console.error(chalk.red(`Error: --seller-address must be host:port (got "${sellerAddressRaw}").`))
+          process.exit(1)
+        }
+        directSeller = { peerId: pinnedPeerId.toLowerCase().replace(/^0x/, ''), host: parsed.host, port: parsed.port }
       }
 
       const runtimeOverrides = buildBuyerRuntimeOverridesFromFlags({
@@ -345,6 +365,9 @@ export function registerBuyerStartCommand(buyerCmd: Command): void {
       console.log(chalk.dim(`  proxy port: ${effectiveBuyerConfig.proxyPort}`))
       if (pinnedPeerId) {
         console.log(chalk.yellow(`  pinned peer: ${pinnedPeerId} (router bypassed)`))
+        if (directSeller) {
+          console.log(chalk.yellow(`  direct seller address: ${directSeller.host}:${directSeller.port} (DHT discovery bypassed)`))
+        }
       } else {
         console.log(chalk.yellow('  pinned peer: none — auto-selection is disabled, requests will fail until a peer is pinned'))
         console.log(chalk.dim('    Pin a peer with:  antseed network browse → antseed buyer connection set --peer <peerId>'))
@@ -399,15 +422,19 @@ export function registerBuyerStartCommand(buyerCmd: Command): void {
       const requireTee = Boolean(options.requireTee) || config.buyer?.requireTee === true
       const teeRegistryUrl = (options.teeRegistryUrl as string | undefined)
         ?? config.buyer?.teeRegistryUrl
+      const teeRegistrySigner = (options.teeRegistrySigner as string | undefined)
+        ?? config.buyer?.teeRegistrySignerPubkey
       let teeVerify: TeeVerifyOptions | undefined
       if (requireTee || teeRegistryUrl) {
         teeVerify = {
           requireTee,
           registryUrl: teeRegistryUrl,
           allowMock: Boolean(options.teeAllowMock),
+          ...(teeRegistrySigner ? { pinnedRegistrySigner: teeRegistrySigner } : {}),
         }
         console.log(chalk.yellow(`  TEE verification: ${requireTee ? 'REQUIRED' : 'advisory'} `
-          + `(registry: ${teeRegistryUrl ?? DEFAULT_TEE_REGISTRY_URL})`))
+          + `(registry: ${teeRegistryUrl ?? DEFAULT_TEE_REGISTRY_URL}`
+          + `${teeRegistrySigner ? `, signer pinned ${teeRegistrySigner.slice(0, 16)}…` : ''})`))
       }
 
       const proxyPort = effectiveBuyerConfig.proxyPort
@@ -418,6 +445,7 @@ export function registerBuyerStartCommand(buyerCmd: Command): void {
         pinnedPeerId,
         dataDir: globalOpts.dataDir,
         backgroundRefreshIntervalMs: effectiveBuyerConfig.peerRefreshIntervalMs,
+        ...(directSeller ? { directSeller } : {}),
         ...(teeVerify ? { teeVerify } : {}),
       })
       let ownsProxyListener = false

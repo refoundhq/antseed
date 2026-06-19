@@ -364,6 +364,77 @@ describe('PeerLookup', () => {
     expect(lookup).not.toHaveBeenCalled();
   });
 
+  it('resolveEndpointDirect resolves a known endpoint without ever hitting the DHT', async () => {
+    // Direct-connect path for a known E2E seller: the buyer supplies host:port
+    // and the lookup must resolve the seller's signed /metadata WITHOUT any
+    // dht.lookup() call, so connection works even when DHT discovery has not
+    // propagated.
+    const targetId = 'a'.repeat(40);
+    const endpoint: PeerEndpoint = { host: '34.10.10.10', port: 6882 };
+
+    const lookup = vi.fn(async () => [] as PeerEndpoint[]);
+    const dht = { lookup } as unknown as DHTNode;
+    const resolve = vi.fn(async (peer: PeerEndpoint) =>
+      buildMetadata({ peerId: targetId as any, publicAddress: `${peer.host}:${peer.port}` }),
+    );
+    const peerLookup = new PeerLookup({
+      dht,
+      metadataResolver: { resolve },
+      requireValidSignature: false,
+      allowStaleMetadata: true,
+      maxAnnouncementAgeMs: 60_000,
+      maxResults: 50,
+    });
+
+    const result = await peerLookup.resolveEndpointDirect(endpoint, targetId);
+    expect(lookup).not.toHaveBeenCalled();
+    expect(resolve).toHaveBeenCalledTimes(1);
+    expect(result?.host).toBe(endpoint.host);
+    expect(result?.port).toBe(endpoint.port);
+    expect(result?.metadata.peerId).toBe(targetId);
+  });
+
+  it('resolveEndpointDirect rejects an endpoint that serves a different peerId', async () => {
+    // Identity binding: a known IP that answers /metadata with a DIFFERENT
+    // peerId than the one the buyer pinned must be refused, so a hostile or
+    // misconfigured endpoint cannot impersonate the expected seller.
+    const expectedId = 'a'.repeat(40);
+    const servedId = 'b'.repeat(40);
+    const lookup = vi.fn();
+    const dht = { lookup } as unknown as DHTNode;
+    const resolve = vi.fn(async () => buildMetadata({ peerId: servedId as any }));
+    const peerLookup = new PeerLookup({
+      dht,
+      metadataResolver: { resolve },
+      requireValidSignature: false,
+      allowStaleMetadata: true,
+      maxAnnouncementAgeMs: 60_000,
+      maxResults: 50,
+    });
+
+    const result = await peerLookup.resolveEndpointDirect({ host: '5.5.5.5', port: 6882 }, expectedId);
+    expect(result).toBeNull();
+    expect(lookup).not.toHaveBeenCalled();
+  });
+
+  it('resolveEndpointDirect returns null when the endpoint is unreachable', async () => {
+    const lookup = vi.fn();
+    const dht = { lookup } as unknown as DHTNode;
+    const resolve = vi.fn(async () => null);
+    const peerLookup = new PeerLookup({
+      dht,
+      metadataResolver: { resolve },
+      requireValidSignature: false,
+      allowStaleMetadata: true,
+      maxAnnouncementAgeMs: 60_000,
+      maxResults: 50,
+    });
+
+    const result = await peerLookup.resolveEndpointDirect({ host: '5.5.5.5', port: 6882 }, 'a'.repeat(40));
+    expect(result).toBeNull();
+    expect(lookup).not.toHaveBeenCalled();
+  });
+
   it('preserves metadata publicAddress so callers can prefer it over the DHT source host', async () => {
     const peers: PeerEndpoint[] = [{ host: '34.134.97.133', port: 6882 }];
     const lookup = vi.fn(async () => peers);
