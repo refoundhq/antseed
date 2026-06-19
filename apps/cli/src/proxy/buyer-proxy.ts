@@ -54,6 +54,7 @@ import { DEFAULT_BUYER_PEER_REFRESH_INTERVAL_MS } from '../config/defaults.js'
 import {
   verifyTeeSeller,
   formatVerification,
+  formatLauncherVerification,
   type TeeVerifyOptions,
   type TeeVerificationOutcome,
 } from './tee-verify.js'
@@ -736,7 +737,7 @@ export class BuyerProxy {
    */
   private async _ensureTeeVerified(peer: PeerInfo): Promise<TeeVerificationOutcome> {
     if (!this._teeVerify) {
-      return { isTeeSeller: false, result: null, allowed: true, reason: null }
+      return { isTeeSeller: false, schema: 'v1', result: null, launcherResult: null, allowed: true, reason: null }
     }
     const key = peer.peerId.toLowerCase()
     const cached = this._teeOutcomes.get(key)
@@ -754,8 +755,9 @@ export class BuyerProxy {
     })
       .then((outcome) => {
         this._teeOutcomes.set(key, { at: Date.now(), outcome })
-        if (outcome.isTeeSeller && outcome.result) {
-          log(formatVerification(peer.peerId, outcome.result))
+        if (outcome.isTeeSeller) {
+          if (outcome.launcherResult) log(formatLauncherVerification(peer.peerId, outcome.launcherResult))
+          else if (outcome.result) log(formatVerification(peer.peerId, outcome.result))
         }
         return outcome
       })
@@ -1295,9 +1297,11 @@ export class BuyerProxy {
             message:
               `Pinned peer ${selectedPeer.peerId.slice(0, 12)}... did not pass TEE verification `
               + `and --require-tee is set. ${teeOutcome.reason ?? ''}`.trim(),
-            verdict: teeOutcome.result?.verdict ?? 'unverified',
+            verdict: teeOutcome.result?.verdict ?? teeOutcome.launcherResult?.verdict ?? 'unverified',
             checks: teeOutcome.result?.checks ?? null,
-            notProven: teeOutcome.result?.notProven ?? null,
+            claims: teeOutcome.launcherResult?.claims ?? null,
+            unmetRequired: teeOutcome.launcherResult?.unmetRequired ?? null,
+            notProven: teeOutcome.result?.notProven ?? teeOutcome.launcherResult?.notProven ?? null,
           },
         }))
         return

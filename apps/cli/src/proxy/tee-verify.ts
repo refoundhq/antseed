@@ -9,6 +9,13 @@ import {
 } from '@antseed/tee/verifier'
 import { RegistryClient } from '@antseed/tee/registry'
 import type { AttestationPlatform, AttestationQuote } from '@antseed/tee/attestation'
+import {
+  verifyLauncherEvidence,
+  EVIDENCE_SCHEMA_LAUNCHER,
+  type LauncherVerifyResult,
+  type EvidenceDocument,
+  type ClaimId,
+} from '@antseed/tee'
 import { log } from './request-utils.js'
 
 /**
@@ -45,6 +52,16 @@ export interface TeeVerifyOptions {
   registryMinRevocationEpoch?: number
   /** Allow the dev/test `mock` platform to reach a verified verdict. Default false. */
   allowMock?: boolean
+  /**
+   * Launcher schema: the claims the buyer REQUIRES verified to route. Defaults to
+   * `['hardware-genuine','approved-binary','binary-active']` under `requireTee`
+   * (the locked-binary-versions posture), `[]` otherwise. Ignored for v1 evidence.
+   */
+  requiredClaims?: ClaimId[]
+  /** Pinned AntSeed release key (hex ed25519); requires a valid release sig on approved-binary. */
+  pinnedReleaseSigner?: string
+  /** Allowed binary release tags (e.g. ['stable']). */
+  allowedBinaryTags?: string[]
   /** Per-fetch timeout (ms). Default 4000. */
   fetchTimeoutMs?: number
   /**
@@ -60,8 +77,12 @@ export interface TeeVerifyOptions {
 export interface TeeVerificationOutcome {
   /** True when this peer advertises TEE attestation (tag `tee` or teeAttestationUrl). */
   isTeeSeller: boolean
-  /** Verifier result, when verification ran. Null for non-TEE peers or fetch failures. */
+  /** Which evidence schema was served/verified. */
+  schema: 'v1' | 'launcher'
+  /** v1 verifier result, when the v1 path ran. Null otherwise. */
   result: VerifySellerResult | null
+  /** Launcher claims result, when the launcher path ran. Null otherwise. */
+  launcherResult: LauncherVerifyResult | null
   /** Whether routing should be allowed. False only when requireTee and verification failed. */
   allowed: boolean
   /** Human-readable reason when `allowed` is false (or a fetch/verify error). */
@@ -210,7 +231,7 @@ export async function verifyTeeSeller(
   opts: TeeVerifyOptions,
 ): Promise<TeeVerificationOutcome> {
   if (!isTeeSeller(peer)) {
-    return { isTeeSeller: false, result: null, allowed: true, reason: null }
+    return { isTeeSeller: false, schema: 'v1', result: null, launcherResult: null, allowed: true, reason: null }
   }
 
   const fetchTimeoutMs = opts.fetchTimeoutMs ?? 4000
@@ -218,7 +239,9 @@ export async function verifyTeeSeller(
     log(`TEE verify ${peer.peerId.slice(0, 12)}...: ${reason}`)
     return {
       isTeeSeller: true,
+      schema: 'v1',
       result: null,
+      launcherResult: null,
       allowed: !opts.requireTee,
       reason,
     }
@@ -268,19 +291,18 @@ export async function verifyTeeSeller(
     return fail(`failed to fetch ${pubkeyPath}: ${errText(err)}`)
   }
 
-  // 3. Generate a fresh nonce and request bound evidence.
+  // 3. Generate a fresh nonce and request bound evidence (schema-agnostic fetch).
   const nonce = randomBytes(32).toString('hex')
   const evidenceUrl = `${baseUrl}${evidencePath}?nonce=${nonce}`
-  let bundle: EvidenceBundle
+  let raw: Record<string, unknown>
   try {
-    bundle = await fetchJson<EvidenceBundle>(evidenceUrl, fetchTimeoutMs)
+    raw = await fetchJson<Record<string, unknown>>(evidenceUrl, fetchTimeoutMs)
   } catch (err) {
     return fail(`failed to fetch evidence: ${errText(err)}`)
   }
+  const schema: 'v1' | 'launcher' = raw.schema === EVIDENCE_SCHEMA_LAUNCHER ? 'launcher' : 'v1'
 
-  // 4. Production posture: a pinned registry signer is MANDATORY under
-  //    --require-tee. Without it (and without the dev escape hatch), fail closed
-  //    before loading anything — an unpinned registry is not trusted.
+  // 4. Production posture: a pinned registry signer is MANDATORY under --require-tee.
   if (opts.requireTee && !opts.pinnedRegistrySigner && !opts.allowUnpinnedSigner) {
     return fail(
       'a pinned registry signer (--tee-registry-signer) is REQUIRED under --require-tee; ' +
@@ -305,25 +327,59 @@ export async function verifyTeeSeller(
     return fail(`failed to load TEE approved-set registry: ${errText(err)}`)
   }
 
-  // 6. Build the buyer's VerificationPolicy from config/flags. The registry's
-  //    active approved measurements (image freedom — possibly MANY images) are
-  //    folded in as the policy's measurementSet so any governed-approved image
-  //    on an allowed platform verifies with the same guarantee semantics.
+  // 6. Registry governance fields shared by both schemas. The registry's active
+  //    approved measurements (image freedom) become the policy measurementSet.
+  const registryPolicy = {
+    requireSignerPin: !opts.allowUnpinnedSigner,
+    ...(opts.registryMinVersion !== undefined ? { minVersion: opts.registryMinVersion } : {}),
+    ...(opts.registryMinRevocationEpoch !== undefined ? { revocationEpoch: opts.registryMinRevocationEpoch } : {}),
+  }
+
+  // 7. Dispatch on the served evidence schema (the package verifiers — never reimplemented here).
+  if (schema === 'launcher') {
+    const policy: VerificationPolicy = defaultProductionPolicy({
+      ...(opts.platforms ? { platforms: opts.platforms } : {}),
+      ...(opts.tcbPolicy ? { tcbPolicy: opts.tcbPolicy } : {}),
+      allowMock: opts.allowMock ?? false,
+      measurementSet: registry.approvedMeasurements(),
+      requiredClaims:
+        opts.requiredClaims ??
+        (opts.requireTee ? (['hardware-genuine', 'approved-binary', 'binary-active'] as ClaimId[]) : []),
+      ...(opts.pinnedReleaseSigner ? { pinnedReleaseSigner: opts.pinnedReleaseSigner } : {}),
+      ...(opts.allowedBinaryTags ? { allowedBinaryTags: opts.allowedBinaryTags } : {}),
+      registry: registryPolicy,
+    })
+    const launcherResult = verifyLauncherEvidence({
+      evidence: raw as unknown as EvidenceDocument,
+      connectedPeerPubkey,
+      nonce,
+      registry,
+      policy,
+    })
+    const verified = launcherResult.verdict === 'verified'
+    return {
+      isTeeSeller: true,
+      schema: 'launcher',
+      result: null,
+      launcherResult,
+      allowed: verified || !opts.requireTee,
+      reason: verified
+        ? null
+        : opts.requireTee
+          ? `TEE launcher verification failed (unmet required claims: ${launcherResult.unmetRequired.join(', ') || 'binding substrate'}); --require-tee refuses this seller`
+          : 'TEE launcher verification failed; advisory only',
+    }
+  }
+
+  // v1 legacy bundle path.
+  const bundle = raw as unknown as EvidenceBundle
   const policy: VerificationPolicy = defaultProductionPolicy({
     ...(opts.platforms ? { platforms: opts.platforms } : {}),
     ...(opts.tcbPolicy ? { tcbPolicy: opts.tcbPolicy } : {}),
     allowMock: opts.allowMock ?? false,
     measurementSet: registry.approvedMeasurements(),
-    registry: {
-      requireSignerPin: !opts.allowUnpinnedSigner,
-      ...(opts.registryMinVersion !== undefined ? { minVersion: opts.registryMinVersion } : {}),
-      ...(opts.registryMinRevocationEpoch !== undefined
-        ? { revocationEpoch: opts.registryMinRevocationEpoch }
-        : {}),
-    },
+    registry: registryPolicy,
   })
-
-  // 7. Verify (the package's verifier — never reimplemented here).
   const result = verifySeller({
     quote: quoteFromBundle(bundle),
     connectedPeerPubkey,
@@ -334,16 +390,19 @@ export async function verifyTeeSeller(
     ...(bundle.bundleDigest ? { bundleDigest: bundle.bundleDigest } : {}),
     ...(bundle.configHash ? { configHash: bundle.configHash } : {}),
   })
-
   const verified = result.verdict === 'verified'
-  const allowed = verified || !opts.requireTee
-  const reason = verified
-    ? null
-    : opts.requireTee
-      ? `TEE verification failed (verdict=${result.verdict}); --require-tee refuses this seller`
-      : `TEE verification failed (verdict=${result.verdict}); advisory only`
-
-  return { isTeeSeller: true, result, allowed, reason }
+  return {
+    isTeeSeller: true,
+    schema: 'v1',
+    result,
+    launcherResult: null,
+    allowed: verified || !opts.requireTee,
+    reason: verified
+      ? null
+      : opts.requireTee
+        ? `TEE verification failed (verdict=${result.verdict}); --require-tee refuses this seller`
+        : `TEE verification failed (verdict=${result.verdict}); advisory only`,
+  }
 }
 
 function errText(err: unknown): string {
@@ -365,5 +424,25 @@ export function formatVerification(peerId: string, result: VerifySellerResult): 
   for (const np of result.notProven) {
     lines.push(`    - ${np}`)
   }
+  return lines.join('\n')
+}
+
+/**
+ * Render the per-claim launcher verification report for stdout/logs: the binding
+ * substrate, then every claim with its claimed/verdict status, then the honest
+ * notProven block. This is the "clarity" the à-la-carte model promises a buyer.
+ */
+export function formatLauncherVerification(peerId: string, result: LauncherVerifyResult): string {
+  const lines: string[] = []
+  lines.push(`TEE launcher verification for ${peerId.slice(0, 12)}... → ${result.verdict.toUpperCase()}`)
+  lines.push(`  substrate: ${result.substrate.ok ? '✓' : '✗'} ${result.substrate.detail}`)
+  for (const c of result.claims) {
+    const mark =
+      c.verdict === 'verified' ? '✓' : c.verdict === 'not-claimed' ? '·' : c.verdict === 'not-proven' ? '?' : '✗'
+    lines.push(`  ${mark} ${c.claim}: ${c.verdict} — ${c.detail}`)
+  }
+  if (result.unmetRequired.length) lines.push(`  unmet required claims: ${result.unmetRequired.join(', ')}`)
+  lines.push('  notProven:')
+  for (const np of result.notProven) lines.push(`    - ${np}`)
   return lines.join('\n')
 }
