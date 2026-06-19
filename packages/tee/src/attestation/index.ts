@@ -9,7 +9,8 @@ export type {
   ReportDataBindings,
 } from "./types.js";
 export { MockAttestation, MOCK_MEASUREMENTS, MOCK_MEASUREMENT, assertProductionPlatform } from "./mock.js";
-export { TdxAttestation } from "./tdx.js";
+export { TdxAttestation, parseTdxMeasurements } from "./tdx.js";
+export type { TdxAttestationOptions } from "./tdx.js";
 
 /**
  * Construct an attestation provider for the given platform.

@@ -49,6 +49,8 @@ export interface AnnouncerConfig {
     services: string[];
     serviceCategories?: Record<string, string[]>;
     serviceApiProtocols?: Record<string, ServiceApiProtocol[]>;
+    /** Optional TEE attestation evidence URL advertised for this provider (v11+ metadata). */
+    teeAttestationUrl?: string;
     maxConcurrency: number;
     /** Per-instance pricing. Takes precedence over the shared pricing Map. */
     pricing?: {
@@ -268,6 +270,16 @@ export class PeerAnnouncer {
       if (normalizedServiceApiProtocols) {
         providerAnnouncement.serviceApiProtocols = normalizedServiceApiProtocols;
       }
+      const teeUrl = p.teeAttestationUrl?.trim();
+      if (teeUrl) {
+        providerAnnouncement.teeAttestationUrl = teeUrl;
+        // Advertise the `tee` category on every offered service so buyers can
+        // discover TEE-attested capacity via the existing category filter.
+        const withTee = this._withTeeCategory(providerAnnouncement.serviceCategories, p.services);
+        if (withTee) {
+          providerAnnouncement.serviceCategories = withTee;
+        }
+      }
       return providerAnnouncement;
     });
 
@@ -429,6 +441,26 @@ export class PeerAnnouncer {
     }
 
     return Object.keys(normalized).length > 0 ? normalized : undefined;
+  }
+
+  /**
+   * Ensure the `tee` category is present for each offered service. Returns a new
+   * categories map (or undefined when the provider offers no named services and
+   * had no prior categories — in that wildcard case `teeAttestationUrl` alone
+   * carries the signal, since categories are keyed by service in the codec).
+   */
+  private _withTeeCategory(
+    existing: Record<string, string[]> | undefined,
+    services: string[],
+  ): Record<string, string[]> | undefined {
+    const result: Record<string, string[]> = { ...(existing ?? {}) };
+    const keys = services.length > 0 ? services : Object.keys(result);
+    for (const service of keys) {
+      const cats = new Set((result[service] ?? []).map((c) => c.trim().toLowerCase()));
+      cats.add("tee");
+      result[service] = Array.from(cats);
+    }
+    return Object.keys(result).length > 0 ? result : undefined;
   }
 
   private _normalizeServiceApiProtocols(

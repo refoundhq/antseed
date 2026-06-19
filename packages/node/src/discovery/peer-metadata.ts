@@ -3,7 +3,7 @@ import type { PeerOffering } from "../types/capability.js";
 import type { ServiceApiProtocol } from "../types/service-api.js";
 import { WELL_KNOWN_SERVICE_API_PROTOCOLS } from "../types/service-api.js";
 
-export const METADATA_VERSION = 10;
+export const METADATA_VERSION = 11;
 export const WELL_KNOWN_SERVICE_CATEGORIES = [
   "privacy",
   "legal",
@@ -32,8 +32,8 @@ export interface ProviderAnnouncement {
    * Optional TEE attestation evidence URL (relative path like `/evidence`
    * resolved against the peer's signaling endpoint, or an absolute URL).
    * Advertised by TEE-wrapped sellers so buyers can fetch attestation evidence.
-   * TODO(tee): wire into codec + bump METADATA_VERSION (encode only when
-   * version >= next bump, gated like prior additive extensions).
+   * Encoded in the binary metadata codec for version >= 11 (gated like prior
+   * additive extensions).
    */
   teeAttestationUrl?: string;
   maxConcurrency: number;

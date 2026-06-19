@@ -51,6 +51,12 @@ import {
   attachStreamingAntseedHeaders,
 } from './telemetry.js'
 import { DEFAULT_BUYER_PEER_REFRESH_INTERVAL_MS } from '../config/defaults.js'
+import {
+  verifyTeeSeller,
+  formatVerification,
+  type TeeVerifyOptions,
+  type TeeVerificationOutcome,
+} from './tee-verify.js'
 
 // Re-export for backward compatibility (used by tests and other consumers)
 export { selectCandidatePeersForRouting, type CandidatePeerRouteSelection } from './routing.js'
@@ -76,6 +82,12 @@ export interface BuyerProxyConfig {
    * and allowed by the buyer's pricing policy. A 502 is returned if the peer cannot be reached.
    */
   pinnedPeerId?: string
+  /**
+   * Opt-in buyer-side TEE verification. When present, any seller advertising
+   * TEE attestation is verified before routing. With `requireTee`, a failed
+   * verification refuses the seller; otherwise the result is advisory.
+   */
+  teeVerify?: TeeVerifyOptions
 }
 
 const RETRYABLE_STATUS_CODES = new Set([408, 429, 500, 502, 503, 504])
@@ -364,6 +376,12 @@ export class BuyerProxy {
 
   private _stateWriteChain: Promise<void> = Promise.resolve()
 
+  private readonly _teeVerify: TeeVerifyOptions | null
+  // Cache verification outcomes per peer so we verify once, not per request.
+  // Entry holds the resolved outcome plus when it was computed.
+  private _teeOutcomes: Map<string, { at: number; outcome: TeeVerificationOutcome }> = new Map()
+  private _teeInflight: Map<string, Promise<TeeVerificationOutcome>> = new Map()
+
   private _cachedPeers: PeerInfo[] = []
   private _cacheLastUpdatedAtMs = 0
   private _cacheMutationEpoch = 0
@@ -380,6 +398,7 @@ export class BuyerProxy {
     this._stateDir = config.dataDir
     this._stateFile = join(config.dataDir, 'buyer.state.json')
     this._pinnedPeer = config.pinnedPeerId?.toLowerCase() ?? null
+    this._teeVerify = config.teeVerify ?? null
     this._server = createServer((req, res) => {
       this._handleRequest(req, res).catch((err) => {
         log('Unhandled error:', err)
@@ -707,6 +726,39 @@ export class BuyerProxy {
       cached.lastReachedAt = Date.now()
       this._persistPeersToState()
     }
+  }
+
+  /**
+   * Run (or reuse a cached) buyer-side TEE verification for a peer. Returns the
+   * outcome; non-TEE peers and a disabled verifier resolve to `allowed: true`.
+   * Outcomes are cached for the peer-cache TTL and verification is de-duplicated
+   * across concurrent requests to the same peer.
+   */
+  private async _ensureTeeVerified(peer: PeerInfo): Promise<TeeVerificationOutcome> {
+    if (!this._teeVerify) {
+      return { isTeeSeller: false, result: null, allowed: true, reason: null }
+    }
+    const key = peer.peerId.toLowerCase()
+    const cached = this._teeOutcomes.get(key)
+    if (cached && Date.now() - cached.at < this._peerCacheTtlMs) {
+      return cached.outcome
+    }
+    const inflight = this._teeInflight.get(key)
+    if (inflight) return inflight
+
+    const promise = verifyTeeSeller(peer, this._teeVerify)
+      .then((outcome) => {
+        this._teeOutcomes.set(key, { at: Date.now(), outcome })
+        if (outcome.isTeeSeller && outcome.result) {
+          log(formatVerification(peer.peerId, outcome.result))
+        }
+        return outcome
+      })
+      .finally(() => {
+        this._teeInflight.delete(key)
+      })
+    this._teeInflight.set(key, promise)
+    return promise
   }
 
   private async _discoverPeersFromNetwork(): Promise<PeerInfo[]> {
@@ -1199,6 +1251,33 @@ export class BuyerProxy {
         + 'Pick a different service in Discover or adjust your buyer pricing/reputation limits.',
       )
       return
+    }
+
+    // Buyer-side TEE gate: verify before routing to a TEE-advertising seller.
+    // With --require-tee, a failed verification refuses the seller; otherwise
+    // the result is advisory (logged, routing continues).
+    if (this._teeVerify) {
+      const teeOutcome = await this._ensureTeeVerified(selectedPeer)
+      if (teeOutcome.isTeeSeller && !teeOutcome.allowed) {
+        log(`Refusing TEE seller ${selectedPeer.peerId.slice(0, 12)}...: ${teeOutcome.reason}`)
+        res.writeHead(502, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({
+          error: {
+            type: 'tee_verification_failed',
+            code: 'tee_verification_failed',
+            message:
+              `Pinned peer ${selectedPeer.peerId.slice(0, 12)}... did not pass TEE verification `
+              + `and --require-tee is set. ${teeOutcome.reason ?? ''}`.trim(),
+            verdict: teeOutcome.result?.verdict ?? 'unverified',
+            checks: teeOutcome.result?.checks ?? null,
+            notProven: teeOutcome.result?.notProven ?? null,
+          },
+        }))
+        return
+      }
+      if (teeOutcome.isTeeSeller && teeOutcome.reason) {
+        log(`TEE advisory for ${selectedPeer.peerId.slice(0, 12)}...: ${teeOutcome.reason}`)
+      }
     }
 
     log(`Using pinned peer ${selectedPeer.peerId.slice(0, 12)}...`)

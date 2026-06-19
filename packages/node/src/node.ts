@@ -289,10 +289,28 @@ export class AntseedNode extends EventEmitter {
     results: PeerVerificationResults;
   }>();
   private _externalVerificationInFlight = new Set<string>();
+  /** Optional seller TEE wiring set via setTeeEvidence() before start(). */
+  private _teeEvidence: {
+    teeAttestationUrl: string;
+    handler: (url: string) => Promise<{ status: number; body: unknown } | null>;
+  } | null = null;
 
   constructor(config: NodeConfig) {
     super();
     this._config = config;
+  }
+
+  /**
+   * Seller-only: enable TEE attestation. Call before `start()`. Advertises
+   * `teeAttestationUrl` on every announced provider and serves the evidence
+   * handler on the signaling-port HTTP server. The handler is opaque (no
+   * dependency on `@antseed/tee`).
+   */
+  setTeeEvidence(evidence: {
+    teeAttestationUrl: string;
+    handler: (url: string) => Promise<{ status: number; body: unknown } | null>;
+  }): void {
+    this._teeEvidence = evidence;
   }
 
   get peerId(): string | null {
@@ -1331,6 +1349,7 @@ export class AntseedNode extends EventEmitter {
           services: p.services,
           ...(p.serviceCategories ? { serviceCategories: { ...p.serviceCategories } } : {}),
           ...(p.serviceApiProtocols ? { serviceApiProtocols: { ...p.serviceApiProtocols } } : {}),
+          ...(this._teeEvidence ? { teeAttestationUrl: this._teeEvidence.teeAttestationUrl } : {}),
           maxConcurrency: p.maxConcurrency,
           pricing: {
             defaults: {
@@ -1369,6 +1388,11 @@ export class AntseedNode extends EventEmitter {
       this._connectionManager!.setMetadataProvider(
         () => this._announcer?.getLatestMetadata() ?? null,
       );
+
+      // Serve TEE evidence endpoints on the same port (consulted before /metadata).
+      if (this._teeEvidence) {
+        this._connectionManager!.setEvidenceHandler((url) => this._teeEvidence!.handler(url));
+      }
     }
 
     // Create seller request handler

@@ -15,6 +15,7 @@ import { loadRouterPlugin, buildPluginConfig, getPackageVersions } from '../../.
 import { ensurePluginsUpToDate } from '../../../plugins/drift.js'
 import { resolvePluginPackage } from '../../../plugins/registry.js'
 import { BuyerProxy } from '../../../proxy/buyer-proxy.js'
+import { DEFAULT_TEE_REGISTRY_URL, type TeeVerifyOptions } from '../../../proxy/tee-verify.js'
 import { resolveEffectiveBuyerConfig, type BuyerRuntimeOverrides } from '../../../config/effective.js'
 import type { BuyerCLIConfig } from '../../../config/types.js'
 
@@ -194,6 +195,9 @@ export function registerBuyerStartCommand(buyerCmd: Command): void {
     .option('--max-output-usd-per-million <number>', 'runtime-only max output pricing override in USD per 1M tokens', parseFloat)
     .option('--metadata-fetch-timeout-ms <number>', 'runtime-only timeout for each peer metadata HTTP fetch during discovery', Number)
     .option('--peer <peerId>', 'pin all requests to a specific peer ID (40-char hex EVM address), bypassing the router')
+    .option('--require-tee', 'refuse to route to a TEE-tagged seller unless it passes attestation verification')
+    .option('--tee-registry-url <urlOrPath>', 'approved-set registry source (URL or local JSON file) for TEE verification')
+    .option('--tee-allow-mock', 'allow the dev/test mock TEE platform to reach a verified verdict (dev only)')
     .action(async (options) => {
       const globalOpts = getGlobalOptions(buyerCmd)
       const config = await loadConfig(globalOpts.config)
@@ -390,6 +394,22 @@ export function registerBuyerStartCommand(buyerCmd: Command): void {
         }
       }
 
+      // Buyer TEE verification: enabled when --require-tee, buyer.requireTee,
+      // or a registry URL is configured. --require-tee (flag) ORs with config.
+      const requireTee = Boolean(options.requireTee) || config.buyer?.requireTee === true
+      const teeRegistryUrl = (options.teeRegistryUrl as string | undefined)
+        ?? config.buyer?.teeRegistryUrl
+      let teeVerify: TeeVerifyOptions | undefined
+      if (requireTee || teeRegistryUrl) {
+        teeVerify = {
+          requireTee,
+          registryUrl: teeRegistryUrl,
+          allowMock: Boolean(options.teeAllowMock),
+        }
+        console.log(chalk.yellow(`  TEE verification: ${requireTee ? 'REQUIRED' : 'advisory'} `
+          + `(registry: ${teeRegistryUrl ?? DEFAULT_TEE_REGISTRY_URL})`))
+      }
+
       const proxyPort = effectiveBuyerConfig.proxyPort
       const proxySpinner = ora(`Starting local proxy on port ${proxyPort}...`).start()
       const proxy = new BuyerProxy({
@@ -398,6 +418,7 @@ export function registerBuyerStartCommand(buyerCmd: Command): void {
         pinnedPeerId,
         dataDir: globalOpts.dataDir,
         backgroundRefreshIntervalMs: effectiveBuyerConfig.peerRefreshIntervalMs,
+        ...(teeVerify ? { teeVerify } : {}),
       })
       let ownsProxyListener = false
 

@@ -62,3 +62,37 @@ describe('PeerAnnouncer capabilities', () => {
     expect(meta?.capabilities).toEqual([CONNECTION_CAPABILITY_RESPONSE_AUTH_V1]);
   });
 });
+
+describe('PeerAnnouncer teeAttestationUrl', () => {
+  it('advertises teeAttestationUrl and the tee category per service when set', async () => {
+    const base = makeBaseConfig();
+    const announcer = new PeerAnnouncer({
+      ...base,
+      providers: [
+        {
+          provider: 'openai',
+          services: ['deepseek-v3.1:free'],
+          teeAttestationUrl: '/evidence',
+          maxConcurrency: 4,
+        },
+      ],
+    });
+
+    await announcer.announce();
+    const meta = announcer.getLatestMetadata();
+    const provider = meta?.providers[0];
+    expect(provider?.teeAttestationUrl).toBe('/evidence');
+    expect(provider?.serviceCategories?.['deepseek-v3.1:free']).toContain('tee');
+  });
+
+  it('omits teeAttestationUrl when not set', async () => {
+    const base = makeBaseConfig();
+    const announcer = new PeerAnnouncer({
+      ...base,
+      providers: [{ provider: 'openai', services: ['gpt-4'], maxConcurrency: 4 }],
+    });
+    await announcer.announce();
+    const meta = announcer.getLatestMetadata();
+    expect(meta?.providers[0]?.teeAttestationUrl).toBeUndefined();
+  });
+});

@@ -11,6 +11,7 @@ const PUBLIC_ADDRESS_METADATA_VERSION = 5;
 const SELLER_CONTRACT_METADATA_VERSION = 8;
 const DOMAIN_VERIFICATION_METADATA_VERSION = 9;
 const PEER_CAPABILITIES_METADATA_VERSION = 10;
+const TEE_ATTESTATION_URL_METADATA_VERSION = 11;
 const DOMAIN_VERIFICATION_METHOD_IDS: Record<DomainVerificationMethod, number> = {
   "dns-txt": 0,
   "https-well-known": 1,
@@ -27,6 +28,7 @@ const DOMAIN_VERIFICATION_METHODS_BY_ID: DomainVerificationMethod[] = ["dns-txt"
  *   [serviceCategoryCount:1][serviceCategoryEntries...] (v3+ only)
  *   [serviceApiProtocolCount:1][serviceApiProtocolEntries...] (v4+ only)
  *   [maxConcurrency:2][currentLoad:2]
+ *   [teeAttestationUrlFlag:1][teeAttestationUrlLen:2][teeAttestationUrl:N] (v11+ only)
  * servicePricingEntry: [serviceLen:1][service:N][inputPrice:4][outputPrice:4][cachedInputPrice:4]
  * serviceCategoryEntry(v3+): [serviceLen:1][service:N][categoryCount:1][categories...]
  * category(v3+): [categoryLen:1][category:N]
@@ -209,6 +211,24 @@ function encodeBody(metadata: PeerMetadata): Uint8Array {
     const loadBuf = new ArrayBuffer(2);
     new DataView(loadBuf).setUint16(0, p.currentLoad, false);
     parts.push(new Uint8Array(loadBuf));
+
+    // teeAttestationUrl (v11+): flag + u16-length-prefixed UTF-8 string.
+    if (metadata.version >= TEE_ATTESTATION_URL_METADATA_VERSION) {
+      const teeUrl = p.teeAttestationUrl?.trim();
+      if (teeUrl && teeUrl.length > 0) {
+        const teeUrlBytes = new TextEncoder().encode(teeUrl);
+        if (teeUrlBytes.length > 65535) {
+          throw new Error(`teeAttestationUrl too long (${teeUrlBytes.length} bytes)`);
+        }
+        parts.push(new Uint8Array([1]));
+        const teeUrlLenBuf = new ArrayBuffer(2);
+        new DataView(teeUrlLenBuf).setUint16(0, teeUrlBytes.length, false);
+        parts.push(new Uint8Array(teeUrlLenBuf));
+        parts.push(teeUrlBytes);
+      } else {
+        parts.push(new Uint8Array([0]));
+      }
+    }
   }
 
   if (hasServiceCategoryExtensions) {
@@ -596,6 +616,22 @@ export function decodeMetadata(data: Uint8Array): PeerMetadata {
     const currentLoad = loadView.getUint16(0, false);
     offset += 2;
 
+    // teeAttestationUrl (v11+): flag + u16-length-prefixed UTF-8 string.
+    let teeAttestationUrl: string | undefined;
+    if (version >= TEE_ATTESTATION_URL_METADATA_VERSION) {
+      checkBounds(offset, 1, data.length);
+      const teeUrlFlag = data[offset]!;
+      offset += 1;
+      if (teeUrlFlag === 1) {
+        checkBounds(offset, 2, data.length);
+        const teeUrlLen = new DataView(data.buffer, data.byteOffset + offset, 2).getUint16(0, false);
+        offset += 2;
+        checkBounds(offset, teeUrlLen, data.length);
+        teeAttestationUrl = new TextDecoder().decode(data.slice(offset, offset + teeUrlLen));
+        offset += teeUrlLen;
+      }
+    }
+
     providers.push({
       provider,
       services,
@@ -607,6 +643,7 @@ export function decodeMetadata(data: Uint8Array): PeerMetadata {
       ...(servicePricingCount > 0 ? { servicePricing } : {}),
       ...(serviceCategories && Object.keys(serviceCategories).length > 0 ? { serviceCategories } : {}),
       ...(serviceApiProtocols && Object.keys(serviceApiProtocols).length > 0 ? { serviceApiProtocols } : {}),
+      ...(teeAttestationUrl ? { teeAttestationUrl } : {}),
       maxConcurrency,
       currentLoad,
     });

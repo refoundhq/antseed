@@ -85,6 +85,15 @@ export function verifySeller(input: VerifySellerInput): VerifySellerResult {
       status: "pass",
       detail: validity.detail,
     });
+  } else if (validity.genuine && validity.debugDisabled && validity.tcbWarn) {
+    // Genuine, debug-off, but TCB needs SW-hardening / configuration. Acceptable
+    // with a surfaced warning rather than a hard fail.
+    checks.push({
+      id: 1,
+      title: "CPU TEE quote genuine (vendor-signed, debug-off, TCB-current, nonce-fresh)",
+      status: "warn",
+      detail: validity.detail,
+    });
   } else {
     checks.push({
       id: 1,

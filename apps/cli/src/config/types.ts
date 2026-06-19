@@ -166,6 +166,18 @@ export interface BuyerCLIConfig {
   metadataFetchTimeoutMs: number;
   /** Buyer-side response-auth evidence sampling settings. */
   verification?: BuyerVerificationConfig;
+  /**
+   * Require TEE verification before routing to any seller tagged `tee` (or
+   * carrying a `teeAttestationUrl`). When true, a TEE seller that fails
+   * verification is dropped from routing. When false (default), verification
+   * is advisory-only. Overridable at runtime with `--require-tee`.
+   */
+  requireTee?: boolean;
+  /**
+   * Approved-set registry source for TEE verification — a URL or local JSON
+   * file path. Defaults to the AntSeed well-known governance endpoint.
+   */
+  teeRegistryUrl?: string;
 }
 
 /**

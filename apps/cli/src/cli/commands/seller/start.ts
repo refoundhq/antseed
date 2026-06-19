@@ -24,6 +24,8 @@ import { ensureDerivedIdentityDisplayName } from '../../../config/identity-displ
 import type { SellerCLIConfig } from '../../../config/types.js'
 import { AntAgentProvider, loadAntAgent, type AntAgentDefinition } from '@antseed/ant-agent'
 import { resolvePluginPackage } from '../../../plugins/registry.js'
+import { buildSellerTeeWiring } from './tee.js'
+import type { TeeSellerConfig } from '../../../config/types.js'
 
 function getStateFile(dataDir: string): string {
   return join(dataDir, 'daemon.state.json')
@@ -330,6 +332,7 @@ export function registerSellerStartCommand(sellerCmd: Command): void {
     .option('--min-settle-delta <usdc>', 'minimum unsettled delta (USDC decimal, e.g. 0.002) before idle settle submits a tx')
     .option('--base-rpc-url <url>', `runtime-only Base JSON-RPC URL override (also ${ANTSEED_BASE_RPC_URL_ENV})`)
     .option('--skip-prereq-check', 'skip pre-flight checks (services configured, on-chain registration + stake). Use only for local testing.')
+    .option('--tee', 'run in TEE mode: serve attestation evidence endpoints and advertise teeAttestationUrl (autodetects Intel TDX; falls back to seller.tee config)')
     .action(async (options) => {
       const globalOpts = getGlobalOptions(sellerCmd)
       const config = await loadConfig(globalOpts.config)
@@ -605,6 +608,31 @@ export function registerSellerStartCommand(sellerCmd: Command): void {
         },
         ...(announcerSellerContract ? { sellerContract: announcerSellerContract } : {}),
       })
+
+      // TEE mode: --tee flag (or seller.tee.enabled) serves attestation evidence
+      // on the signaling port and advertises teeAttestationUrl + the tee category.
+      const teeConfig: TeeSellerConfig | undefined = options.tee
+        ? { ...(effectiveSellerConfig.tee ?? {}), enabled: true }
+        : effectiveSellerConfig.tee?.enabled
+          ? effectiveSellerConfig.tee
+          : undefined
+      if (teeConfig?.enabled) {
+        const teeSpinner = ora('Initializing TEE attestation...').start()
+        try {
+          const identity = await loadOrCreateIdentity(globalOpts.dataDir)
+          const tee = await buildSellerTeeWiring(identity, teeConfig)
+          node.setTeeEvidence({ teeAttestationUrl: tee.teeAttestationUrl, handler: tee.handler })
+          teeSpinner.succeed(chalk.green(`TEE attestation active (platform: ${tee.platform})`))
+          console.log(chalk.dim(`  evidence endpoint: ${tee.teeAttestationUrl} (served on signaling port)`))
+          console.log(chalk.dim(`  enclave signing pubkey: ${tee.enclaveSigningPubkey.slice(0, 24)}...`))
+          if (tee.platform === 'mock') {
+            console.log(chalk.yellow('  Warning: mock platform — quotes are NOT genuine (dev/test only).'))
+          }
+        } catch (err) {
+          teeSpinner.fail(chalk.red(`Failed to initialize TEE attestation: ${(err as Error).message}`))
+          process.exit(1)
+        }
+      }
 
       let registeredProviders = providers
 

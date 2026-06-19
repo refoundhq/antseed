@@ -35,6 +35,19 @@ export interface PeerEndpoint {
   port: number;
 }
 
+/** HTTP reply shape for the optional TEE-evidence handler (structural mirror of
+ * `@antseed/tee`'s EvidenceReply — kept local to avoid depending on that package). */
+export interface EvidenceHttpReply {
+  status: number;
+  body: unknown;
+}
+
+/**
+ * Handles a request path on the signaling-port HTTP server. Returns a reply, or
+ * `null` if the path is not owned by this handler (fall through to /metadata).
+ */
+export type EvidenceHttpHandler = (url: string) => Promise<EvidenceHttpReply | null>;
+
 type TransportMode = "webrtc" | "tcp";
 type InitialWireMessage =
   | {
@@ -288,6 +301,19 @@ function normalizeCapabilities(value: unknown): string[] {
   return capabilities;
 }
 
+/** Map a numeric HTTP status to a `"<code> <reason>"` status line for the few
+ * statuses the evidence handler emits (200/400/500), defaulting reasonably. */
+function httpStatusLine(status: number): string {
+  const reasons: Record<number, string> = {
+    200: "OK",
+    400: "Bad Request",
+    404: "Not Found",
+    500: "Internal Server Error",
+    503: "Service Unavailable",
+  };
+  return `${status} ${reasons[status] ?? "OK"}`;
+}
+
 /** Manages all peer connections and optional inbound listening. */
 export class ConnectionManager extends EventEmitter {
   private _connections = new Map<PeerId, PeerConnection>();
@@ -299,6 +325,7 @@ export class ConnectionManager extends EventEmitter {
   private _server: net.Server | null = null;
   private _transportMode: TransportMode;
   private _metadataProvider: (() => object | null) | null = null;
+  private _evidenceHandler: EvidenceHttpHandler | null = null;
   private _ipConnectionCounts = new Map<string, number>();
   private readonly _introReplayGuard = new NonceReplayGuard();
   private static _knownEndpoints = new Map<PeerId, PeerEndpoint>();
@@ -333,6 +360,16 @@ export class ConnectionManager extends EventEmitter {
 
   setMetadataProvider(provider: () => object | null): void {
     this._metadataProvider = provider;
+  }
+
+  /**
+   * Register an optional TEE-evidence handler served on the signaling-port HTTP
+   * server. It is consulted BEFORE the `/metadata` handler; returning `null`
+   * means "not my path" and falls through to metadata/404. Kept as an opaque
+   * async function so this package takes no dependency on `@antseed/tee`.
+   */
+  setEvidenceHandler(handler: EvidenceHttpHandler | null): void {
+    this._evidenceHandler = handler;
   }
 
   setLocalPeerId(peerId: PeerId): void {
@@ -689,35 +726,62 @@ export class ConnectionManager extends EventEmitter {
     socket.on("data", onData);
 
     const url = requestLine.split(" ")[1] ?? "";
-    let statusLine: string;
-    let body: string;
 
-    if (url !== "/metadata") {
-      statusLine = "404 Not Found";
-      body = JSON.stringify({ error: "not found" });
-    } else if (!this._metadataProvider) {
-      statusLine = "503 Service Unavailable";
-      body = JSON.stringify({ error: "metadata not available" });
-    } else {
-      const metadata = this._metadataProvider();
-      if (!metadata) {
+    const writeReply = (statusLine: string, body: string): void => {
+      socket.end(
+        `HTTP/1.1 ${statusLine}\r\n` +
+        `Content-Type: application/json\r\n` +
+        `Content-Length: ${Buffer.byteLength(body)}\r\n` +
+        `Date: ${new Date().toUTCString()}\r\n` +
+        `Connection: close\r\n` +
+        `\r\n` +
+        body,
+      );
+    };
+
+    const serveMetadata = (): void => {
+      let statusLine: string;
+      let body: string;
+      if (url !== "/metadata") {
+        statusLine = "404 Not Found";
+        body = JSON.stringify({ error: "not found" });
+      } else if (!this._metadataProvider) {
         statusLine = "503 Service Unavailable";
         body = JSON.stringify({ error: "metadata not available" });
       } else {
-        statusLine = "200 OK";
-        body = JSON.stringify(metadata);
+        const metadata = this._metadataProvider();
+        if (!metadata) {
+          statusLine = "503 Service Unavailable";
+          body = JSON.stringify({ error: "metadata not available" });
+        } else {
+          statusLine = "200 OK";
+          body = JSON.stringify(metadata);
+        }
       }
+      writeReply(statusLine, body);
+    };
+
+    // Consult the optional TEE-evidence handler first; it owns /evidence,
+    // /pubkey, and /.well-known/antseed-evidence and returns null otherwise.
+    if (this._evidenceHandler) {
+      void this._evidenceHandler(url)
+        .then((reply) => {
+          if (socket.destroyed) return;
+          if (reply) {
+            writeReply(httpStatusLine(reply.status), JSON.stringify(reply.body));
+          } else {
+            serveMetadata();
+          }
+        })
+        .catch(() => {
+          if (!socket.destroyed) {
+            writeReply("500 Internal Server Error", JSON.stringify({ error: "evidence handler failed" }));
+          }
+        });
+      return;
     }
 
-    socket.end(
-      `HTTP/1.1 ${statusLine}\r\n` +
-      `Content-Type: application/json\r\n` +
-      `Content-Length: ${Buffer.byteLength(body)}\r\n` +
-      `Date: ${new Date().toUTCString()}\r\n` +
-      `Connection: close\r\n` +
-      `\r\n` +
-      body,
-    );
+    serveMetadata();
   }
 
   private _acceptTcpInbound(

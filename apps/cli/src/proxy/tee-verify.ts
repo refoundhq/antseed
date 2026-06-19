@@ -1,0 +1,269 @@
+import { randomBytes } from 'node:crypto'
+import type { PeerInfo } from '@antseed/node'
+import { verifySeller, type VerifySellerResult } from '@antseed/tee/verifier'
+import { RegistryClient } from '@antseed/tee/registry'
+import type { AttestationPlatform, AttestationQuote } from '@antseed/tee/attestation'
+import { log } from './request-utils.js'
+
+/**
+ * Default approved-set registry source. Buyers can override via
+ * `buyer.teeRegistryUrl` (URL or local file path). The fallback points at the
+ * AntSeed well-known governance endpoint so `--require-tee` works out of the box
+ * without extra config.
+ */
+export const DEFAULT_TEE_REGISTRY_URL = 'https://antseed.network/.well-known/antseed-tee-validset.json'
+
+export interface TeeVerifyOptions {
+  /** Refuse to route to a TEE-tagged seller unless it verifies. */
+  requireTee: boolean
+  /** Registry source (URL or local JSON file). Defaults to DEFAULT_TEE_REGISTRY_URL. */
+  registryUrl?: string
+  /** Pinned governance signer (hex ed25519 pubkey). Loads must match it when set. */
+  pinnedRegistrySigner?: string
+  /** Allow the dev/test `mock` platform to reach a verified verdict. Default false. */
+  allowMock?: boolean
+  /** Per-fetch timeout (ms). Default 4000. */
+  fetchTimeoutMs?: number
+}
+
+export interface TeeVerificationOutcome {
+  /** True when this peer advertises TEE attestation (tag `tee` or teeAttestationUrl). */
+  isTeeSeller: boolean
+  /** Verifier result, when verification ran. Null for non-TEE peers or fetch failures. */
+  result: VerifySellerResult | null
+  /** Whether routing should be allowed. False only when requireTee and verification failed. */
+  allowed: boolean
+  /** Human-readable reason when `allowed` is false (or a fetch/verify error). */
+  reason: string | null
+}
+
+/** Discovery descriptor served at /.well-known/antseed-evidence. */
+interface EvidenceDescriptor {
+  scheme: string
+  platform: string
+  evidencePath: string
+  pubkeyPath: string
+}
+
+/** Evidence bundle returned by GET <evidencePath>?nonce=<hex>. */
+interface EvidenceBundle {
+  scheme: string
+  platform: string
+  peerPubkey: string
+  nonce: string
+  quote: string
+  reportDataHex: string
+  measurements: Record<string, string>
+  timestamp: number
+}
+
+const WELLKNOWN_PATH = '/.well-known/antseed-evidence'
+const PUBKEY_PATH = '/pubkey'
+
+/**
+ * Detect whether a peer advertises TEE attestation. A peer is treated as a TEE
+ * seller if any announced provider carries a `teeAttestationUrl`, or if any
+ * service is tagged with the well-known `tee` category.
+ */
+export function isTeeSeller(peer: PeerInfo): boolean {
+  return resolveTeeAttestationUrl(peer) !== null || hasTeeCategory(peer)
+}
+
+function hasTeeCategory(peer: PeerInfo): boolean {
+  const matrix = peer.providerServiceCategories
+  if (matrix) {
+    for (const entry of Object.values(matrix)) {
+      for (const cats of Object.values(entry.services ?? {})) {
+        if (cats.some((c) => c.toLowerCase() === 'tee')) return true
+      }
+    }
+  }
+  for (const provider of peer.metadata?.providers ?? []) {
+    for (const cats of Object.values(provider.serviceCategories ?? {})) {
+      if (cats.some((c) => c.toLowerCase() === 'tee')) return true
+    }
+  }
+  return false
+}
+
+/**
+ * The announced TEE evidence URL, if any. Prefers an explicit
+ * `teeAttestationUrl` from any provider announcement; returns null otherwise.
+ */
+export function resolveTeeAttestationUrl(peer: PeerInfo): string | null {
+  for (const provider of peer.metadata?.providers ?? []) {
+    const url = provider.teeAttestationUrl?.trim()
+    if (url) return url
+  }
+  return null
+}
+
+/**
+ * Resolve the seller's evidence HTTP base URL (`http://host:port`) from its
+ * `publicAddress`. The evidence routes are served on the same signaling-port
+ * HTTP server that answers `/metadata`, so the base is identical to discovery.
+ */
+export function resolveEvidenceBaseUrl(peer: PeerInfo): string | null {
+  const addr = peer.publicAddress?.trim()
+  if (!addr) return null
+  // Same host:port the metadata resolver fetches /metadata from — the evidence
+  // routes are served on the seller's signaling-port HTTP server.
+  const lastColon = addr.lastIndexOf(':')
+  if (lastColon <= 0 || lastColon === addr.length - 1) return null
+  const host = addr.slice(0, lastColon).trim()
+  const portText = addr.slice(lastColon + 1)
+  if (host.length === 0 || !/^\d+$/.test(portText)) return null
+  const port = Number(portText)
+  if (!Number.isInteger(port) || port < 1 || port > 65535) return null
+  return `http://${host}:${port}`
+}
+
+async function fetchJson<T>(url: string, timeoutMs: number): Promise<T> {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    const res = await fetch(url, { signal: controller.signal })
+    if (!res.ok) throw new Error(`HTTP ${res.status} from ${url}`)
+    return (await res.json()) as T
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
+/**
+ * Reconstruct the `AttestationQuote` the verifier expects from the on-the-wire
+ * evidence bundle. The bundle carries the quote as base64 and the measurement
+ * registers as hex; the verifier re-derives report_data itself, so we only need
+ * the raw quote bytes + measurements + platform.
+ */
+function quoteFromBundle(bundle: EvidenceBundle): AttestationQuote {
+  return {
+    platform: bundle.platform as AttestationPlatform,
+    quote: new Uint8Array(Buffer.from(bundle.quote, 'base64')),
+    reportData: new Uint8Array(Buffer.from(bundle.reportDataHex, 'hex')),
+    measurements: bundle.measurements,
+  }
+}
+
+/**
+ * Run buyer-side TEE verification for one selected seller.
+ *
+ * Nonce: a fresh 32-byte hex value generated here and supplied in the
+ * `/evidence?nonce=` query. The verifier re-derives report_data over this exact
+ * nonce (check #3), so a replayed/stale quote fails.
+ *
+ * Connected-peer-pubkey: the AntSeed node exposes only the peer's EVM address
+ * (peerId), not its secp256k1/enclave pubkey. The authoritative enclave key is
+ * served by the seller at `/pubkey` on the SAME connected `publicAddress`
+ * host:port used for routing. We fetch it over that connected endpoint and bind
+ * it as `connectedPeerPubkey`, anchoring the quote's report_data to the peer we
+ * actually reach. (When a node-level connected-pubkey accessor lands, swap the
+ * source here.)
+ */
+export async function verifyTeeSeller(
+  peer: PeerInfo,
+  opts: TeeVerifyOptions,
+): Promise<TeeVerificationOutcome> {
+  if (!isTeeSeller(peer)) {
+    return { isTeeSeller: false, result: null, allowed: true, reason: null }
+  }
+
+  const fetchTimeoutMs = opts.fetchTimeoutMs ?? 4000
+  const fail = (reason: string): TeeVerificationOutcome => {
+    log(`TEE verify ${peer.peerId.slice(0, 12)}...: ${reason}`)
+    return {
+      isTeeSeller: true,
+      result: null,
+      allowed: !opts.requireTee,
+      reason,
+    }
+  }
+
+  const baseUrl = resolveEvidenceBaseUrl(peer)
+  if (!baseUrl) {
+    return fail('no reachable publicAddress to fetch TEE evidence from')
+  }
+
+  // 1. Discover evidence + pubkey paths.
+  let descriptor: EvidenceDescriptor
+  try {
+    descriptor = await fetchJson<EvidenceDescriptor>(baseUrl + WELLKNOWN_PATH, fetchTimeoutMs)
+  } catch (err) {
+    return fail(`failed to fetch ${WELLKNOWN_PATH}: ${errText(err)}`)
+  }
+  const evidencePath = typeof descriptor.evidencePath === 'string' ? descriptor.evidencePath : '/evidence'
+  const pubkeyPath = typeof descriptor.pubkeyPath === 'string' ? descriptor.pubkeyPath : PUBKEY_PATH
+
+  // 2. Independently fetch the connected peer's enclave pubkey.
+  let connectedPeerPubkey: string
+  try {
+    const body = await fetchJson<{ peerPubkey?: string }>(baseUrl + pubkeyPath, fetchTimeoutMs)
+    if (!body.peerPubkey || typeof body.peerPubkey !== 'string') {
+      return fail(`${pubkeyPath} did not return a peerPubkey`)
+    }
+    connectedPeerPubkey = body.peerPubkey
+  } catch (err) {
+    return fail(`failed to fetch ${pubkeyPath}: ${errText(err)}`)
+  }
+
+  // 3. Generate a fresh nonce and request bound evidence.
+  const nonce = randomBytes(32).toString('hex')
+  const evidenceUrl = `${baseUrl}${evidencePath}?nonce=${nonce}`
+  let bundle: EvidenceBundle
+  try {
+    bundle = await fetchJson<EvidenceBundle>(evidenceUrl, fetchTimeoutMs)
+  } catch (err) {
+    return fail(`failed to fetch evidence: ${errText(err)}`)
+  }
+
+  // 4. Load the approved-set registry (fail-closed inside RegistryClient).
+  const registry = new RegistryClient(
+    opts.pinnedRegistrySigner ? { pinnedSigner: opts.pinnedRegistrySigner } : {},
+  )
+  try {
+    await registry.load(opts.registryUrl ?? DEFAULT_TEE_REGISTRY_URL)
+  } catch (err) {
+    return fail(`failed to load TEE approved-set registry: ${errText(err)}`)
+  }
+
+  // 5. Verify (the package's verifier — never reimplemented here).
+  const result = verifySeller({
+    quote: quoteFromBundle(bundle),
+    connectedPeerPubkey,
+    nonce,
+    registry,
+    allowMock: opts.allowMock ?? false,
+  })
+
+  const verified = result.verdict === 'verified'
+  const allowed = verified || !opts.requireTee
+  const reason = verified
+    ? null
+    : opts.requireTee
+      ? `TEE verification failed (verdict=${result.verdict}); --require-tee refuses this seller`
+      : `TEE verification failed (verdict=${result.verdict}); advisory only`
+
+  return { isTeeSeller: true, result, allowed, reason }
+}
+
+function errText(err: unknown): string {
+  return err instanceof Error ? err.message : String(err)
+}
+
+/**
+ * Render the numbered tri-state checklist + the honesty (notProven) block for
+ * stdout/logs. Concise, one line per check.
+ */
+export function formatVerification(peerId: string, result: VerifySellerResult): string {
+  const lines: string[] = []
+  lines.push(`TEE verification for ${peerId.slice(0, 12)}... → ${result.verdict.toUpperCase()}`)
+  for (const c of result.checks) {
+    const mark = c.status === 'pass' ? '✓' : c.status === 'warn' ? '!' : '✗'
+    lines.push(`  ${mark} [${c.id}] ${c.title}: ${c.detail}`)
+  }
+  lines.push('  notProven (MVP scope — these properties are NOT proven):')
+  for (const np of result.notProven) {
+    lines.push(`    - ${np}`)
+  }
+  return lines.join('\n')
+}

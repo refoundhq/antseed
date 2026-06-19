@@ -49,6 +49,28 @@ describe('encodeMetadata / decodeMetadata', () => {
     expect(decoded.providers[0]!.currentLoad).toBe(3);
   });
 
+  it('should round-trip teeAttestationUrl on a provider (v11+)', () => {
+    const original = makeMetadata({
+      providers: [
+        {
+          provider: 'openai',
+          services: ['deepseek-v3.1:free'],
+          defaultPricing: { inputUsdPerMillion: 0, outputUsdPerMillion: 0 },
+          teeAttestationUrl: '/evidence',
+          maxConcurrency: 4,
+          currentLoad: 1,
+        },
+      ],
+    });
+    const decoded = decodeMetadata(encodeMetadata(original));
+    expect(decoded.providers[0]!.teeAttestationUrl).toBe('/evidence');
+  });
+
+  it('omits teeAttestationUrl when not set', () => {
+    const decoded = decodeMetadata(encodeMetadata(makeMetadata()));
+    expect(decoded.providers[0]!.teeAttestationUrl).toBeUndefined();
+  });
+
   it('should handle float32 precision for prices', () => {
     const original = makeMetadata();
     const encoded = encodeMetadata(original);

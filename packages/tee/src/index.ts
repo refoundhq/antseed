@@ -21,6 +21,7 @@ export {
 
 // ---- config ----
 export type { TeeSellerConfig } from "./config.js";
+export { resolveSellerAttestation } from "./config.js";
 
 // ================= SELLER HALF =================
 export type {
@@ -36,7 +37,9 @@ export {
   MOCK_MEASUREMENT,
   assertProductionPlatform,
   TdxAttestation,
+  parseTdxMeasurements,
 } from "./attestation/index.js";
+export type { TdxAttestationOptions } from "./attestation/index.js";
 
 export {
   handleEvidenceRequest,
@@ -48,9 +51,11 @@ export type {
   EvidenceReply,
 } from "./evidence/routes.js";
 
-// v2 (interface only) — model-call transcript decorator
-export { TeeAttestingProvider } from "./attesting-provider.js";
-export type { EnclaveSigner } from "./attesting-provider.js";
+// v2 (interface only) — model-call transcript decorator.
+// `TeeAttestingProvider` is a type-only `declare class` (no runtime body yet),
+// so it MUST be re-exported as a type — a value re-export resolves to nothing at
+// runtime and breaks any ESM consumer that imports the package root.
+export type { TeeAttestingProvider, EnclaveSigner } from "./attesting-provider.js";
 
 // ================= BUYER HALF =================
 export {
