@@ -1,4 +1,5 @@
 import type { AttestationPlatform } from "../attestation/types.js";
+import type { ClaimId, StoragePolicy, NetworkPolicy } from "../evidence/document.js";
 
 /**
  * How the buyer treats a quote's Intel/AMD TCB status.
@@ -98,6 +99,26 @@ export interface VerificationPolicy {
    * `platforms`, a production verifier rejects it unless this is set.
    */
   allowMock: boolean;
+
+  // --- launcher claims model (à-la-carte; ARCHITECTURE.md §6) ---
+  /**
+   * Claims the buyer REQUIRES verified to route. Routing is allowed iff every id
+   * here is `claimed && verified` in the launcher evidence. Empty/omitted = the
+   * buyer requires no specific claim (it still receives the full claim report).
+   */
+  requiredClaims?: ClaimId[];
+  /** Minimum storage posture required (the listed fields must hold in the evidence policy). */
+  requiredStorage?: Partial<StoragePolicy>;
+  /** Minimum network posture required. */
+  requiredNetwork?: Partial<NetworkPolicy>;
+  /** Launcher capabilities the buyer requires (e.g. "no-operator-shell", "egress-locked"). */
+  requiredCapabilities?: string[];
+  /** Pinned AntSeed release key (hex ed25519). When set, approved-binary needs a valid release sig. */
+  pinnedReleaseSigner?: string;
+  /** Allowed binary release tags (e.g. ["stable"]). Applied to approved-binary. */
+  allowedBinaryTags?: string[];
+  /** Require the bound binary's version to equal this (exact pin). */
+  requireBinaryVersion?: string;
 }
 
 /**

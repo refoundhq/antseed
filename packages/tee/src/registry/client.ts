@@ -279,6 +279,26 @@ export class RegistryClient {
     return verifyApprovedBinary(this.set, binary, opts);
   }
 
+  /**
+   * The active, non-revoked approved entry for (platform, measurement), if any.
+   * The launcher claims read its `capabilities` / policy hashes — what the
+   * governance signer vouches this approved launcher enforces.
+   */
+  findApprovedEntry(
+    platform: AttestationPlatform,
+    measurement: string,
+  ): ValidSetEntry | undefined {
+    if (!this.set) return undefined;
+    const m = measurement.toLowerCase();
+    if (this.set.revokedMeasurements?.some((r) => r.toLowerCase() === m)) return undefined;
+    return this.set.entries.find(
+      (e) =>
+        e.platform === platform &&
+        e.measurement.toLowerCase() === m &&
+        e.status === "active",
+    );
+  }
+
   /** The verified set, or undefined if none is loaded. */
   getValidSet(): ValidSet | undefined {
     return this.set;
