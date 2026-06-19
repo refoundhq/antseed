@@ -9,6 +9,7 @@ import {
   type StoragePolicy,
   type NetworkPolicy,
 } from "./document.js";
+import type { RtmrEvent, ImaEntry } from "./rtmr.js";
 
 /**
  * The seller-side EvidenceBuilder (ARCHITECTURE.md §3). The launcher assembles the
@@ -41,6 +42,16 @@ export interface LauncherEvidenceContext {
   configHash?: string;
   bundleDigest?: string;
   eventLogRef?: string;
+  /**
+   * Measured runtime-policy event log the launcher extended into the runtime RTMR
+   * (read from the launcher / sysfs by the seller; the hardware quote's RTMR already
+   * reflects these extends). Drives the egress-allowlisted / no-buyer-data-at-rest claims.
+   */
+  rtmrLog?: RtmrEvent[];
+  /** IMA measurement log read from the system (drives known-binaries-only). */
+  imaLog?: ImaEntry[];
+  /** Which RTMR the IMA log extends (default 2). */
+  imaRtmrIndex?: number;
   /** Timestamp (ms). Tests pin it; production passes Date.now(). */
   timestamp: number;
 }
@@ -90,6 +101,9 @@ export async function buildLauncherEvidence(
     ...(ctx.configHash ? { configHash: ctx.configHash } : {}),
     ...(ctx.bundleDigest ? { bundleDigest: ctx.bundleDigest } : {}),
     ...(ctx.eventLogRef ? { eventLogRef: ctx.eventLogRef } : {}),
+    ...(ctx.rtmrLog ? { rtmrLog: ctx.rtmrLog } : {}),
+    ...(ctx.imaLog ? { imaLog: ctx.imaLog } : {}),
+    ...(ctx.imaRtmrIndex !== undefined ? { imaRtmrIndex: ctx.imaRtmrIndex } : {}),
   };
 
   return { ...unsigned, enclaveSignature: signEvidenceDocument(unsigned, ctx.enclavePrivateKey) };
