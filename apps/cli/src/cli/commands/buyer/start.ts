@@ -199,6 +199,9 @@ export function registerBuyerStartCommand(buyerCmd: Command): void {
     .option('--tee-registry-url <urlOrPath>', 'approved-set registry source (URL or local JSON file) for TEE verification')
     .option('--tee-registry-signer <hex>', 'pinned approved-code registry signer (hex ed25519 pubkey); ValidSets signed by any other key are rejected')
     .option('--tee-allow-mock', 'allow the dev/test mock TEE platform to reach a verified verdict (dev only)')
+    .option('--tee-required-claims <csv>', 'launcher schema: comma-separated claims the buyer REQUIRES verified (e.g. hardware-genuine,approved-binary,binary-active). Default under --require-tee is the locked-binary-versions set')
+    .option('--tee-release-signer <hex>', 'pinned AntSeed release key (hex ed25519): require a valid release signature on the approved binary')
+    .option('--tee-binary-tags <csv>', 'launcher schema: allowed binary release tags (e.g. stable)')
     .action(async (options) => {
       const globalOpts = getGlobalOptions(buyerCmd)
       const config = await loadConfig(globalOpts.config)
@@ -402,6 +405,14 @@ export function registerBuyerStartCommand(buyerCmd: Command): void {
         ?? config.buyer?.teeRegistryUrl
       const teeRegistrySigner = (options.teeRegistrySigner as string | undefined)
         ?? config.buyer?.teeRegistrySignerPubkey
+      const parseCsv = (v: string | undefined): string[] | undefined => {
+        const items = v?.split(',').map((s) => s.trim()).filter(Boolean)
+        return items && items.length ? items : undefined
+      }
+      const teeRequiredClaims = parseCsv(options.teeRequiredClaims as string | undefined)
+      const teeBinaryTags = parseCsv(options.teeBinaryTags as string | undefined)
+      const teeReleaseSigner = (options.teeReleaseSigner as string | undefined)
+        ?? config.buyer?.teeReleaseSignerPubkey
       let teeVerify: TeeVerifyOptions | undefined
       if (requireTee || teeRegistryUrl) {
         teeVerify = {
@@ -409,6 +420,9 @@ export function registerBuyerStartCommand(buyerCmd: Command): void {
           registryUrl: teeRegistryUrl,
           allowMock: Boolean(options.teeAllowMock),
           ...(teeRegistrySigner ? { pinnedRegistrySigner: teeRegistrySigner } : {}),
+          ...(teeRequiredClaims ? { requiredClaims: teeRequiredClaims as TeeVerifyOptions['requiredClaims'] } : {}),
+          ...(teeReleaseSigner ? { pinnedReleaseSigner: teeReleaseSigner } : {}),
+          ...(teeBinaryTags ? { allowedBinaryTags: teeBinaryTags } : {}),
         }
         console.log(chalk.yellow(`  TEE verification: ${requireTee ? 'REQUIRED' : 'advisory'} `
           + `(registry: ${teeRegistryUrl ?? DEFAULT_TEE_REGISTRY_URL}`

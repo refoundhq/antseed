@@ -185,6 +185,12 @@ export interface BuyerCLIConfig {
    * `--tee-registry-signer`.
    */
   teeRegistrySignerPubkey?: string;
+  /**
+   * Launcher schema: pinned AntSeed release key (hex ed25519). When set, the
+   * approved-binary claim requires a valid release signature over the bound
+   * binary digest under this key. Overridable with `--tee-release-signer`.
+   */
+  teeReleaseSignerPubkey?: string;
 }
 
 /**
