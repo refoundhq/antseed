@@ -45,21 +45,24 @@ export async function buildSellerTeeWiring(
     assertProductionPlatform(platform)
   }
 
-  // In-enclave ed25519 signing key (v2 model-call transcript signer). Generated
-  // fresh per process so the key lives only inside this enclave instance.
+  // In-enclave ed25519 evidence-signing key. Generated fresh per process so the
+  // key lives only inside this enclave instance. It is bound into report_data
+  // (below) so the buyer can trust the /pubkey value — otherwise it would be an
+  // unattested, MITM-substitutable key.
   const { publicKey } = generateKeyPairSync('ed25519')
   const enclaveSigningPubkey = publicKey
     .export({ type: 'spki', format: 'der' })
     .toString('hex')
 
-  // The peer pubkey bound into report_data is the seller's AntSeed identity
-  // public key (compressed secp256k1) — the same key that authenticates the P2P
-  // channel.
+  // report_data binds BOTH keys: the seller's AntSeed identity public key
+  // (compressed secp256k1, authenticates the P2P channel) AND the ed25519
+  // evidence-signing key above.
   const peerPubkey = identity.wallet.signingKey.compressedPublicKey.replace(/^0x/, '')
 
   const ctx: EvidenceContext = {
     attestation: provider,
     peerPubkey,
+    enclavePubkey: enclaveSigningPubkey,
   }
 
   const handler = async (url: string): Promise<{ status: number; body: unknown } | null> => {

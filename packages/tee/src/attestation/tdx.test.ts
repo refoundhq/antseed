@@ -6,6 +6,7 @@ import { TdxAttestation, parseTdxMeasurements } from "./tdx.js";
 import { packReportData } from "../report-data.js";
 
 const PEER_PUBKEY = "02" + "07".repeat(32);
+const ENCLAVE_PUBKEY = "ed".repeat(44);
 const NONCE = "ab".repeat(32);
 
 // TDX v4 quote layout: 48-byte header + 584-byte td_quote_body.
@@ -55,7 +56,7 @@ describe("TdxAttestation configfs-tsm round-trip (fake configfs path)", () => {
     // Pre-stage what a real kernel would produce: a quote whose embedded
     // report_data equals packReportData(bindings). Generated lazily on read,
     // so compute it from the same bindings the test will request.
-    outblob = fakeQuote(packReportData({ peerPubkey: PEER_PUBKEY, nonce: NONCE }));
+    outblob = fakeQuote(packReportData({ peerPubkey: PEER_PUBKEY, enclavePubkey: ENCLAVE_PUBKEY, nonce: NONCE }));
   });
 
   afterEach(async () => {
@@ -72,10 +73,10 @@ describe("TdxAttestation configfs-tsm round-trip (fake configfs path)", () => {
     // then drop the staged outblob/provider into it.
     const stop = pollAndStage(root, outblob);
     try {
-      const quote = await att.generateQuote({ peerPubkey: PEER_PUBKEY, nonce: NONCE });
+      const quote = await att.generateQuote({ peerPubkey: PEER_PUBKEY, enclavePubkey: ENCLAVE_PUBKEY, nonce: NONCE });
       expect(quote.platform).toBe("tdx");
       // report_data returned == canonical packReportData(bindings).
-      const expected = packReportData({ peerPubkey: PEER_PUBKEY, nonce: NONCE });
+      const expected = packReportData({ peerPubkey: PEER_PUBKEY, enclavePubkey: ENCLAVE_PUBKEY, nonce: NONCE });
       expect(Buffer.from(quote.reportData).toString("hex")).toBe(
         Buffer.from(expected).toString("hex"),
       );
@@ -113,7 +114,7 @@ describe("TdxAttestation configfs-tsm round-trip (fake configfs path)", () => {
     const stop = pollAndStage(root, new Uint8Array(0));
     try {
       await expect(
-        att.generateQuote({ peerPubkey: PEER_PUBKEY, nonce: NONCE }),
+        att.generateQuote({ peerPubkey: PEER_PUBKEY, enclavePubkey: ENCLAVE_PUBKEY, nonce: NONCE }),
       ).rejects.toThrow(/outblob was empty/);
     } finally {
       stop();

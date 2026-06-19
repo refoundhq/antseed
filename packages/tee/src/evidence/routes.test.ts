@@ -4,9 +4,14 @@ import { packReportData } from "../report-data.js";
 import { handleEvidenceRequest, type EvidenceContext } from "./routes.js";
 
 const PEER_PUBKEY = "02" + "07".repeat(32);
+const ENCLAVE_PUBKEY = "ed".repeat(44);
 
 function ctx(): EvidenceContext {
-  return { attestation: new MockAttestation(), peerPubkey: PEER_PUBKEY };
+  return {
+    attestation: new MockAttestation(),
+    peerPubkey: PEER_PUBKEY,
+    enclavePubkey: ENCLAVE_PUBKEY,
+  };
 }
 
 describe("handleEvidenceRequest", () => {
@@ -15,10 +20,10 @@ describe("handleEvidenceRequest", () => {
     expect(await handleEvidenceRequest("/", ctx())).toBeNull();
   });
 
-  it("serves /pubkey", async () => {
+  it("serves /pubkey with both the channel and enclave keys", async () => {
     const reply = await handleEvidenceRequest("/pubkey", ctx());
     expect(reply?.status).toBe(200);
-    expect(reply?.body).toEqual({ peerPubkey: PEER_PUBKEY });
+    expect(reply?.body).toEqual({ peerPubkey: PEER_PUBKEY, enclavePubkey: ENCLAVE_PUBKEY });
   });
 
   it("serves the well-known descriptor", async () => {
@@ -40,10 +45,11 @@ describe("handleEvidenceRequest", () => {
     expect(body.scheme).toBe("antseed-tee/v1");
     expect(body.nonce).toBe(nonce);
     expect(body.peerPubkey).toBe(PEER_PUBKEY);
+    expect(body.enclavePubkey).toBe(ENCLAVE_PUBKEY);
 
-    // report_data in the bundle must equal the canonical recompute.
+    // report_data in the bundle must equal the canonical recompute over BOTH keys.
     const expected = Buffer.from(
-      packReportData({ peerPubkey: PEER_PUBKEY, nonce }),
+      packReportData({ peerPubkey: PEER_PUBKEY, enclavePubkey: ENCLAVE_PUBKEY, nonce }),
     ).toString("hex");
     expect(body.reportDataHex).toBe(expected);
   });

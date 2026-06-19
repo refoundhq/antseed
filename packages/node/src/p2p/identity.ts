@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { homedir } from "node:os";
-import { Wallet, hashMessage, getBytes, hexlify, verifyMessage } from "ethers";
+import { Wallet, hashMessage, getBytes, hexlify, verifyMessage, SigningKey } from "ethers";
 import { toPeerId, type PeerId } from "../types/peer.js";
 import { hexToBytes, bytesToHex } from "../utils/hex.js";
 
@@ -179,5 +179,26 @@ export function verifyUtf8(
     return recovered.slice(2).toLowerCase() === address.toLowerCase();
   } catch {
     return false;
+  }
+}
+
+/**
+ * Recover the COMPRESSED secp256k1 public key (hex, no 0x) from a UTF-8 message
+ * signature. Uses the same "antseed-msg-v1:" domain tag as {@link signUtf8} /
+ * {@link verifyUtf8}, so it recovers the same key those sign/verify. Returns
+ * null if the signature is malformed. Callers that need identity assurance MUST
+ * still compare the derived address against the expected peerId.
+ */
+export function recoverUtf8PublicKey(
+  message: string,
+  signatureHex: string
+): string | null {
+  try {
+    const tagged = DOMAIN_MSG + message;
+    const msgBytes = new TextEncoder().encode(tagged);
+    const uncompressed = SigningKey.recoverPublicKey(hashMessage(msgBytes), '0x' + signatureHex);
+    return SigningKey.computePublicKey(uncompressed, true).replace(/^0x/, '');
+  } catch {
+    return null;
   }
 }

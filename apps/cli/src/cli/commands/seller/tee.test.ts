@@ -20,10 +20,13 @@ test('buildSellerTeeWiring (mock platform) advertises /evidence and serves endpo
 
   const expectedPubkey = identity.wallet.signingKey.compressedPublicKey.replace(/^0x/, '')
 
-  // /pubkey echoes the seller's compressed secp256k1 identity pubkey.
+  // /pubkey serves BOTH the secp256k1 channel key and the ed25519 enclave key.
   const pubkeyReply = await wiring.handler('/pubkey')
   assert.equal(pubkeyReply?.status, 200)
-  assert.deepEqual(pubkeyReply?.body, { peerPubkey: expectedPubkey })
+  assert.deepEqual(pubkeyReply?.body, {
+    peerPubkey: expectedPubkey,
+    enclavePubkey: wiring.enclaveSigningPubkey,
+  })
 
   // /.well-known descriptor advertises the scheme + platform.
   const wk = await wiring.handler('/.well-known/antseed-evidence')
@@ -42,12 +45,21 @@ test('evidence bundle binds the buyer nonce to the canonical report_data', async
 
   const reply = await wiring.handler(`/evidence?nonce=${nonce}`)
   assert.equal(reply?.status, 200)
-  const body = reply!.body as { nonce: string; reportDataHex: string; peerPubkey: string }
+  const body = reply!.body as {
+    nonce: string
+    reportDataHex: string
+    peerPubkey: string
+    enclavePubkey: string
+  }
   assert.equal(body.nonce, nonce)
   assert.equal(body.peerPubkey, peerPubkey)
+  assert.equal(body.enclavePubkey, wiring.enclaveSigningPubkey)
 
-  // report_data in the bundle equals the canonical recompute the buyer performs.
-  const expected = Buffer.from(packReportData({ peerPubkey, nonce })).toString('hex')
+  // report_data in the bundle equals the canonical recompute the buyer performs
+  // over BOTH the channel key and the attested ed25519 enclave key.
+  const expected = Buffer.from(
+    packReportData({ peerPubkey, enclavePubkey: wiring.enclaveSigningPubkey, nonce }),
+  ).toString('hex')
   assert.equal(body.reportDataHex, expected)
 })
 

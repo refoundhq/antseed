@@ -746,7 +746,12 @@ export class BuyerProxy {
     const inflight = this._teeInflight.get(key)
     if (inflight) return inflight
 
-    const promise = verifyTeeSeller(peer, this._teeVerify)
+    const promise = verifyTeeSeller(peer, {
+      ...this._teeVerify,
+      // Anchor the seller's served secp256k1 key to its authenticated peerId.
+      authenticatePeerPubkey: (peerId, candidate) =>
+        this._node.getAuthenticatedConnectedPeerPublicKey(peerId, candidate),
+    })
       .then((outcome) => {
         this._teeOutcomes.set(key, { at: Date.now(), outcome })
         if (outcome.isTeeSeller && outcome.result) {

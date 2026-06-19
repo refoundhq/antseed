@@ -4,6 +4,7 @@ import { join } from "node:path";
 
 import type { Identity, IdentityStore } from "./p2p/identity.js";
 import { loadOrCreateIdentity } from "./p2p/identity.js";
+import { authenticatePeerPublicKey } from "./p2p/connection-auth.js";
 import type { PeerId } from "./types/peer.js";
 import type { PeerInfo, PeerVerificationResults, TokenPricingUsdPerMillion } from "./types/peer.js";
 import { peerIdToAddress } from "./types/peer.js";
@@ -362,6 +363,25 @@ export class AntseedNode extends EventEmitter {
   /** Current connection state for a peer if a connection exists, otherwise null. */
   getPeerConnectionState(peerId: PeerId): ConnectionState | null {
     return this._connectionManager?.getConnection(peerId)?.state ?? null;
+  }
+
+  /**
+   * Authenticate a CANDIDATE secp256k1 public key against a peer's authenticated
+   * identity.
+   *
+   * Returns the normalized compressed pubkey (hex, no 0x) iff `candidatePubkeyHex`
+   * cryptographically derives to `peerId` (the peer's EVM address — its
+   * authenticated routing/channel identity), otherwise null. This lets a
+   * consumer obtain the authenticated channel-identity pubkey behind a peer
+   * (e.g. to bind it into TEE attestation report_data) without trusting an
+   * unauthenticated value the remote served: a MITM-substituted key does not
+   * hash to `peerId` and yields null.
+   */
+  getAuthenticatedConnectedPeerPublicKey(
+    peerId: string,
+    candidatePubkeyHex: string,
+  ): string | null {
+    return authenticatePeerPublicKey(peerId, candidatePubkeyHex);
   }
 
   /**

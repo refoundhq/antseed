@@ -9,8 +9,18 @@ export type { CheckResult, CheckStatus, QuoteValidity } from "./checks.js";
 export interface VerifySellerInput {
   /** The attestation quote returned by the seller for our nonce. */
   quote: AttestationQuote;
-  /** Hex public key of the peer we actually connected to (P2P channel identity). */
+  /**
+   * Hex secp256k1 pubkey of the peer we actually connected to (P2P channel
+   * identity). Must be the cryptographically-authenticated key — derived from
+   * the connected peer's authenticated peerId, NOT a value the seller can lie
+   * about. Bound into report_data check #3.
+   */
   connectedPeerPubkey: string;
+  /**
+   * Hex ed25519 enclave evidence-signing pubkey served at /pubkey. Trusted only
+   * because it is bound into report_data here: a substituted key fails check #3.
+   */
+  enclavePubkey: string;
   /** Hex nonce we supplied in the /evidence request (replay defense). */
   nonce: string;
   /** Loaded, signature-verified approved-set registry. */
@@ -51,10 +61,11 @@ export const NOT_PROVEN: string[] = [
  * Verify a TEE seller against the three load-bearing checks for requirement #1:
  *   1. Quote valid — genuine TEE, debug-off, TCB-current, nonce-fresh.
  *   2. quote.measurement ∈ approvedSet (active).
- *   3. quote.reportData == packReportData({ peerPubkey: connectedPeer, nonce }).
+ *   3. quote.reportData ==
+ *        packReportData({ peerPubkey: connectedPeer, enclavePubkey, nonce }).
  */
 export function verifySeller(input: VerifySellerInput): VerifySellerResult {
-  const { quote, connectedPeerPubkey, nonce, registry, allowMock = false } = input;
+  const { quote, connectedPeerPubkey, enclavePubkey, nonce, registry, allowMock = false } = input;
   const checks: CheckResult[] = [];
 
   // --- CHECK 1: quote validity (genuine, debug-off, TCB-current, fresh) ---
@@ -118,24 +129,28 @@ export function verifySeller(input: VerifySellerInput): VerifySellerResult {
         : `measurement ${shorten(measurement)} is not in the approved set (or deprecated)`,
   });
 
-  // --- CHECK 3: report_data binds peerPubkey + nonce ---
+  // --- CHECK 3: report_data binds peerPubkey + enclavePubkey + nonce ---
   const expected = recomputeReportData({
     peerPubkey: connectedPeerPubkey,
+    enclavePubkey,
     nonce,
   });
-  // Bind to the connected channel via the report_data recompute: a quote whose
-  // report_data does not match our connected peer's key + our nonce fails here.
+  // Bind to the connected channel AND the evidence-signing key via the
+  // report_data recompute: a quote whose report_data does not match our
+  // connected peer's secp256k1 key + the served ed25519 enclave key + our nonce
+  // fails here. This is what makes a substituted enclave key (MITM) or a
+  // substituted peer pubkey detectable.
   const boundOk =
     validity.reportData.length === 64 &&
     reportDataEquals(validity.reportData, expected);
   checks.push({
     id: 3,
-    title: "report_data binds connected peer pubkey + buyer nonce",
+    title: "report_data binds connected peer pubkey + enclave pubkey + buyer nonce",
     status: boundOk ? "pass" : "fail",
     detail: boundOk
-      ? "report_data == packReportData({ connected peer pubkey, our nonce })"
-      : "report_data does not match the recompute over the connected peer key + nonce " +
-        "(channel-bind / nonce-freshness failure)",
+      ? "report_data == packReportData({ connected peer pubkey, enclave pubkey, our nonce })"
+      : "report_data does not match the recompute over the connected peer key + " +
+        "enclave key + nonce (channel-bind / enclave-key / nonce-freshness failure)",
   });
 
   const allPass = checks.every((c) => c.status === "pass" || c.status === "warn");

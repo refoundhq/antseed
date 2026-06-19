@@ -24,6 +24,14 @@ export interface TeeVerifyOptions {
   allowMock?: boolean
   /** Per-fetch timeout (ms). Default 4000. */
   fetchTimeoutMs?: number
+  /**
+   * Authenticate a candidate secp256k1 peer pubkey against the connected peer's
+   * authenticated peerId. Supplied by the buyer-proxy from the node accessor
+   * (`getAuthenticatedConnectedPeerPublicKey`). Returns the normalized pubkey if
+   * it derives to the peer's authenticated identity, else null. When omitted,
+   * verification cannot anchor the channel identity and fails closed.
+   */
+  authenticatePeerPubkey?: (peerId: string, candidatePubkeyHex: string) => string | null
 }
 
 export interface TeeVerificationOutcome {
@@ -50,6 +58,7 @@ interface EvidenceBundle {
   scheme: string
   platform: string
   peerPubkey: string
+  enclavePubkey: string
   nonce: string
   quote: string
   reportDataHex: string
@@ -152,13 +161,17 @@ function quoteFromBundle(bundle: EvidenceBundle): AttestationQuote {
  * `/evidence?nonce=` query. The verifier re-derives report_data over this exact
  * nonce (check #3), so a replayed/stale quote fails.
  *
- * Connected-peer-pubkey: the AntSeed node exposes only the peer's EVM address
- * (peerId), not its secp256k1/enclave pubkey. The authoritative enclave key is
- * served by the seller at `/pubkey` on the SAME connected `publicAddress`
- * host:port used for routing. We fetch it over that connected endpoint and bind
- * it as `connectedPeerPubkey`, anchoring the quote's report_data to the peer we
- * actually reach. (When a node-level connected-pubkey accessor lands, swap the
- * source here.)
+ * Two keys are bound into report_data and re-derived by the verifier:
+ *
+ *  - connectedPeerPubkey (secp256k1): the seller's channel-identity key. It is
+ *    served at `/pubkey`, but we do NOT trust the served value blindly — we run
+ *    it through `opts.authenticatePeerPubkey`, which confirms it derives to the
+ *    connected peer's authenticated `peerId` (the node's
+ *    `getAuthenticatedConnectedPeerPublicKey`). A MITM-substituted key fails
+ *    derivation and verification aborts.
+ *  - enclavePubkey (ed25519): the in-enclave evidence-signing key, also served
+ *    at `/pubkey`. It is trusted ONLY because it is bound into report_data: if
+ *    the seller served a different key than the enclave attested, check #3 fails.
  */
 export async function verifyTeeSeller(
   peer: PeerInfo,
@@ -194,14 +207,31 @@ export async function verifyTeeSeller(
   const evidencePath = typeof descriptor.evidencePath === 'string' ? descriptor.evidencePath : '/evidence'
   const pubkeyPath = typeof descriptor.pubkeyPath === 'string' ? descriptor.pubkeyPath : PUBKEY_PATH
 
-  // 2. Independently fetch the connected peer's enclave pubkey.
+  // 2. Fetch the seller's two keys, then AUTHENTICATE the secp256k1 channel key
+  //    against the connected peer's authenticated identity (peerId). The ed25519
+  //    enclave key is taken as-is here — it is attested via report_data (check #3).
   let connectedPeerPubkey: string
+  let enclavePubkey: string
   try {
-    const body = await fetchJson<{ peerPubkey?: string }>(baseUrl + pubkeyPath, fetchTimeoutMs)
+    const body = await fetchJson<{ peerPubkey?: string; enclavePubkey?: string }>(
+      baseUrl + pubkeyPath,
+      fetchTimeoutMs,
+    )
     if (!body.peerPubkey || typeof body.peerPubkey !== 'string') {
       return fail(`${pubkeyPath} did not return a peerPubkey`)
     }
-    connectedPeerPubkey = body.peerPubkey
+    if (!body.enclavePubkey || typeof body.enclavePubkey !== 'string') {
+      return fail(`${pubkeyPath} did not return an enclavePubkey`)
+    }
+    if (!opts.authenticatePeerPubkey) {
+      return fail('no authenticatePeerPubkey resolver available — cannot anchor channel identity')
+    }
+    const authenticated = opts.authenticatePeerPubkey(peer.peerId, body.peerPubkey)
+    if (!authenticated) {
+      return fail(`${pubkeyPath} peerPubkey does not derive to the connected peer's authenticated identity`)
+    }
+    connectedPeerPubkey = authenticated
+    enclavePubkey = body.enclavePubkey
   } catch (err) {
     return fail(`failed to fetch ${pubkeyPath}: ${errText(err)}`)
   }
@@ -230,6 +260,7 @@ export async function verifyTeeSeller(
   const result = verifySeller({
     quote: quoteFromBundle(bundle),
     connectedPeerPubkey,
+    enclavePubkey,
     nonce,
     registry,
     allowMock: opts.allowMock ?? false,

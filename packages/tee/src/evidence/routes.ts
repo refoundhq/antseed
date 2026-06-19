@@ -9,8 +9,10 @@ import type { AttestationProvider, AttestationQuote } from "../attestation/types
 export interface EvidenceContext {
   /** The attestation provider that issues quotes (tdx / mock). */
   attestation: AttestationProvider;
-  /** Hex public key of this enclave/peer (the same key that identifies the channel). */
+  /** Hex secp256k1 AntSeed peer public key (authenticates the P2P channel). */
   peerPubkey: string;
+  /** Hex ed25519 in-enclave evidence-signing public key (served at /pubkey, bound into report_data). */
+  enclavePubkey: string;
   /** Optional bundle digest D to bind (forward-compat; omitted in MVP). */
   bundleDigest?: string;
   /** Optional effective-config hash to bind (forward-compat; omitted in MVP). */
@@ -29,8 +31,10 @@ export interface EvidenceDescriptor {
 export interface EvidenceBundle {
   scheme: "antseed-tee/v1";
   platform: string;
-  /** Hex peer/enclave public key. */
+  /** Hex secp256k1 AntSeed peer public key. */
   peerPubkey: string;
+  /** Hex ed25519 in-enclave evidence-signing public key (bound into report_data). */
+  enclavePubkey: string;
   /** Hex bundle digest D, if bound. */
   bundleDigest?: string;
   /** Hex config hash, if bound. */
@@ -45,10 +49,18 @@ export interface EvidenceBundle {
   timestamp: number;
 }
 
+/** Response body for GET /pubkey: both the channel and evidence-signing keys. */
+export interface PubkeyReply {
+  /** Hex secp256k1 AntSeed peer public key (channel identity). */
+  peerPubkey: string;
+  /** Hex ed25519 in-enclave evidence-signing public key (bound into report_data). */
+  enclavePubkey: string;
+}
+
 export interface EvidenceReply {
   status: number;
   /** `application/json` body to write. */
-  body: EvidenceBundle | EvidenceDescriptor | { peerPubkey: string } | { error: string };
+  body: EvidenceBundle | EvidenceDescriptor | PubkeyReply | { error: string };
 }
 
 const EVIDENCE_PATH = "/evidence";
@@ -70,7 +82,10 @@ export async function handleEvidenceRequest(
   const { pathname, query } = splitUrl(url);
 
   if (pathname === PUBKEY_PATH) {
-    return { status: 200, body: { peerPubkey: ctx.peerPubkey } };
+    return {
+      status: 200,
+      body: { peerPubkey: ctx.peerPubkey, enclavePubkey: ctx.enclavePubkey },
+    };
   }
 
   if (pathname === WELLKNOWN_PATH) {
@@ -101,6 +116,7 @@ async function buildEvidence(
 ): Promise<EvidenceBundle> {
   const quote: AttestationQuote = await ctx.attestation.generateQuote({
     peerPubkey: ctx.peerPubkey,
+    enclavePubkey: ctx.enclavePubkey,
     nonce,
     bundleDigest: ctx.bundleDigest,
     configHash: ctx.configHash,
@@ -110,6 +126,7 @@ async function buildEvidence(
     scheme: "antseed-tee/v1",
     platform: quote.platform,
     peerPubkey: ctx.peerPubkey,
+    enclavePubkey: ctx.enclavePubkey,
     nonce,
     quote: toBase64(quote.quote),
     reportDataHex: toHex(quote.reportData),

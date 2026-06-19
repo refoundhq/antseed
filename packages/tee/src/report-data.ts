@@ -11,21 +11,27 @@ import type { ReportDataBindings } from "./attestation/types.js";
  *
  * ## Layout (domain-separated canonical byte concatenation -> SHA-512 -> 64 bytes)
  *
- *   report_data[0:64] = SHA-512( CTX || peerPubkey || nonce || bundleDigest || configHash )
+ *   report_data[0:64] =
+ *     SHA-512( CTX || peerPubkey || enclavePubkey || nonce || bundleDigest || configHash )
  *
- *   CTX          = ascii "antseed-tee/v1\0"   (fixed domain separation tag)
- *   peerPubkey   = raw bytes of the hex-encoded peer/enclave public key
- *   nonce        = raw bytes of the hex-encoded buyer-supplied nonce
- *   bundleDigest = raw bytes of the hex-encoded seller-bundle digest (optional)
- *   configHash   = raw bytes of the hex-encoded effective-config hash (optional)
+ *   CTX           = ascii "antseed-tee/v1\0"  (fixed domain separation tag)
+ *   peerPubkey    = raw bytes of the hex-encoded secp256k1 AntSeed peer key
+ *   enclavePubkey = raw bytes of the hex-encoded ed25519 enclave evidence key
+ *   nonce         = raw bytes of the hex-encoded buyer-supplied nonce
+ *   bundleDigest  = raw bytes of the hex-encoded seller-bundle digest (optional)
+ *   configHash    = raw bytes of the hex-encoded effective-config hash (optional)
+ *
+ * Binding BOTH keys is the correctness fix: `peerPubkey` anchors the quote to
+ * the cryptographically-authenticated P2P channel identity, while
+ * `enclavePubkey` attests the ed25519 evidence-signing key served at `/pubkey`
+ * (otherwise unattested and MITM-substitutable).
  *
  * Each field is length-prefixed with a single big-endian u32 byte length so the
  * concatenation is unambiguous even though field widths can vary. Optional
  * fields, when absent, are encoded as a zero-length segment — present-but-empty
  * and absent are therefore indistinguishable by design (both contribute the same
- * length prefix), which keeps MVP quotes (peerPubkey + nonce only) stable while
- * leaving room to bind `bundleDigest` / `configHash` for requirement #4 and the
- * base/bundle split with no change to the layout rule.
+ * length prefix), which leaves room to bind `bundleDigest` / `configHash` for
+ * requirement #4 and the base/bundle split with no change to the layout rule.
  *
  * SHA-512 emits exactly 64 bytes, so the field is fully consumed with zero
  * padding.
@@ -84,12 +90,13 @@ function concatSegments(segments: Uint8Array[]): Uint8Array {
 /**
  * Pack the bindings into the canonical 64-byte report_data value.
  *
- * For the MVP only `peerPubkey` + `nonce` are populated; `bundleDigest` and
- * `configHash` are forward-compat (requirement #4 / base-bundle split) and
- * default to empty.
+ * Both `peerPubkey` (secp256k1 channel identity) and `enclavePubkey` (ed25519
+ * evidence-signing key) are bound. `bundleDigest` and `configHash` are
+ * forward-compat (requirement #4 / base-bundle split) and default to empty.
  */
 export function packReportData(bindings: ReportDataBindings): Uint8Array {
   const peerPubkey = hexToBytes("peerPubkey", bindings.peerPubkey);
+  const enclavePubkey = hexToBytes("enclavePubkey", bindings.enclavePubkey);
   const nonce = hexToBytes("nonce", bindings.nonce);
   const bundleDigest = hexToBytes("bundleDigest", bindings.bundleDigest ?? "");
   const configHash = hexToBytes("configHash", bindings.configHash ?? "");
@@ -98,6 +105,8 @@ export function packReportData(bindings: ReportDataBindings): Uint8Array {
     REPORT_DATA_CTX,
     lengthPrefix(peerPubkey.length),
     peerPubkey,
+    lengthPrefix(enclavePubkey.length),
+    enclavePubkey,
     lengthPrefix(nonce.length),
     nonce,
     lengthPrefix(bundleDigest.length),

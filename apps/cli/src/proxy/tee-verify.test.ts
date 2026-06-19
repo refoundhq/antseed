@@ -41,18 +41,23 @@ function emptyRegistryFile(): { set: ValidSet } {
 }
 
 const SELLER_PUBKEY = 'aa'.repeat(33) // 66-hex compressed-key-shaped placeholder
+const SELLER_ENCLAVE_PUBKEY = 'ed'.repeat(44) // ed25519 spki/der-shaped placeholder
 
 /**
  * Spin up a mock seller HTTP server serving the real TEE evidence routes via
- * @antseed/tee. `tamper` mutates the bundle to simulate a failed seller.
+ * @antseed/tee. `tamper` mutates the bundle to simulate a failed seller;
+ * `pubkeyTamper` mutates the /pubkey response (e.g. a MITM-swapped enclave key).
  */
 async function startMockSeller(opts: {
   pubkey?: string
+  enclavePubkey?: string
   tamper?: (body: Record<string, unknown>) => void
+  pubkeyTamper?: (body: Record<string, unknown>) => void
 }): Promise<{ server: Server; baseUrl: string }> {
   const ctx: EvidenceContext = {
     attestation: new MockAttestation(),
     peerPubkey: opts.pubkey ?? SELLER_PUBKEY,
+    enclavePubkey: opts.enclavePubkey ?? SELLER_ENCLAVE_PUBKEY,
   }
   const server = createServer((req, res) => {
     void (async () => {
@@ -65,6 +70,9 @@ async function startMockSeller(opts: {
       const body = reply.body as Record<string, unknown>
       if (opts.tamper && (req.url ?? '').startsWith('/evidence')) {
         opts.tamper(body)
+      }
+      if (opts.pubkeyTamper && (req.url ?? '') === '/pubkey') {
+        opts.pubkeyTamper(body)
       }
       res.writeHead(reply.status, { 'content-type': 'application/json' })
       res.end(JSON.stringify(body))
@@ -101,6 +109,10 @@ const baseOpts = (over: Partial<TeeVerifyOptions>): TeeVerifyOptions => ({
   requireTee: false,
   allowMock: true,
   fetchTimeoutMs: 2000,
+  // Default resolver: treat the seller's served secp256k1 key as authenticated.
+  // (The real resolver derives the key to the peerId; tests that exercise the
+  // failure path override this with a rejecting resolver.)
+  authenticatePeerPubkey: (_peerId, candidate) => candidate,
   ...over,
 })
 
@@ -144,6 +156,58 @@ test('tampered seller is rejected when --require-tee', async () => {
     assert.notEqual(outcome.result?.verdict, 'verified')
     assert.equal(outcome.allowed, false, 'requireTee refuses a failed seller')
     assert.match(outcome.reason ?? '', /require-tee/)
+  } finally {
+    server.close()
+  }
+})
+
+test('substituted enclave key (/pubkey MITM) fails check #3 when --require-tee', async () => {
+  // The quote attests the seller's real enclave key, but /pubkey serves a
+  // DIFFERENT ed25519 key. The buyer recomputes report_data over the served key,
+  // so check #3 (which binds the enclave key) fails — exactly the MITM the fix
+  // closes.
+  const { server, baseUrl } = await startMockSeller({
+    pubkeyTamper: (body) => {
+      body.enclavePubkey = 'ee'.repeat(44)
+    },
+  })
+  const reg = approvedRegistryFile()
+  const regFile = await writeTmpRegistry(reg.set)
+  try {
+    const outcome = await verifyTeeSeller(
+      teePeer(baseUrl),
+      baseOpts({ requireTee: true, registryUrl: regFile, pinnedRegistrySigner: reg.set.signer }),
+    )
+    assert.equal(outcome.isTeeSeller, true)
+    assert.notEqual(outcome.result?.verdict, 'verified')
+    assert.equal(outcome.result?.checks.find((c) => c.id === 3)?.status, 'fail')
+    assert.equal(outcome.allowed, false)
+  } finally {
+    server.close()
+  }
+})
+
+test('peer pubkey that fails authentication is rejected when --require-tee', async () => {
+  // The resolver (node accessor) returns null: the served secp256k1 key does not
+  // derive to the connected peer's authenticated peerId (a MITM-substituted
+  // channel key). Verification aborts before any quote check.
+  const { server, baseUrl } = await startMockSeller({})
+  const reg = approvedRegistryFile()
+  const regFile = await writeTmpRegistry(reg.set)
+  try {
+    const outcome = await verifyTeeSeller(
+      teePeer(baseUrl),
+      baseOpts({
+        requireTee: true,
+        registryUrl: regFile,
+        pinnedRegistrySigner: reg.set.signer,
+        authenticatePeerPubkey: () => null,
+      }),
+    )
+    assert.equal(outcome.isTeeSeller, true)
+    assert.equal(outcome.result, null)
+    assert.equal(outcome.allowed, false)
+    assert.match(outcome.reason ?? '', /authenticated identity/)
   } finally {
     server.close()
   }

@@ -11,12 +11,18 @@ export type AttestationPlatform = "tdx" | "sev-snp" | "mock";
  * (see {@link ../report-data.ts}). All values are hex strings (no `0x`
  * required; an optional `0x` prefix is tolerated).
  *
- * MVP populates only `peerPubkey` + `nonce`. `bundleDigest` / `configHash` are
- * forward-compat for requirement #4 and the base/bundle measurement split.
+ * Two distinct keys are bound: the secp256k1 AntSeed peer identity key (which
+ * authenticates the P2P channel) AND the ed25519 enclave evidence-signing key
+ * (served at `/pubkey`). Binding both anchors the quote to the connection we
+ * actually reach AND attests the evidence-signing key so it cannot be
+ * substituted by a MITM. `bundleDigest` / `configHash` are forward-compat for
+ * requirement #4 and the base/bundle measurement split.
  */
 export interface ReportDataBindings {
-  /** Hex-encoded peer/enclave public key (the same key that identifies the P2P channel). */
+  /** Hex-encoded secp256k1 AntSeed peer public key (authenticates the P2P channel). */
   peerPubkey: string;
+  /** Hex-encoded ed25519 in-enclave evidence-signing public key (served at /pubkey). */
+  enclavePubkey: string;
   /** Hex-encoded buyer-supplied nonce for this verification round (replay defense). */
   nonce: string;
   /** Optional hex-encoded seller-bundle content digest D. Forward-compat. */
