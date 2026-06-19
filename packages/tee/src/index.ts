@@ -54,8 +54,8 @@ export type {
   EvidenceDescriptor,
   EvidenceReply,
 } from "./evidence/routes.js";
-export { createEvidenceHandler } from "./evidence/serving.js";
-export type { EvidenceServingOptions } from "./evidence/serving.js";
+export { createEvidenceHandler, createLauncherEvidenceHandler } from "./evidence/serving.js";
+export type { EvidenceServingOptions, ServeReply } from "./evidence/serving.js";
 export {
   signEvidenceDocument,
   verifyEvidenceSignature,

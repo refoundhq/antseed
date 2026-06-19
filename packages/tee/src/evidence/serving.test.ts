@@ -1,5 +1,8 @@
 import { test, expect } from "vitest";
-import { createEvidenceHandler } from "./serving.js";
+import { generateKeyPairSync } from "node:crypto";
+import { createEvidenceHandler, createLauncherEvidenceHandler } from "./serving.js";
+import { verifyEvidenceSignature, type EvidenceDocument } from "./document.js";
+import { MockAttestation } from "../attestation/index.js";
 import type { EvidenceContext } from "./routes.js";
 import type { AttestationProvider, AttestationQuote } from "../attestation/types.js";
 
@@ -83,4 +86,28 @@ test("bounded concurrency: a second in-flight quote is rejected with 503", async
 
   release();
   expect((await first)?.status).toBe(200);
+});
+
+test("launcher handler: /evidence serves an enclave-signed doc bound to the nonce; /pubkey returns the keys", async () => {
+  const { publicKey, privateKey } = generateKeyPairSync("ed25519");
+  const enclavePubkey = (publicKey.export({ type: "spki", format: "der" }) as Buffer).toString("hex");
+  const h = createLauncherEvidenceHandler({
+    platform: "mock",
+    attestation: new MockAttestation(),
+    claims: ["hardware-genuine", "channel-key-bound"],
+    peerPubkey: "aa".repeat(33),
+    enclavePubkey,
+    enclavePrivateKey: privateKey,
+    channelPubkey: "cc".repeat(32),
+  });
+
+  const pub = await h("/pubkey");
+  expect(pub?.status).toBe(200);
+  expect((pub!.body as Record<string, unknown>).channelPubkey).toBe("cc".repeat(32));
+
+  const ev = await h("/evidence?nonce=abcd");
+  const doc = ev!.body as EvidenceDocument;
+  expect(doc.schema).toBe("antseed-tee/launcher");
+  expect(doc.nonce).toBe("abcd");
+  expect(verifyEvidenceSignature(doc)).toBe(true);
 });
