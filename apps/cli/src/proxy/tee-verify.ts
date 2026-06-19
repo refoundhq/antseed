@@ -11,6 +11,7 @@ import { RegistryClient } from '@antseed/tee/registry'
 import type { AttestationPlatform, AttestationQuote } from '@antseed/tee/attestation'
 import {
   verifyLauncherEvidence,
+  claimInfo,
   EVIDENCE_SCHEMA_LAUNCHER,
   type LauncherVerifyResult,
   type EvidenceDocument,
@@ -439,7 +440,8 @@ export function formatLauncherVerification(peerId: string, result: LauncherVerif
   for (const c of result.claims) {
     const mark =
       c.verdict === 'verified' ? '✓' : c.verdict === 'not-claimed' ? '·' : c.verdict === 'not-proven' ? '?' : '✗'
-    lines.push(`  ${mark} ${c.claim}: ${c.verdict} — ${c.detail}`)
+    // Plain-English label for the buyer, with the stable claim id in parens.
+    lines.push(`  ${mark} ${claimInfo(c.claim).label} (${c.claim}): ${c.verdict} — ${c.detail}`)
   }
   if (result.unmetRequired.length) lines.push(`  unmet required claims: ${result.unmetRequired.join(', ')}`)
   lines.push('  notProven:')

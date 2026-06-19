@@ -23,7 +23,12 @@ import {
   type ImaEntry,
 } from "../evidence/rtmr.js";
 import type { AttestationPlatform } from "../attestation/types.js";
-import { verifyLauncherEvidence } from "./launcher-verify.js";
+import {
+  verifyLauncherEvidence,
+  registerClaimEvaluator,
+  claimInfo,
+  CLAIM_INFO,
+} from "./launcher-verify.js";
 import { defaultProductionPolicy, type VerificationPolicy } from "./policy.js";
 
 const PEER = "aa".repeat(33);
@@ -344,4 +349,40 @@ test('measured claims fall to not-proven when the launcher measurement is unappr
   reg2.loadFromObject(set);
   const r = verifyLauncherEvidence({ evidence: doc, connectedPeerPubkey: PEER, nonce: NONCE, registry: reg2, policy: devPolicy() });
   expect(claim(r, 'egress-allowlisted').verdict).toBe('not-proven');
+});
+
+// ---- pluggable claim registry + user-facing labels ----
+
+test("pluggable: a registered custom claim is evaluated and can gate routing", async () => {
+  registerClaimEvaluator("x-fresh-build", (c) =>
+    !c.doc.claims.includes("x-fresh-build")
+      ? { claim: "x-fresh-build", claimed: false, verdict: "not-claimed", detail: "not attested" }
+      : c.docOk
+        ? { claim: "x-fresh-build", claimed: true, verdict: "verified", detail: "custom check passed" }
+        : { claim: "x-fresh-build", claimed: true, verdict: "not-proven", detail: "substrate failed" },
+  );
+  const { doc, registry } = await scenario({ claims: ["hardware-genuine", "x-fresh-build"], channelPubkey: null });
+  const r = verifyLauncherEvidence({
+    evidence: doc, connectedPeerPubkey: PEER, nonce: NONCE, registry,
+    policy: devPolicy({ requiredClaims: ["x-fresh-build"] }),
+  });
+  expect(r.claims.find((c) => c.claim === "x-fresh-build")!.verdict).toBe("verified");
+  expect(r.verdict).toBe("verified");
+});
+
+test("a required claim with NO registered evaluator fails closed", async () => {
+  const { doc, registry } = await scenario({ claims: ["hardware-genuine"], channelPubkey: null });
+  const r = verifyLauncherEvidence({
+    evidence: doc, connectedPeerPubkey: PEER, nonce: NONCE, registry,
+    policy: devPolicy({ requiredClaims: ["x-unknown-claim"] }),
+  });
+  expect(r.claims.find((c) => c.claim === "x-unknown-claim")!.verdict).toBe("not-claimed");
+  expect(r.verdict).toBe("failed");
+});
+
+test("claimInfo gives a plain-English label for known claims and falls back for custom", () => {
+  expect(claimInfo("egress-allowlisted").label).toMatch(/egress/i);
+  expect(claimInfo("no-buyer-data-at-rest").blurb).toMatch(/disk|persistent/i);
+  expect(claimInfo("x-totally-custom").label).toBe("x-totally-custom"); // fallback to the id
+  expect(CLAIM_INFO["hardware-genuine"]?.label).toBeTruthy();
 });

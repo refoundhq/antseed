@@ -20,6 +20,18 @@ import {
   imaLogToEvents,
   RTMR_EVENT,
 } from "../evidence/rtmr.js";
+import {
+  registerClaimEvaluator,
+  claimEvaluators,
+  type ClaimResult,
+  type ClaimContext,
+} from "./claims.js";
+
+// ClaimResult / ClaimVerdict / ClaimContext + the pluggable evaluator registry are
+// defined in ./claims.ts; re-exported here for back-compat.
+export type { ClaimResult, ClaimVerdict, ClaimContext, ClaimEvaluator } from "./claims.js";
+export { registerClaimEvaluator, claimEvaluators, claimInfo, CLAIM_INFO } from "./claims.js";
+export type { ClaimInfo } from "./claims.js";
 
 /**
  * The BuyerPolicyVerifier for the launcher evidence schema (ARCHITECTURE.md §6).
@@ -32,16 +44,6 @@ import {
  * nonce + peer + the enclave signature over the document verifies). Otherwise the
  * field is unrooted and the claim is `not-proven`, never silently passed.
  */
-
-export type ClaimVerdict = "verified" | "failed" | "not-proven" | "not-claimed";
-
-export interface ClaimResult {
-  claim: ClaimId;
-  /** Did the seller attest this claim? */
-  claimed: boolean;
-  verdict: ClaimVerdict;
-  detail: string;
-}
 
 export interface LauncherVerifyInput {
   evidence: EvidenceDocument;
@@ -115,19 +117,34 @@ export function verifyLauncherEvidence(input: LauncherVerifyInput): LauncherVeri
   const set = registry.getValidSet();
   const entry = registry.findApprovedEntry(doc.platform, g.measurement);
 
-  const claims: ClaimResult[] = [
-    evalHardwareGenuine(doc, policy, g, isMock, bindingOk, hardwareReal),
-    evalChannelKey(doc, docOk),
-    evalApprovedLauncher(doc, registry, docOk, g.measurement),
-    ...evalBinary(doc, set ? registry : undefined, policy, docOk, set),
-    evalStorage(doc, entry, policy, docOk),
-    evalNetwork(doc, entry, policy, docOk),
-    evalCapability("no-operator-shell", doc, entry, docOk),
-    evalMemEncryption(doc, g, isMock, docOk),
-    evalEgressAllowlisted(doc, registry, policy, docOk, g.measurement),
-    evalNoDataAtRest(doc, registry, policy, docOk, g.measurement),
-    evalKnownBinariesOnly(doc, registry, docOk, g.measurement),
-  ];
+  // Evaluate every registered claim through the pluggable registry. The report
+  // covers all registered claims PLUS anything the seller attested or the buyer
+  // required, so an unknown/custom claim surfaces (fail-closed if unverifiable).
+  const ctx: ClaimContext = {
+    doc,
+    policy,
+    registry,
+    set,
+    entry,
+    g,
+    measurement: g.measurement,
+    isMock,
+    docOk,
+    bindingOk,
+    hardwareReal,
+  };
+  const ids = new Set<string>([
+    ...claimEvaluators().keys(),
+    ...doc.claims,
+    ...(policy.requiredClaims ?? []),
+  ]);
+  const claims: ClaimResult[] = [...ids].map((id) => {
+    const ev = claimEvaluators().get(id);
+    if (ev) return ev(ctx);
+    return doc.claims.includes(id)
+      ? { claim: id, claimed: true, verdict: "not-proven", detail: "no verifier is registered for this claim — cannot evaluate" }
+      : { claim: id, claimed: false, verdict: "not-claimed", detail: "not attested by the seller" };
+  });
 
   // requiredCapabilities fold into the report via no-operator-shell + storage/network;
   // here we additionally fail-closed if a required capability isn't attested.
@@ -487,3 +504,36 @@ function base64ToBytes(b64: string): Uint8Array {
   const buf = Buffer.from(b64, "base64");
   return new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
 }
+
+// ---- register the built-in claim evaluators (pluggable; see ./claims.ts) ----
+// Adapters thread the shared ClaimContext into each evaluator. Registration order is
+// the report order. A new AntSeed version (or a third party) adds a claim by calling
+// registerClaimEvaluator(...) — no change to verifyLauncherEvidence required.
+registerClaimEvaluator("hardware-genuine", (c) =>
+  evalHardwareGenuine(c.doc, c.policy, c.g, c.isMock, c.bindingOk, c.hardwareReal),
+);
+registerClaimEvaluator("channel-key-bound", (c) => evalChannelKey(c.doc, c.docOk));
+registerClaimEvaluator("approved-launcher", (c) =>
+  evalApprovedLauncher(c.doc, c.registry, c.docOk, c.measurement),
+);
+registerClaimEvaluator("approved-binary", (c) =>
+  evalBinary(c.doc, c.set ? c.registry : undefined, c.policy, c.docOk, c.set)[0],
+);
+registerClaimEvaluator("binary-active", (c) =>
+  evalBinary(c.doc, c.set ? c.registry : undefined, c.policy, c.docOk, c.set)[1],
+);
+registerClaimEvaluator("storage-policy", (c) => evalStorage(c.doc, c.entry, c.policy, c.docOk));
+registerClaimEvaluator("network-policy", (c) => evalNetwork(c.doc, c.entry, c.policy, c.docOk));
+registerClaimEvaluator("no-operator-shell", (c) =>
+  evalCapability("no-operator-shell", c.doc, c.entry, c.docOk),
+);
+registerClaimEvaluator("mem-encryption", (c) => evalMemEncryption(c.doc, c.g, c.isMock, c.docOk));
+registerClaimEvaluator("egress-allowlisted", (c) =>
+  evalEgressAllowlisted(c.doc, c.registry, c.policy, c.docOk, c.measurement),
+);
+registerClaimEvaluator("no-buyer-data-at-rest", (c) =>
+  evalNoDataAtRest(c.doc, c.registry, c.policy, c.docOk, c.measurement),
+);
+registerClaimEvaluator("known-binaries-only", (c) =>
+  evalKnownBinariesOnly(c.doc, c.registry, c.docOk, c.measurement),
+);

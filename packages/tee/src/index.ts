@@ -146,12 +146,21 @@ export {
 export type { QuoteGenuineness, QuoteVerifierFn } from "./verifier/quote-verifiers.js";
 
 // Launcher claims verifier — the à-la-carte BuyerPolicyVerifier (ARCHITECTURE.md §6).
-export { verifyLauncherEvidence } from "./verifier/launcher-verify.js";
+export {
+  verifyLauncherEvidence,
+  registerClaimEvaluator,
+  claimEvaluators,
+  claimInfo,
+  CLAIM_INFO,
+} from "./verifier/launcher-verify.js";
 export type {
   LauncherVerifyInput,
   LauncherVerifyResult,
   ClaimResult,
   ClaimVerdict,
+  ClaimContext,
+  ClaimEvaluator,
+  ClaimInfo,
 } from "./verifier/launcher-verify.js";
 
 // Low-level DCAP entry points, surfaced for registry-seeding tooling that must

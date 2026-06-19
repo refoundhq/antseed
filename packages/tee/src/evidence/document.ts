@@ -39,7 +39,10 @@ export type ClaimId =
   // --- MEASURED specific attestations (RTMR-anchored; Tier A — see COMPLIANCE.md) ---
   | "egress-allowlisted"
   | "no-buyer-data-at-rest"
-  | "known-binaries-only";
+  | "known-binaries-only"
+  // Open union: custom claim ids are permitted (pluggable evaluators) while the
+  // known literals above still autocomplete.
+  | (string & {});
 
 export const ALL_CLAIMS: readonly ClaimId[] = [
   "hardware-genuine",
