@@ -1147,6 +1147,28 @@ export class BuyerProxy {
       hasForcedRefresh = true
       log(`Forcing peer refresh before routing after ${reason}.`)
       discoveredPeers = await this._getPeers({ forceRefresh: true })
+      // If the wildcard subnet sweep missed the pinned peer, resolve it with a
+      // TARGETED per-peer DHT lookup (antseed:peer:<peerId> — one infohash). The
+      // wildcard sweep is unreliable from NAT'd buyers, but the seller announces
+      // on its per-peer topic, so this deterministically finds a known peer.
+      if (!discoveredPeers.some((p) => p.peerId.toLowerCase() === explicitPeerId)) {
+        const findPeerFn = (this._node as AntseedNode & {
+          findPeer?: (id: string) => Promise<PeerInfo | null>
+        }).findPeer
+        if (typeof findPeerFn === 'function') {
+          try {
+            const found = await findPeerFn.call(this._node, explicitPeerId)
+            if (found) {
+              log(`Resolved pinned peer ${explicitPeerId.slice(0, 12)}... via targeted per-peer DHT topic`)
+              const others = this._cachedPeers.filter((p) => p.peerId.toLowerCase() !== explicitPeerId)
+              this._replacePeers([found, ...others])
+              discoveredPeers = [found, ...discoveredPeers.filter((p) => p.peerId.toLowerCase() !== explicitPeerId)]
+            }
+          } catch (err) {
+            log(`Targeted findPeer for pinned peer failed: ${err instanceof Error ? err.message : String(err)}`)
+          }
+        }
+      }
       ;({
         candidatePeers: routingPeers,
         routePlanByPeerId: routingPlans,
