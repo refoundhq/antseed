@@ -1,4 +1,5 @@
 import { generateKeyPairSync } from 'node:crypto'
+import { readFileSync } from 'node:fs'
 import {
   resolveSellerAttestation,
   createEvidenceHandler,
@@ -7,6 +8,10 @@ import {
   type EvidenceContext,
   type LauncherEvidenceContext,
   type ClaimId,
+  type RtmrEvent,
+  type ImaEntry,
+  type NetworkPolicy,
+  type StoragePolicy,
 } from '@antseed/tee'
 import type { Identity } from '@antseed/node'
 import type { TeeSellerConfig } from '../../../config/types.js'
@@ -50,6 +55,31 @@ function binaryFromEnv(): { digest: string; version: string; tag: string } | und
     digest,
     version: process.env.ANTSEED_BINARY_VERSION?.trim() || '0.0.0',
     tag: process.env.ANTSEED_BINARY_TAG?.trim() || 'stable',
+  }
+}
+
+/**
+ * Measured runtime evidence written by the launcher (it applies the egress / storage
+ * policy, drops the matching capability, extends the TDX RTMR, and records the logs).
+ * The seller reads it from `ANTSEED_MEASURED_EVIDENCE_FILE` and attests the MEASURED
+ * claims (egress-allowlisted / no-buyer-data-at-rest / known-binaries-only). Absent
+ * file ⇒ those claims are simply not attested.
+ */
+interface MeasuredEvidence {
+  rtmrLog?: RtmrEvent[]
+  imaLog?: ImaEntry[]
+  imaRtmrIndex?: number
+  networkPolicy?: NetworkPolicy
+  storagePolicy?: StoragePolicy
+}
+
+function readMeasuredEvidence(): MeasuredEvidence | undefined {
+  const path = process.env.ANTSEED_MEASURED_EVIDENCE_FILE?.trim()
+  if (!path) return undefined
+  try {
+    return JSON.parse(readFileSync(path, 'utf8')) as MeasuredEvidence
+  } catch {
+    return undefined
   }
 }
 
@@ -140,6 +170,13 @@ export async function buildSellerTeeWiring(
   const claims: ClaimId[] = ['hardware-genuine', 'channel-key-bound', 'approved-launcher']
   if (binary) claims.push('approved-binary', 'binary-active')
 
+  // Measured specific attestations: attested iff the launcher recorded them (it
+  // applies the policy, drops the matching capability, and extends the RTMR).
+  const measured = readMeasuredEvidence()
+  if (measured?.rtmrLog && measured.networkPolicy) claims.push('egress-allowlisted')
+  if (measured?.rtmrLog && measured.storagePolicy) claims.push('no-buyer-data-at-rest')
+  if (measured?.imaLog && measured.imaLog.length > 0) claims.push('known-binaries-only')
+
   const launcherCtx: Omit<LauncherEvidenceContext, 'timestamp'> = {
     platform: provider.platform,
     attestation: provider,
@@ -152,6 +189,11 @@ export async function buildSellerTeeWiring(
       ? { launcherVersion: process.env.ANTSEED_LAUNCHER_VERSION.trim() }
       : {}),
     ...(binary ? { antseedBinary: binary } : {}),
+    ...(measured?.rtmrLog ? { rtmrLog: measured.rtmrLog } : {}),
+    ...(measured?.imaLog ? { imaLog: measured.imaLog } : {}),
+    ...(measured?.imaRtmrIndex !== undefined ? { imaRtmrIndex: measured.imaRtmrIndex } : {}),
+    ...(measured?.networkPolicy ? { networkPolicy: measured.networkPolicy } : {}),
+    ...(measured?.storagePolicy ? { storagePolicy: measured.storagePolicy } : {}),
   }
   const evidence = createLauncherEvidenceHandler(launcherCtx)
 
