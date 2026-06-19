@@ -48,6 +48,22 @@ export const ALL_CLAIMS: readonly ClaimId[] = [
   "mem-encryption",
 ];
 
+/**
+ * Canonical operational capability identifiers a governance-signed approved entry
+ * MAY assert about a measurement (`ValidSetEntry.capabilities`). The mapping from
+ * each id to the image properties it requires is the contract in COMPLIANCE.md §2.
+ * The list is OPEN — a buyer may require any capability string and a reviewer may
+ * sign a new one; this is the documented reference set, not a closed enum.
+ */
+export const KNOWN_CAPABILITIES = [
+  "no-operator-shell",
+  "egress-locked",
+  "ephemeral-storage",
+  "mem-enc",
+  "measured-boot",
+] as const;
+export type KnownCapability = (typeof KNOWN_CAPABILITIES)[number];
+
 /** Runtime storage posture the launcher attests (and a buyer can require). */
 export interface StoragePolicy {
   /** Platform memory encryption is present (TDX/SEV memory confidentiality). */

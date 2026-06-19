@@ -63,12 +63,14 @@ export {
   canonicalizeEvidenceDocument,
   stableStringify,
   ALL_CLAIMS,
+  KNOWN_CAPABILITIES,
   EVIDENCE_SCHEMA_LAUNCHER,
   EVIDENCE_SCHEMA_V1,
 } from "./evidence/document.js";
 export type {
   EvidenceDocument,
   ClaimId,
+  KnownCapability,
   StoragePolicy,
   NetworkPolicy,
 } from "./evidence/document.js";

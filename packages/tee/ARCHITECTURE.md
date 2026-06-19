@@ -231,17 +231,26 @@ interface ValidSet {
 All of it is inside `ValidSetSignedPayload` → none tamperable without breaking the
 governance signature. Buyer pins the governance signer (mandatory in production).
 
-## 8. GCP TDX launcher-backed deployment (design requirement D)
+## 8. Deployment — AntSeed's image is a REFERENCE, never required (design requirement D)
 
-The existing Packer/Terraform stays the baseline path; the change is that the
-systemd unit starts the **launcher**, and the launcher starts the **AntSeed seller
-binary** after verifying it. The launcher-backed image additionally moves toward
-operator-exclusion (no interactive sshd in the trusted profile, ephemeral writable
-state, nft egress allowlist) so the launcher measurement can legitimately carry the
-`no-operator-shell` / `egress-locked` capabilities the buyer policy can require. The
-current SSH-able dev image keeps working but its measurement does **not** carry
-those capabilities, so a strict buyer treats its confidentiality claims as not
-proven — exactly the honesty boundary.
+**Design directive: the image is never a required piece — it is a reference
+implementation.** A seller may run ANY confidential-computing image. AntSeed ships a
+reference Packer/Terraform image as a convenience — it is one approved measurement,
+not a mandate. Compliance is governed entirely by the approved set + capabilities
+(see [COMPLIANCE.md](./COMPLIANCE.md)): an image is compliant *for a buyer* iff its
+measurement is governance-approved carrying the capabilities that buyer requires.
+
+The launcher unit starts the AntSeed seller binary (verifying its digest first) and
+serves launcher evidence. An image *earns* the operational capabilities
+(`no-operator-shell`, `egress-locked`, `ephemeral-storage`) by actually enforcing
+them per COMPLIANCE.md §2 and being reviewed + signed into the approved set —
+whether that image is AntSeed's reference or a third party's, on TDX or any future
+platform. An image that does not enforce a capability simply does not carry it; a
+buyer requiring it gets `not-proven` and fails closed. There is no central locked
+image — the honesty boundary is per measurement, per capability. The path to a fully
+gatekeeper-free model is the self-verifying **measured-boot / IMA** track
+(COMPLIANCE.md §1), where the buyer checks a measured log directly with no per-image
+review.
 
 ## 9. What is proven vs not proven (do-not-overclaim)
 
