@@ -1141,27 +1141,83 @@ html[data-theme='light'] main[class*='blog'] {
 .blog-wrapper .container,
 .blog-list-page main,
 .blog-post-page main {
-  max-width: 1180px;
+  max-width: 1460px;
+}
+.blog-wrapper .container {
+  width: min(100%, 1460px);
+}
+.blog-post-page .container.margin-vert--lg > .row {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr) 250px;
+  align-items: start;
+}
+.blog-list-page .container.margin-vert--lg > .row {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  align-items: start;
+}
+.blog-post-page .container.margin-vert--lg > .row > .col,
+.blog-list-page .container.margin-vert--lg > .row > .col {
+  width: auto;
+}
+.blog-post-page .row > aside.col--3,
+.blog-list-page .row > aside.col--3 {
+  --ifm-col-width: 220px;
+  flex: 0 0 220px;
+  max-width: 220px;
+}
+.blog-post-page main.col--7,
+.blog-list-page main.col--7 {
+  --ifm-col-width: auto;
+  flex: 1 1 auto;
+  max-width: none;
+}
+.blog-post-page .row > .col--2 {
+  --ifm-col-width: 250px;
+  flex: 0 0 250px;
+  max-width: 250px;
+}
+.blog-post-page .container.margin-vert--lg > .row > aside.col--3,
+.blog-list-page .container.margin-vert--lg > .row > aside.col--3,
+.blog-post-page .container.margin-vert--lg > .row > .col--2 {
+  align-self: start;
+  position: sticky !important;
+  top: calc(var(--ifm-navbar-height) + 1rem);
+  max-height: calc(100vh - var(--ifm-navbar-height) - 2rem);
+  overflow-y: auto;
+}
+.blog-post-page .row > aside.col--3 > nav,
+.blog-list-page .row > aside.col--3 > nav,
+.blog-post-page .row > .col--2 > div {
+  position: static !important;
+  max-height: none;
+  overflow: visible;
+}
+.blog-post-page .row > .col {
+  min-width: 0;
+}
+.blog-post-page main.col {
+  min-width: 0;
+  overflow: visible;
+}
+.blog-post-page .markdown {
+  min-width: 0;
+}
+.blog-post-page .col--2 {
+  min-width: 0;
 }
 .blog-wrapper article {
   position: relative;
-  overflow: hidden;
-  border-radius: 24px;
+  overflow: visible;
+  border-radius: 0;
   padding: clamp(22px, 3vw, 34px);
   margin-bottom: 28px;
-  background:
-    radial-gradient(circle at 100% 0%, rgba(31, 216, 122, 0.065), transparent 34%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.012));
-  border: 1px solid rgba(151, 255, 199, 0.105);
-  box-shadow: 0 24px 80px rgba(0,0,0,0.24), inset 0 1px 0 rgba(255,255,255,0.035);
+  background: transparent;
+  border: 0;
+  box-shadow: none;
 }
 .blog-wrapper article::before {
-  content: '';
-  position: absolute;
-  inset: 0 0 auto;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(31,216,122,0.36), transparent);
-  pointer-events: none;
+  content: none;
 }
 .blog-wrapper article header h1,
 .blog-wrapper article header h2,
@@ -1332,14 +1388,12 @@ html[data-theme='light'] main[class*='blog'] {
 }
 
 html[data-theme='light'] .blog-wrapper article {
-  background:
-    radial-gradient(circle at 100% 0%, rgba(19, 146, 86, 0.055), transparent 34%),
-    linear-gradient(180deg, rgba(255,255,249,0.94), rgba(248,246,237,0.84));
-  border-color: rgba(10,14,20,0.08);
-  box-shadow: 0 24px 70px rgba(10,14,20,0.08), inset 0 1px 0 rgba(255,255,255,0.74);
+  background: transparent;
+  border: 0;
+  box-shadow: none;
 }
 html[data-theme='light'] .blog-wrapper article::before {
-  background: linear-gradient(90deg, transparent, rgba(19,146,86,0.22), transparent);
+  content: none;
 }
 html[data-theme='light'] .blog-wrapper article header h1,
 html[data-theme='light'] .blog-wrapper article header h2,
@@ -1408,6 +1462,33 @@ html[data-theme='light'] .blog-wrapper .pagination-nav__link:hover {
 }
 
 @media (max-width: 996px) {
+  .blog-post-page .container.margin-vert--lg > .row,
+  .blog-list-page .container.margin-vert--lg > .row {
+    display: block;
+  }
+  .blog-post-page .row > aside.col--3,
+  .blog-list-page .row > aside.col--3,
+  .blog-post-page main.col--7,
+  .blog-list-page main.col--7,
+  .blog-post-page .row > .col--2 {
+    --ifm-col-width: 100%;
+    flex-basis: 100%;
+    max-width: 100%;
+  }
+  .blog-post-page .container.margin-vert--lg > .row > aside.col--3,
+  .blog-list-page .container.margin-vert--lg > .row > aside.col--3,
+  .blog-post-page .container.margin-vert--lg > .row > .col--2 {
+    position: static !important;
+    max-height: none;
+    overflow: visible;
+  }
+  .blog-post-page .row > aside.col--3 > nav,
+  .blog-list-page .row > aside.col--3 > nav,
+  .blog-post-page .row > .col--2 > div {
+    position: static;
+    max-height: none;
+    overflow: visible;
+  }
   .blog-wrapper article {
     border-radius: 20px;
     margin-bottom: 20px;
