@@ -3,80 +3,82 @@
 Confidential-broker attestation for AntSeed TEE sellers.
 
 A TEE-wrapped seller runs the AntSeed broker inside a CPU confidential VM (Intel
-TDX or AMD SEV-SNP), routing inference to **external** provider APIs
-(OpenAI / Anthropic). This package provides the **attestation primitive**
-(seller side) and the **buyer verifier** + **approved-code registry** (buyer
-side) that let a buyer cryptographically check *which code* a seller is running
-before trusting it — with **no external platform dependency and no KMS** (trust
-roots only on silicon-vendor PKI).
+TDX today), routing inference to **external** provider APIs. This package provides
+the **seller-side attestation primitive** and the **buyer-side verifier +
+governance registry** that let a buyer cryptographically check *what a seller is
+running* before trusting it — with **no external platform dependency and no KMS**
+(trust roots only on silicon-vendor PKI). Its only runtime dependency is Node's
+built-in `node:crypto`; `@antseed/node` is a types-only `peerDependency`. Non-TEE
+sellers never install it.
 
-It is an **optional** dependency: non-TEE sellers never install it. It depends on
-`@antseed/node` only for *types* (a `peerDependency`); its only runtime
-dependency is Node's built-in `node:crypto`.
+The full design contract is **[`ARCHITECTURE.md`](./ARCHITECTURE.md)**; the
+capability→image-property compliance contract is
+**[`COMPLIANCE.md`](./COMPLIANCE.md)**.
 
-## MVP scope — requirement #1 only
+## The model: à-la-carte claims, buyer-decided policy
 
-This MVP proves exactly one property:
+The protocol mandates **no fixed attestation set**. A seller attests to ANY subset
+of named **claims**; the evidence document lists them; the buyer verifies each
+independently and reports per-claim `{claimed, verdict}` (`verified` / `failed` /
+`not-proven` / `not-claimed`), then applies its OWN `requiredClaims` policy and
+fails closed on anything unmet.
 
-> **The seller runs only approved code (any approved version).**
+Soundness comes from a **dependency lattice**: every runtime claim is `verified`
+only if the binding **substrate** holds — the quote is genuine, `report_data`
+binds the served enclave key + peer + nonce, and the in-enclave ed25519 key signs
+the evidence document. The enclave-signs-the-document move carries unbounded
+attested fields **without** enlarging `report_data`, so v1 verifiers keep working.
 
-It is built to extend to #2/#3/#4 with no rework. Concretely, the verifier runs
-three load-bearing checks:
+The protocol claim set is **sealed** (`verifier/claims.ts`): the built-in
+evaluators register at load, then the registry is closed — a claim can only be
+added by an attested `@antseed/tee` release, never runtime injection or override. A
+seller-attested claim the protocol doesn't know has no evaluator → `not-proven` →
+fail-closed.
 
-1. **Quote valid** — genuine TEE, debug-off, TCB-current, nonce-fresh.
-   (`mock`: structural validation only; `tdx`: a clearly-marked DCAP integration
-   point — the verification *interface* is implemented, the DCAP crypto is a
-   `TODO(tee)`.)
-2. **`quote.measurement ∈ approvedSet`** — the image measurement (TDX MRTD/RTMR,
-   SEV-SNP MEASUREMENT) is in the registry's active approved set.
-3. **`quote.reportData == packReportData({ peerPubkey: connectedPeer, nonce })`**
-   — the quote is bound to the connected channel and this verification round.
+| Claim | Verified when … |
+| --- | --- |
+| `hardware-genuine` | genuine TEE quote, debug off, TCB acceptable, nonce-fresh |
+| `channel-key-bound` | an enclave-held X25519 key is attested (advertised — payload e2ee to it is **not yet wired**, see ARCHITECTURE §5) |
+| `approved-launcher` | the launcher measurement ∈ the governance-signed approved set |
+| `approved-binary` | the bound binary digest is an approved release — **only under** `approved-launcher` (the digest is self-reported) |
+| `binary-active` | that release is active (not deprecated/revoked) |
+| `storage-policy` / `network-policy` | the policy hash is vouched by the approved launcher entry (governance-asserted) |
+| `no-operator-shell` / `mem-encryption` | capability vouched / platform memory encryption present |
+| `no-buyer-data-at-rest` / `egress-allowlisted` / `known-binaries-only` | **measured** (Tier A): the policy digest is in the launcher's RTMR event-log AND the log replays to the genuine quote's RTMR |
 
-Plus a `notProven` honesty block surfaced verbatim (operator-blind/#2,
-no-other-processes/#3, model/#4, v1-not-reproducible, provider-sees-plaintext).
-
-### Measurement vs report_data
-
-These are kept strictly separate:
-
-- The **image measurement** lives in the quote's measurement registers
-  (MRTD/RTMR for TDX, MEASUREMENT for SEV-SNP) and is checked against the
-  approved set.
-- **`report_data`** is the single 64-byte free field the hardware binds. We
-  pack it with **one** domain-separated hash:
-
-  ```
-  report_data[0:64] = SHA-512( CTX || len|peerPubkey || len|nonce
-                                   || len|bundleDigest || len|configHash )
-  CTX = "antseed-tee/v1\0"
-  ```
-
-  SHA-512 fully consumes the 64 bytes (no padding/slack). For the MVP only
-  `peerPubkey` + `nonce` are set; `bundleDigest` / `configHash` are forward-compat
-  for requirement #4 and the base/bundle measurement split. `packReportData` is
-  **the one canonical encoder** — both the seller (quote generation) and the
-  buyer (verifier recompute) route through it.
+`verifier/claims.ts` also exports `CLAIM_INFO` / `claimInfo(id)` — a buyer-facing
+`{ label, blurb }` per claim for UIs and the CLI report.
 
 ## Layout
 
 ```
 src/
-  report-data.ts          # THE canonical packReportData + recompute helper
-  config.ts               # TeeSellerConfig
-  attestation/
-    types.ts              # AttestationPlatform, AttestationProvider, AttestationQuote
-    mock.ts               # MockAttestation (deterministic, dev/test) + assertProductionPlatform
-    tdx.ts                # TdxAttestation (configfs-tsm / tdx_guest sysfs; DCAP TODOs)
-    index.ts              # createAttestationProvider(platform?)
-  evidence/
-    routes.ts             # handleEvidenceRequest: /evidence, /.well-known/..., /pubkey
-  registry/
-    types.ts              # ValidSet, ValidSetEntry
-    client.ts             # RegistryClient — load/verify(ed25519)/cache, fail-closed
-  verifier/
-    checks.ts             # per-platform quote validation (CHECK 1 backend)
-    verify.ts             # verifySeller(...) — numbered tri-state checklist + verdict
-  attesting-provider.ts   # v2 TeeAttestingProvider decorator (interface only)
+  report-data.ts            THE canonical report_data encoder (seller + buyer route through it)
+  config.ts                 TeeSellerConfig
+  attestation/              SELLER quote generation
+    types.ts                AttestationPlatform / Provider / Quote
+    mock.ts                 deterministic dev/test provider
+    tdx.ts                  TdxAttestation — configfs-tsm / tdx_guest; parses MRTD + RTMR0-3
+    collateral.ts           DCAP collateral fetch/embed
+  evidence/                 the launcher evidence document
+    document.ts             EvidenceDocument (schema antseed-tee/launcher) + enclave sign/verify + ClaimId + policies
+    rtmr.ts                 measured-event log: rtmrExtend/replayRtmr/measureDigest (SHA-384) + IMA helpers
+    builder.ts              buildLauncherEvidence — seller assembly + enclave-sign
+    serving.ts              createLauncherEvidenceHandler — hardened evidence serving
+    routes.ts               v1 evidence routes (/evidence, /.well-known/…, /pubkey)
+  registry/                 governance-signed approved set
+    types.ts                ValidSet / ValidSetEntry / ApprovedBinary (all signed)
+    client.ts               RegistryClient — load/verify(ed25519)/cache, fail-closed
+    binary.ts               BinaryVerifier (shared by launcher gate + buyer) + release-sig
+    sign.ts                 gen/sign registry keys
+  verifier/                 BUYER verification
+    quote-verifiers.ts      QUOTE_VERIFIERS registry (tdx=real DCAP, sev-snp=fail-closed, mock)
+    dcap.ts                 real Intel DCAP quote verification (@phala/dcap-qvl)
+    policy.ts               VerificationPolicy (requiredClaims/storage/network/binary pins)
+    launcher-verify.ts      verifyLauncherEvidence — the à-la-carte claims verifier
+    claims.ts               SEALED claim-evaluator registry + CLAIM_INFO labels
+    checks.ts / verify.ts   v1 (antseed-tee/v1) quote checklist — kept for back-compat
+  attesting-provider.ts     TeeAttestingProvider (model-verify decorator; interface)
 ```
 
 Exports split seller-side (`./attestation`, `./evidence`) from buyer-side
@@ -89,25 +91,4 @@ cd packages/tee
 pnpm install
 pnpm run typecheck   # tsc --noEmit (strict, NodeNext)
 pnpm test            # vitest run
-```
-
-## Extension path to #2 / #3 / #4
-
-- **#2 (operator-blind) / #3 (no-other-processes):** these are *image*
-  properties certified by the **audit** attached to an approved measurement
-  (`ValidSet.auditUrl`). The verifier already proves "an approved measurement is
-  running, bound to this channel"; extending to #2/#3 means enriching the
-  approved-set audit metadata and (v2) reproducible builds + dm-verity — no
-  change to the verifier predicate or `report_data` layout.
-- **#4 (advertised model == called model):** implement the `TeeAttestingProvider`
-  decorator (already declared as an interface-only stub). It wraps any
-  `@antseed/node` `Provider`, signs `{ requestedModel, requestedEffort,
-  servedModelEcho }` with the enclave key, and the buyer verifies the signature
-  with `peerPubkey`. Because `report_data` already length-prefixes optional
-  fields, binding `bundleDigest` / `configHash` requires no layout change.
-- **Two-tier (base + bundle):** `ValidSetEntry.bundleDigest` and the optional
-  `report_data` fields are already in place; the base becomes the sole quote
-  producer and stamps the bundle digest `D` per-quote.
-- **SEV-SNP:** add a `SevAttestation` provider (the `'sev-snp'` platform is
-  already in the type and a verifier branch is stubbed).
 ```
