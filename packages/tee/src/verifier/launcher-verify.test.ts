@@ -388,3 +388,22 @@ test("claimInfo gives a plain-English label for known claims and falls back for 
   expect(claimInfo("x-totally-custom").label).toBe("x-totally-custom"); // fallback to the id
   expect(CLAIM_INFO["hardware-genuine"]?.label).toBeTruthy();
 });
+
+test("approved-binary is NOT trusted under an UNAPPROVED launcher (depends on approved-launcher)", async () => {
+  const { doc } = await scenario({ claims: ["hardware-genuine", "approved-binary", "binary-active"], channelPubkey: null });
+  // The registry lists the binary but approves a DIFFERENT launcher measurement.
+  const { set, signerHex } = signValidSet({
+    version: 1,
+    entries: [{ platform: "mock", measurement: "ee".repeat(48), status: "active" }],
+    binaries: [{ digest: DIGEST, version: "1.2.0", tag: "stable", status: "active" }],
+  });
+  const reg = new RegistryClient({ pinnedSigner: signerHex });
+  reg.loadFromObject(set);
+  const r = verifyLauncherEvidence({
+    evidence: doc, connectedPeerPubkey: PEER, nonce: NONCE, registry: reg,
+    policy: devPolicy({ requiredClaims: ["approved-binary"] }),
+  });
+  expect(claim(r, "approved-binary").verdict).toBe("not-proven"); // launcher not approved -> digest untrusted
+  expect(claim(r, "binary-active").verdict).toBe("not-proven");
+  expect(r.verdict).toBe("failed");
+});

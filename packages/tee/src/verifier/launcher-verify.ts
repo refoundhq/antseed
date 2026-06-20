@@ -223,7 +223,11 @@ function evalChannelKey(doc: EvidenceDocument, docOk: boolean): ClaimResult {
   if (!doc.channelPubkey || doc.channelKeyAlg !== "x25519") {
     return failed(c, "claimed but no enclave-signed x25519 channel key is present in the evidence");
   }
-  return verified(c, "enclave-custodied x25519 channel key is bound (buyer↔seller traffic e2ee to an in-TEE key)");
+  // HONEST scope: this attests that an enclave-custodied x25519 channel key is
+  // ADVERTISED + bound to the quote. It does NOT mean payloads are encrypted to it —
+  // ECDH/AEAD payload wrapping is NOT yet implemented (the transport is WebRTC/DTLS).
+  // Do not read this as "your traffic is e2ee to the enclave".
+  return verified(c, "an enclave-custodied x25519 channel key is attested + advertised (payload encryption to it is NOT yet wired)");
 }
 
 function evalApprovedLauncher(
@@ -254,6 +258,7 @@ function evalBinary(
   policy: VerificationPolicy,
   docOk: boolean,
   set: ReturnType<RegistryClient["getValidSet"]>,
+  measurement: string,
 ): [ClaimResult, ClaimResult] {
   const approvedId: ClaimId = "approved-binary";
   const activeId: ClaimId = "binary-active";
@@ -267,6 +272,16 @@ function evalBinary(
   }
   if (!registry || !set) {
     const np = (id: ClaimId) => notProven(id, "no verified registry loaded (governance unusable)");
+    return [aClaimed ? np(approvedId) : notClaimed(approvedId), actClaimed ? np(activeId) : notClaimed(activeId)];
+  }
+  // CRITICAL: the bound binary digest is SELF-REPORTED by the launcher (enclave-signed
+  // but NOT in the hardware measurement). It is only trustworthy if the LAUNCHER itself
+  // is governance-approved — otherwise a genuine TDX env running UNAPPROVED launcher
+  // code could self-report any approved digest. So approved-binary/binary-active DEPEND
+  // on approved-launcher: not-proven unless the launcher measurement is approved.
+  if (!registry.isApproved(doc.platform, measurement)) {
+    const np = (id: ClaimId) =>
+      notProven(id, "self-reported binary digest is untrusted: the launcher measurement is not an approved AntSeed launcher (depends on approved-launcher)");
     return [aClaimed ? np(approvedId) : notClaimed(approvedId), actClaimed ? np(activeId) : notClaimed(activeId)];
   }
   const digest = (doc.antseedBinaryDigest ?? "").toLowerCase().replace(/^0x/, "");
@@ -520,10 +535,10 @@ registerClaimEvaluator("approved-launcher", (c) =>
   evalApprovedLauncher(c.doc, c.registry, c.docOk, c.measurement),
 );
 registerClaimEvaluator("approved-binary", (c) =>
-  evalBinary(c.doc, c.set ? c.registry : undefined, c.policy, c.docOk, c.set)[0],
+  evalBinary(c.doc, c.set ? c.registry : undefined, c.policy, c.docOk, c.set, c.measurement)[0],
 );
 registerClaimEvaluator("binary-active", (c) =>
-  evalBinary(c.doc, c.set ? c.registry : undefined, c.policy, c.docOk, c.set)[1],
+  evalBinary(c.doc, c.set ? c.registry : undefined, c.policy, c.docOk, c.set, c.measurement)[1],
 );
 registerClaimEvaluator("storage-policy", (c) => evalStorage(c.doc, c.entry, c.policy, c.docOk));
 registerClaimEvaluator("network-policy", (c) => evalNetwork(c.doc, c.entry, c.policy, c.docOk));

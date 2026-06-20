@@ -143,18 +143,25 @@ attested. `report_data` is **unchanged** (no wire break; v1 still recomputes).
 
 ## 5. Enclave-custodied channel key (design requirement F, relaxed)
 
+> **⚠ STATUS — steps 3–4 are NOT IMPLEMENTED (design only).** Today the launcher only
+> generates + attests the X25519 key (steps 1–2 below), so the `channel-key-bound`
+> claim means **"an enclave-custodied channel key is advertised"** — nothing more. The
+> ECDH→AEAD payload wrapping (steps 3–4) is NOT wired: the live transport is WebRTC/DTLS
+> and buyer payloads are **not** encrypted to `channelPubkey`. Do not read
+> `channel-key-bound` as "your traffic is e2ee to the enclave" until this lands.
+
 Literal TLS termination does not map onto AntSeed's WebRTC/DTLS+TCP transport (the
 session terminates *inside the seller process*). The requirement is satisfied
 instead by an **enclave-generated, enclave-custodied X25519 key**:
 
 1. The launcher generates the X25519 keypair in-TEE; the private half never leaves
-   the process and is never written to disk.
+   the process and is never written to disk. ✅ implemented
 2. Its public fingerprint is in the evidence doc, covered by `enclaveSignature`,
-   anchored (via the enclave ed25519 key) to `report_data`.
-3. Buyer verifies the quote + doc **first**, then opens an ECDH→AEAD channel to
-   `channelPubkey` and sends sensitive payloads only through it.
-4. Result: relayed buyer↔seller traffic is e2ee under a key only the in-TEE process
-   holds. A relay/MITM without in-TEE memory cannot read it; substitution breaks
+   anchored (via the enclave ed25519 key) to `report_data`. ✅ implemented
+3. *(planned)* Buyer verifies the quote + doc **first**, then opens an ECDH→AEAD channel
+   to `channelPubkey` and sends sensitive payloads only through it.
+4. *(planned)* Result: relayed buyer↔seller traffic is e2ee under a key only the in-TEE
+   process holds. A relay/MITM without in-TEE memory cannot read it; substitution breaks
    the enclave signature / `report_data`. Extraction by **guest root** is prevented
    **operationally** by the locked runtime (attested via launcher measurement) — and
    where that isn't attested, the buyer fails the confidentiality check (§9).
@@ -176,7 +183,7 @@ Named claims (extensible):
 | Claim | Plain-language meaning | Verified by |
 |-------|------------------------|-------------|
 | `hardware-genuine` | runs in a real TEE, debug off, acceptable TCB | silicon quote + collateral |
-| `channel-key-bound` | buyer↔seller traffic is e2ee under an enclave-held key | enclave key (in `report_data`) signs the doc binding the channel key |
+| `channel-key-bound` | an enclave-held channel key is **advertised** (e2ee payload wrapping is planned, not wired — see §5) | enclave key (in `report_data`) signs the doc binding the channel key |
 | `approved-launcher` | the runtime is an approved AntSeed launcher build | launcher measurement ∈ signed set |
 | `approved-binary` | the seller binary is an official signed AntSeed release | bound digest ∈ signed binary set (+ release sig) |
 | `binary-active` | that release is current, not deprecated/revoked | binary status + revocation |

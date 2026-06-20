@@ -345,7 +345,11 @@ export async function verifyTeeSeller(
       measurementSet: registry.approvedMeasurements(),
       requiredClaims:
         opts.requiredClaims ??
-        (opts.requireTee ? (['hardware-genuine', 'approved-binary', 'binary-active'] as ClaimId[]) : []),
+        // approved-launcher is REQUIRED: the binary digest is self-reported by the
+        // launcher and is only trustworthy under an approved launcher measurement.
+        (opts.requireTee
+          ? (['hardware-genuine', 'approved-launcher', 'approved-binary', 'binary-active'] as ClaimId[])
+          : []),
       ...(opts.pinnedReleaseSigner ? { pinnedReleaseSigner: opts.pinnedReleaseSigner } : {}),
       ...(opts.allowedBinaryTags ? { allowedBinaryTags: opts.allowedBinaryTags } : {}),
       registry: registryPolicy,

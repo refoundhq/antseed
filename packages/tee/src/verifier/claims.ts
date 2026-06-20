@@ -99,8 +99,8 @@ export const CLAIM_INFO: Readonly<Record<string, ClaimInfo>> = Object.freeze({
     blurb: "Runs in a real hardware TEE — debug off, trusted-computing-base up to date.",
   },
   "channel-key-bound": {
-    label: "Enclave-held channel key",
-    blurb: "The key securing your connection is generated and held inside the enclave.",
+    label: "Enclave channel key advertised",
+    blurb: "An enclave-held x25519 key is attested for a future e2ee channel — payload encryption to it is NOT yet wired.",
   },
   "approved-launcher": {
     label: "Approved runtime",
