@@ -752,6 +752,8 @@ function Card({
     && (!hasCachedInput || item.cachedInputUsdPerMillion === 0);
   const lowReputation = isLowReputation(item.reputationScore);
   const reputationTooltip = formatReputationTooltip(item);
+  const hiddenTags = item.tags.slice(MAX_VISIBLE_CARD_TAGS);
+  const hiddenTagLabels = hiddenTags.map(formatCategoryLabel).join(', ');
 
   useEffect(() => {
     if (!copied) return undefined;
@@ -786,20 +788,26 @@ function Card({
           {item.tags.slice(0, MAX_VISIBLE_CARD_TAGS).map((t) => (
             <span key={t} className={styles.tag} style={getTagTint(t)}>{formatCategoryLabel(t)}</span>
           ))}
-          {item.tags.length > MAX_VISIBLE_CARD_TAGS && (
-            <span
-              className={`${styles.tag} ${styles.tagMore}`}
-              tabIndex={0}
-              aria-label={`${item.tags.length - MAX_VISIBLE_CARD_TAGS} more categories: `
-                + item.tags.slice(MAX_VISIBLE_CARD_TAGS).map(formatCategoryLabel).join(', ')}
-              onClick={(e) => e.stopPropagation()}
-              onKeyDown={(e) => e.stopPropagation()}
+          {hiddenTags.length > 0 && (
+            <InfoTooltip
+              align="left"
+              content={(
+                <>
+                  <strong>More categories</strong>
+                  <span>{hiddenTagLabels}</span>
+                </>
+              )}
             >
-              +{item.tags.length - MAX_VISIBLE_CARD_TAGS}
-              <span role="tooltip" className={styles.tagMoreTooltip}>
-                {item.tags.slice(MAX_VISIBLE_CARD_TAGS).map(formatCategoryLabel).join(', ')}
+              <span
+                className={`${styles.tag} ${styles.tagMore}`}
+                tabIndex={0}
+                aria-label={`${hiddenTags.length} more categories: ${hiddenTagLabels}`}
+                onClick={(e) => e.stopPropagation()}
+                onKeyDown={(e) => e.stopPropagation()}
+              >
+                +{hiddenTags.length}
               </span>
-            </span>
+            </InfoTooltip>
           )}
         </div>
         <div className={styles.cardNameRow}>

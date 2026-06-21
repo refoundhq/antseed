@@ -36,6 +36,7 @@ This project uses selective package publishing. Each release entry lists the pub
 - Fixed buyer response-auth timeout warnings for non-inference probes and sellers that do not advertise response-auth support.
 - Fixed buyer discovery so temporarily unreachable metadata endpoints are probed for recovery before the full exponential cooldown expires, allowing recovered peers to reappear in buyer peer lists sooner.
 - Fixed Desktop chats for peers that disappear from discovery so the header reports that the peer was not found and disables the composer instead of showing stale peer identifiers.
+- Fixed Desktop Discover overflow tag tooltips so the `+N` category indicator works on service cards in the first row.
 - Fixed `antseed seller emissions claim` so it only checks and claims seller rewards, leaving buyer rewards to the buyer command.
 
 ## 2026-06-15 — Buyer peer failure accounting and desktop stream responsiveness
