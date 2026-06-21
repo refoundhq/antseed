@@ -26,7 +26,7 @@ AntSeed is being built for a simple but difficult idea: anyone should be able to
 
 That openness is what makes the network powerful. A developer can run a model. A team can offer a specialized agent. A provider can sell private, TEE-backed inference. A router can help buyers find the right service. Buyers can choose between many sellers instead of depending on one centralized platform.
 
-But openness also creates the hardest problem in any market: **how do you make it fair?**
+But openness also creates the hardest problem in any market: **how do you build trust?**
 
 If anyone can show up and claim to be fast, reliable, cheap, private, or high quality, buyers need a way to know who has actually delivered. Sellers need a path to earn trust through real usage. Routers need signals they can inspect instead of relying on private rankings. And the network needs incentives that reward useful participation without making fake activity easy to profit from.
 
@@ -50,7 +50,7 @@ Seller pools introduce a simple loop for ANTS:
 2. **Good sellers can attract long-term support.** ANTS holders can lock tokens behind a seller identity, creating a public signal that the service has durable backing.
 3. **Rewards follow useful participation.** Sellers, buyers, stakers, and verifiers can earn from the weekly emissions budget, but only inside capped ranges.
 4. **Unused rewards do not quietly become extra yield.** If a dynamic reward bucket is not fully earned, the remainder burns first, then routes to the AntSeed Foundation.
-5. **Fees add another burn path.** Platform and operator-pool fees are modeled as market buy-and-burn demand, separate from emission routing.
+5. **Fees can add another burn path.** Platform and operator-pool fees may be directed to market buy-and-burn, separate from emission routing.
 
 The important change is that ANTS emissions are not just a flat giveaway. They are routed through usage, stake, verification, burn, and Foundation rules so the system can reward growth while reducing the value of fake activity.
 
@@ -122,24 +122,24 @@ A seller cannot buy a good reputation with stake alone. The pool becomes meaning
 
 ## The lANTS NFT
 
-When stakers lock ANTS into a seller pool, they choose a number of epochs for the lock. The position is represented by an NFT called **lANTS**.
+When stakers lock ANTS into a seller pool, they choose how long the lock should last. The position is represented by an NFT called **lANTS**.
 
-The lANTS NFT records:
+Think of **lANTS as an on-chain receipt** for committed support behind a seller.
 
 | Field | Description |
 | --- | --- |
 | Staker | Who locked the ANTS |
 | Seller / Agent ID | Which provider is being backed |
 | Amount Locked | How much ANTS was committed |
-| Lock Window | Duration of the lock in epochs |
+| Lock Window | How long the position is committed |
 | Position Weight | Calculated weight for reward distribution |
 | Status | Whether the position was moved, extended, restaked, or withdrawn |
 
-The lANTS NFT is not a profile picture. It is not reputation by itself. It is a position object: a portable receipt for committed stake behind a seller identity.
+The lANTS NFT is **not** a profile picture. It is **not** reputation by itself. It is a portable record of committed stake behind a seller identity.
 
-Because it is an NFT, wallets, dashboards, routers, and future contracts can read it as a public record of locked support.
+Because it is an NFT, the support is public and composable. Wallets can show it. Dashboards can explain it. Routers can factor it into policy. Future contracts can build on top of it.
 
-We also expect the locked-position object — lANTS / iANTS naming may be finalized as the implementation moves forward — to most likely play a role in the second ANTS utility phase focused on liquid inference. The exact mechanics are still being designed, but the intent is that long-term support behind real providers can become useful beyond this first reputation layer.
+We also expect the locked-position object — **lANTS / iANTS naming may be finalized as the implementation moves forward** — to play a role in the second ANTS utility phase focused on **liquid inference**. The exact mechanics are still being designed, but the intent is that long-term support behind real providers can become useful beyond this first reputation layer.
 
 ## Recognized Usage
 
@@ -147,15 +147,12 @@ Every paid AntSeed channel already produces buyer-authorized settlement data.
 
 Here is the basic flow:
 
-1. Buyers sign cumulative `SpendingAuth` messages
-2. These authorize payment up to a cumulative amount
-3. The authorization binds to a metadata hash
-4. When a seller settles, contracts update:
-   - Settled USDC volume
-   - Channel stats
-   - Optional cumulative token or request metadata
+1. A buyer authorizes payment for usage
+2. A seller settles against that authorization
+3. The contract records the settled USDC volume
+4. Optional metadata can also record request or token counts
 
-For each settlement, the protocol records usage points for the buyer and seller. Those points are weighted by the seller pool's frozen epoch power.
+For each settlement, the protocol records usage points for the buyer and seller. Those points are weighted by the seller pool's locked support for that epoch.
 
 In plain English:
 
@@ -182,38 +179,33 @@ Open incentive systems attract abuse. We should be honest about that.
 Seller pools are designed to make wash trading harder to reward. Fake volume has to pass through multiple layers:
 
 - Signed buyer payment flow
-- Pool-weighted accounting
-- Per-account caps
-- Dynamic emission ranges
-- Reserve routing
-- Burn routing
-- Verification and anti-abuse policies
+- Pool-weighted accounting, so stake context matters
+- Account caps and dynamic reward ranges, so fake volume cannot simply scale forever
+- Burn and Foundation routing, so unused rewards do not become extra yield
+- Verification and anti-abuse policies, so suspicious behavior can be checked and excluded
 
-No single number is enough. The goal is not to pretend abuse disappears. The goal is to make reputation harder to fake and make extraction less attractive.
+**No single number is enough.** The goal is not to pretend abuse disappears. The goal is to make reputation harder to fake and make extraction less attractive.
 
 ## Verification Is Part of the Market
 
-A fair market cannot depend only on payments and stake. It also needs people and software constantly checking whether the network is doing what sellers say it is doing.
+A trustworthy market cannot depend only on payments and stake. It also needs people and software constantly checking whether the network is doing what sellers say it is doing.
 
 That is why 10% of the epoch allocation is reserved for **verification**.
 
 The verification pool is for the people who help validate the network: buyers, routers, providers, researchers, and future verifier operators who contribute useful checks, dispute signals, monitoring, and anti-abuse work. In other words, the network should be validated by the people who serve and use the network.
 
-The first verification layer we are building is **behavioral model fingerprinting**.
+The first verification layer we are building is **[behavioral model fingerprinting](/blog/model-verification-fingerprint-swarm)**.
 
 The problem is simple: a provider can advertise a premium model name, but serve a cheaper or unrelated model behind the scenes. Payment settlement proves that a response happened. Ghost-channel reputation can show whether a seller completed sessions. But neither of those alone proves that the advertised model actually produced the response.
 
 Behavioral fingerprinting is a lightweight first step. Buyer-side verifiers can periodically send small deterministic probe requests to the same peer that handled real traffic. These probes do not block user traffic. They are designed to catch common low-effort substitution by testing things like:
 
-- Exact character counts
-- Exact word counts
-- JSON schema compliance
-- Integer arithmetic
-- String reversal
-- Fixed line-count generation
-- Model-family sanity checks for advertised model names
+- Format and schema compliance
+- Simple deterministic tasks
+- Model-family sanity checks
+- Behavior that should be stable for the advertised model
 
-This is not a perfect proof of model identity, and we should not pretend it is. It is a practical first layer. It helps detect obvious mismatches while we keep improving the verification system.
+This is **not** a perfect proof of model identity, and we should not pretend it is. It is a practical first layer. It helps detect obvious mismatches while we keep improving the verification system.
 
 Over time, we expect to add more verification families, including:
 
@@ -232,6 +224,8 @@ This is also why verification is its own allocation instead of being hidden insi
 
 Each weekly epoch has an ANTS emission budget. Some parts are fixed, and some parts are dynamic.
 
+In plain terms: **some buckets are always present**, while others only expand when the network has more real usage or more locked support behind sellers.
+
 The fixed parts are easy to understand:
 
 - **Contributors:** 15%
@@ -244,19 +238,19 @@ The dynamic parts depend on what is actually happening in the network:
 - **Sellers / operators:** 5-10%, based on recognized settled USDC volume
 - **Buyers:** 5-10%, based on recognized settled USDC volume
 
-The dynamic ranges are what make this model different from a fixed emissions schedule. The protocol does not need to pay the maximum reward when usage and stake are still early. As real usage grows and more ANTS is locked behind sellers, more of the dynamic budget becomes earned.
+The **dynamic ranges** are what make this model different from a fixed emissions schedule. The protocol does not need to pay the maximum reward when usage and stake are still early. As real usage grows and more ANTS is locked behind sellers, more of the dynamic budget becomes earned.
 
 | Bucket | Allocation | Purpose |
 | --- | ---: | --- |
-| Seller-Pool Stakers | 2-40% cap | Dynamic rewards for lANTS positions; the budget grows with active seller-pool stake and is capped each week |
+| Seller-Pool Stakers | 2-40% cap | Dynamic rewards for locked seller-pool support; the budget grows with active stake and is capped each week |
 | Sellers / Operators | 5-10% | Dynamic direct usage rewards for serving recognized usage |
 | Buyers | 5-10% | Dynamic direct usage rewards for creating recognized demand |
-| Verification | 10% | Rewards for network validation: behavioral fingerprinting, TEE and capability verification, anti-abuse work, dispute signals, verifier infrastructure, and future points policies |
+| Verification | 10% | Rewards for network validation: behavioral fingerprinting, TEE and capability checks, anti-abuse work, dispute signals, and verifier infrastructure |
 | AntSeed Foundation | 15% | Long-term ecosystem needs and remainder amounts above the burn cap |
 | Contributors | 15% | Contributor support |
 | Remainder | Variable | Unused dynamic reward budget routes through burn first, then the AntSeed Foundation |
 
-The projection uses a conservative stake model. It does not assume the 500M stake target is reached early. Instead, it caps modeled active stake by projected circulating supply and a gradual staked-circulating participation curve.
+The projection uses a conservative stake model. It does not assume the 500M stake target is reached early. Instead, it limits modeled active stake based on projected circulating supply and a gradual participation curve.
 
 For usage, the projection starts near the current level of about **$15k settled USDC per weekly epoch** and reaches the **$1M per-epoch target** around year two.
 
@@ -272,21 +266,21 @@ Seller-pool and usage rewards are not paid out as one fixed percentage every epo
 
 The flow is:
 
-1. The seller-pool budget grows as active ANTS stake grows, with modeled active stake limited by projected circulating participation, then capped at the weekly 40% maximum
+1. The seller-pool budget grows as active ANTS stake grows, but the model does not assume every token can immediately be staked; the weekly budget is still capped at 40%
 2. Buyer and seller/operator budgets each grow inside a 5-10% range as recognized settled USDC volume grows toward the $1M per-epoch target
 3. Claimable rewards go to lANTS positions, sellers/operators, or buyers based on weighted usage
 4. Unused dynamic reward budget is settled as a remainder
 5. Remainders burn first, up to 30% of weekly emission, then route to the AntSeed Foundation
 
-That dynamic-budget remainder is only one burn path. The projection in the charts now includes three modeled burn sources:
+That dynamic-budget remainder is only one burn path. The charts project burn from emission routing and early-withdraw penalties only; fee-driven buy-and-burn is a separate mechanism and **is not projected here**.
 
 | Burn source | What it does |
 | --- | --- |
-| Remainder burn | When dynamic budgets are not fully earned, unallocated emissions burn first up to the weekly burn cap |
+| Unused budget burn | When dynamic budgets are not fully earned, unallocated emissions burn first up to the weekly burn cap |
 | Early-withdraw burn | If a locked position exits early, the penalty is burned, making short-term capital less attractive |
-| Market-fee buy-and-burn | Platform fees, currently modeled at 4%, and Diem-pool / future operator-pool fees, currently modeled at 10%, are used to buy ANTS from the market and burn it; the projection bounds this at roughly 5k-50k ANTS per epoch |
+| Market-fee buy-and-burn | Platform and seller-pool operator fees may be used to market-buy ANTS and burn it. This is a separate fee mechanism, **not included in the chart projections**; final rates and activation depend on the contracts and governance parameters. |
 
-The burn is not a single fixed allocation. It can come from unallocated dynamic-budget remainder, early exits from locked positions, and fee-driven market buybacks. Final rates can change as the contracts and governance parameters are finalized.
+The burn shown here is not a single fixed allocation. It can come from unallocated dynamic-budget remainder and early exits from locked positions. Fee-driven market buybacks may add another burn path later, but they are not included in this projection.
 
 This makes unused emission budget visible. Early emissions should not simply go to whoever manufactures the largest number, and budget that is not earned through stake or recognized usage should not quietly become extra rewards.
 
@@ -328,35 +322,35 @@ Because lANTS positions are readable on-chain objects, they can support many fut
 
 | Use Case | Description |
 | --- | --- |
-| Provider reputation pages | Show settled volume, latency, ANTS locked, lock duration, pool weight, and historical reward flow |
-| Routing policy | Require minimum pool support for sensitive or high-value work, such as TEE providers with N epochs of locked support |
+| Provider reputation pages | Show settled volume, latency, ANTS locked, lock duration, pool weight, and reward history |
+| Routing policy | Prefer or require sellers with enough long-term support for sensitive or high-value work |
 | Delegated support | Buyers and communities stake earned ANTS behind trusted sellers without running a node |
-| Restaking rewards | Compound long-term pool support by rolling rewards into new locked positions |
-| Accounting | New lANTS positions make seller-pool support explicit and auditable |
-| Future access rules | Use lANTS for provider tiers, reputation badges, grant eligibility, and verification programs |
+| Restaking | Roll rewards into new locked positions to compound long-term support |
+| Accounting | Make seller-pool support explicit and auditable |
+| Future access rules | Support provider tiers, reputation badges, grant eligibility, and verification programs |
 
 The key distinction is important:
 
 > The NFT is the receipt for committed stake. Reputation still comes from usage, settlement, and observable service quality.
 
-It may also become an important primitive for the second token utility phase around liquid inference, where durable provider support and routing liquidity are expected to connect more directly.
+It may also become an important primitive for the second token utility phase around **liquid inference**, where durable provider support and routing liquidity are expected to connect more directly.
 
 ## The Three Layers of AntSeed Reputation
 
 AntSeed reputation has three layers.
 
-### Layer 1: Settlement and Accounting History
+### Layer 1: What Happened?
 
 This includes:
 
 - Completed sessions
-- Ghost sessions
+- Failed or abandoned sessions
 - Settled USDC volume
 - Optional request count
 - Optional token volume
 - Latency and client-side service metrics
 
-### Layer 2: Economic Commitment
+### Layer 2: Who Is Committed Behind It?
 
 This includes:
 
@@ -366,7 +360,7 @@ This includes:
 - Restaked rewards
 - New lANTS positions created through the seller-pools protocol
 
-### Layer 3: Verification and Validation
+### Layer 3: Can the Claims Be Verified?
 
 This includes:
 
@@ -374,7 +368,7 @@ This includes:
 - TEE attestation and privacy checks
 - Capability and provider-claim verification
 - Receipt and metering verification
-- Points policies that scale or exclude usage
+- Rules that scale down or exclude suspicious usage
 - Verifier rewards for people and systems that improve network trust
 - Penalties for fake usage, sybil behavior, model substitution, or incentive extraction
 
@@ -452,7 +446,7 @@ The system is built around a simple, self-reinforcing loop:
 | 7 | Verification checks model claims, delivery quality, metering, and abuse signals |
 | 8 | Pool weight and validation make reputation harder to fake and easier to route against |
 
-## The Point
+## Closing Thoughts
 
 This first phase of ANTS token economics is about reputation and utility.
 
@@ -469,4 +463,4 @@ Seller pools are how AntSeed starts putting those pieces together.
 
 We are still early. We are building while the network is already being used at meaningful scale. We will learn, we will adjust, and when we get things wrong, we will fix them quickly.
 
-The goal is simple: a fairer market for AI services, where useful providers can earn trust in public and buyers can route with more confidence.
+The goal is simple: a more trustworthy market for AI services, where useful providers can earn trust in public and buyers can route with more confidence.

@@ -37,9 +37,6 @@ const START_RECOGNIZED_VOLUME = 15_000;
 const RECOGNIZED_VOLUME_TARGET_WEEKS = WEEKS_PER_YEAR * 2;
 const RECOGNIZED_VOLUME_ANNUAL_GROWTH = 0.16;
 const EMISSION_BURN_CAP_SHARE = 30;
-const MIN_MARKET_BUYBACK_BURN = 5_000;
-const MAX_MARKET_BUYBACK_BURN = 50_000;
-const POOL_BUYBACK_SHARE = 0.45;
 
 const COLORS = {
   team: '#7f8a83',
@@ -48,8 +45,6 @@ const COLORS = {
   burn: '#6f4b50',
   remainderBurn: '#a35f5f',
   exitBurn: '#b47a68',
-  buybackBurn: '#8f6271',
-  poolBuybackBurn: '#6f5b80',
   verification: '#4f93a3',
   buyers: '#9b6f96',
   sellers: '#5f7fa8',
@@ -102,9 +97,6 @@ type ModelRow = {
   remainderBurn: number;
   remainderReserve: number;
   earlyWithdrawBurn: number;
-  platformFeeBurn: number;
-  operatorPoolFeeBurn: number;
-  marketBuybackBurn: number;
   communityStake: number;
   reserveStake: number;
   totalStake: number;
@@ -122,9 +114,6 @@ type ModelRow = {
   remainderBurnTotal: number;
   earlyWithdrawBurnTotal: number;
   remainderReserveTotal: number;
-  platformFeeBurnTotal: number;
-  operatorPoolFeeBurnTotal: number;
-  marketBuybackBurnTotal: number;
   verificationTotal: number;
   buyersTotal: number;
   sellersTotal: number;
@@ -144,9 +133,6 @@ type Model = {
     remainderBurn: number;
     earlyWithdrawBurn: number;
     remainderReserve: number;
-    platformFeeBurn: number;
-    operatorPoolFeeBurn: number;
-    marketBuybackBurn: number;
   };
 };
 
@@ -165,13 +151,6 @@ type DistributionSeries = {
 
 function emissionForEpoch(epoch: number): number {
   return INITIAL_EMISSION / Math.pow(2, Math.floor(epoch / HALVING));
-}
-
-function marketBuybackBurnForWeek(week: number): number {
-  const progress = Math.min(1, week / (WEEKS_PER_YEAR * 5));
-  const ramp = 1 - Math.pow(1 - progress, 2);
-
-  return MIN_MARKET_BUYBACK_BURN + (MAX_MARKET_BUYBACK_BURN - MIN_MARKET_BUYBACK_BURN) * ramp;
 }
 
 function saturatingShare(metric: number, minShare: number, maxShare: number, target: number): number {
@@ -203,7 +182,7 @@ function stakedCirculatingShareForWeek(week: number): number {
 function projectedCirculatingFromTotals(totals: Model['totals']): number {
   return Math.max(
     0,
-    START_SUPPLY + totals.stakers + totals.sellers + totals.buyers + totals.verification - totals.marketBuybackBurn,
+    START_SUPPLY + totals.stakers + totals.sellers + totals.buyers + totals.verification,
   );
 }
 
@@ -220,9 +199,6 @@ function buildModel(): Model {
     remainderBurn: 0,
     earlyWithdrawBurn: 0,
     remainderReserve: 0,
-    platformFeeBurn: 0,
-    operatorPoolFeeBurn: 0,
-    marketBuybackBurn: 0,
   };
   const rows: ModelRow[] = [];
   let emitted = 0;
@@ -260,12 +236,9 @@ function buildModel(): Model {
     const burnCap = emission * EMISSION_BURN_CAP_SHARE / 100;
     const remainderBurn = Math.min(emissionRemainder, burnCap);
     const remainderReserve = emissionRemainder - remainderBurn;
-    const marketBuybackBurn = marketBuybackBurnForWeek(week);
-    const operatorPoolFeeBurn = marketBuybackBurn * POOL_BUYBACK_SHARE;
-    const platformFeeBurn = marketBuybackBurn - operatorPoolFeeBurn;
     const earlyWithdrawBurn = stakerGross * EARLY_WITHDRAW_BURN_SHARE;
     const stakers = stakerGross - earlyWithdrawBurn;
-    const burn = remainderBurn + earlyWithdrawBurn + marketBuybackBurn;
+    const burn = remainderBurn + earlyWithdrawBurn;
 
     totals.team += team;
     totals.baseReserve += baseReserve;
@@ -278,9 +251,6 @@ function buildModel(): Model {
     totals.remainderBurn += remainderBurn;
     totals.earlyWithdrawBurn += earlyWithdrawBurn;
     totals.remainderReserve += remainderReserve;
-    totals.platformFeeBurn += platformFeeBurn;
-    totals.operatorPoolFeeBurn += operatorPoolFeeBurn;
-    totals.marketBuybackBurn += marketBuybackBurn;
 
     reserveBalance += baseReserve + remainderReserve;
     const progress = week / (WEEKS - 1);
@@ -323,9 +293,6 @@ function buildModel(): Model {
       remainderBurn,
       earlyWithdrawBurn,
       remainderReserve,
-      platformFeeBurn,
-      operatorPoolFeeBurn,
-      marketBuybackBurn,
       communityStake,
       reserveStake,
       totalStake: communityStake + reserveStake,
@@ -343,9 +310,6 @@ function buildModel(): Model {
       remainderBurnTotal: totals.remainderBurn,
       earlyWithdrawBurnTotal: totals.earlyWithdrawBurn,
       remainderReserveTotal: totals.remainderReserve,
-      platformFeeBurnTotal: totals.platformFeeBurn,
-      operatorPoolFeeBurnTotal: totals.operatorPoolFeeBurn,
-      marketBuybackBurnTotal: totals.marketBuybackBurn,
       verificationTotal: totals.verification,
       buyersTotal: totals.buyers,
       sellersTotal: totals.sellers,
@@ -586,8 +550,8 @@ function WeeklyEmissionStackedAreas() {
   const maxY = INITIAL_EMISSION;
   const yFor = (value: number) => pad.top + chartHeight - (value / maxY) * chartHeight;
   const segments = [
-    {label: 'Remainder foundation', color: COLORS.remainderReserve, get: (row: ModelRow) => row.remainderReserve},
-    {label: 'Remainder burn', color: COLORS.remainderBurn, get: (row: ModelRow) => row.remainderBurn},
+    {label: 'Unused budget -> Foundation', color: COLORS.remainderReserve, get: (row: ModelRow) => row.remainderReserve},
+    {label: 'Unused budget -> burned', color: COLORS.remainderBurn, get: (row: ModelRow) => row.remainderBurn},
     {label: 'Exit burn', color: COLORS.exitBurn, get: (row: ModelRow) => row.earlyWithdrawBurn},
     {label: 'Stakers', color: COLORS.stakers, get: (row: ModelRow) => row.stakers},
     {label: 'Sellers', color: COLORS.sellers, get: (row: ModelRow) => row.sellers},
@@ -680,8 +644,8 @@ export function SellerPoolsOverviewChart() {
   return (
     <StackedDistributionChart
       series={[
-        {label: 'Remainder foundation', color: COLORS.remainderReserve, values: rows.map((row) => row.remainderReserveTotal)},
-        {label: 'Remainder burn', color: COLORS.remainderBurn, values: rows.map((row) => row.remainderBurnTotal)},
+        {label: 'Unused budget -> Foundation', color: COLORS.remainderReserve, values: rows.map((row) => row.remainderReserveTotal)},
+        {label: 'Unused budget -> burned', color: COLORS.remainderBurn, values: rows.map((row) => row.remainderBurnTotal)},
         {label: 'Exit burn', color: COLORS.exitBurn, values: rows.map((row) => row.earlyWithdrawBurnTotal)},
         {label: 'Stakers', color: COLORS.stakers, values: rows.map((row) => row.stakersTotal)},
         {label: 'Sellers', color: COLORS.sellers, values: rows.map((row) => ALREADY_EMITTED_SELLERS + row.sellersTotal)},
@@ -738,9 +702,9 @@ export function SellerPoolsWeeklyRoutingChart() {
           {label: '40% max', color: COLORS.gray, values: rows.map((row) => row.emission * STAKER_MAX_SHARE / 100), dashed: true},
           {label: 'Stakers', color: COLORS.stakers, values: rows.map((row) => row.stakers)},
           {label: 'Target amount', color: COLORS.sellers, values: rows.map((row) => row.stakerDesired), dashed: true},
-          {label: 'Remainder burn', color: COLORS.remainderBurn, values: rows.map((row) => Math.min(row.stakerRemainder, row.emission * EMISSION_BURN_CAP_SHARE / 100))},
+          {label: 'Unused budget -> burned', color: COLORS.remainderBurn, values: rows.map((row) => Math.min(row.stakerRemainder, row.emission * EMISSION_BURN_CAP_SHARE / 100))},
           {label: 'Exit burn', color: COLORS.exitBurn, values: rows.map((row) => row.earlyWithdrawBurn)},
-          {label: 'Remainder foundation', color: COLORS.remainderReserve, values: rows.map((row) => Math.max(0, row.stakerRemainder - row.emission * EMISSION_BURN_CAP_SHARE / 100))},
+          {label: 'Unused budget -> Foundation', color: COLORS.remainderReserve, values: rows.map((row) => Math.max(0, row.stakerRemainder - row.emission * EMISSION_BURN_CAP_SHARE / 100))},
         ]}
       />
     </div>
