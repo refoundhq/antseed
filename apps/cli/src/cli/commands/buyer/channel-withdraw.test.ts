@@ -53,6 +53,10 @@ test('resolveBuyerChannelById rejects ambiguous prefixes', () => {
 
 test('secondsUntilChannelWithdrawReady tracks 15 minute timeout grace period', () => {
   assert.equal(
+    secondsUntilChannelWithdrawReady(0n, 100),
+    CHANNEL_CLOSE_GRACE_PERIOD_SECONDS,
+  );
+  assert.equal(
     secondsUntilChannelWithdrawReady(100n, 100 + CHANNEL_CLOSE_GRACE_PERIOD_SECONDS - 1),
     1,
   );

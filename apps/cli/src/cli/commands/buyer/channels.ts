@@ -2,12 +2,8 @@ import type { Command } from 'commander';
 import chalk from 'chalk';
 import { loadOrCreateIdentity } from '@antseed/node';
 import { getGlobalOptions } from '../types.js';
-import { formatUsdc, openChannelStore } from '../../payment-utils.js';
+import { formatUsdc, openChannelStore, shortId } from '../../payment-utils.js';
 import { registerBuyerChannelWithdrawCommands } from './channel-withdraw.js';
-
-function short(id: string, len = 10): string {
-  return id.length > len ? id.slice(0, len) + '...' : id;
-}
 
 function statusColor(status: string): string {
   switch (status) {
@@ -66,9 +62,9 @@ async function listBuyerChannels(buyerCmd: Command, options: { status?: string; 
 
     console.log(chalk.bold(`Payment Channels (${limited.length} of ${filtered.length}):\n`));
     for (const session of limited) {
-      console.log(`  ${chalk.bold(short(session.sessionId, 16))}  ${statusColor(session.status)}  ${chalk.dim(session.role)}`);
+      console.log(`  ${chalk.bold(shortId(session.sessionId, 16))}  ${statusColor(session.status)}  ${chalk.dim(session.role)}`);
       const unsettled = subtractBigintFloor(session.authMax, session.settledAmount);
-      console.log(`    Peer: ${chalk.dim(short(session.peerId, 16))}  Requests: ${session.requestCount}  Tokens: ${session.tokensDelivered}`);
+      console.log(`    Peer: ${chalk.dim(shortId(session.peerId, 16))}  Requests: ${session.requestCount}  Tokens: ${session.tokensDelivered}`);
       console.log(`    Deposit: ${chalk.green(usdc(session.authMax))}  Settled: ${chalk.cyan(usdc(session.settledAmount))}  Unsettled: ${chalk.yellow(usdc(unsettled))}`);
       console.log(`    Created: ${chalk.dim(new Date(session.createdAt).toISOString())}`);
       if (session.settledAt) {

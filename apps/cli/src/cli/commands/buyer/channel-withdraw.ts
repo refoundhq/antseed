@@ -10,9 +10,12 @@ import {
   formatUsdc,
   loadCryptoContext,
   openChannelStore,
+  shortId,
 } from '../../payment-utils.js';
 
 export const CHANNEL_CLOSE_GRACE_PERIOD_SECONDS = 15 * 60;
+// Contract channel status is a uint8; 1 maps to the on-chain Active enum value.
+const ON_CHAIN_STATUS_ACTIVE = 1;
 
 const CHANNEL_STATUS_LABELS: Record<number, string> = {
   0: 'none',
@@ -23,10 +26,6 @@ const CHANNEL_STATUS_LABELS: Record<number, string> = {
 
 function normalizeChannelId(value: string): string {
   return value.trim().toLowerCase();
-}
-
-function short(value: string, len = 18): string {
-  return value.length > len ? `${value.slice(0, len)}...` : value;
 }
 
 export function resolveBuyerChannelById(
@@ -62,6 +61,16 @@ function formatWait(seconds: number): string {
   return `about ${minutes} minutes`;
 }
 
+function openChannelStoreOrExit(dataDir: string): ReturnType<typeof openChannelStore> {
+  try {
+    return openChannelStore(dataDir);
+  } catch (err) {
+    console.error(chalk.red(`Failed to open channel store: ${(err as Error).message}`));
+    console.error(chalk.dim('Have you connected to the network yet? Channels are stored locally after first use.'));
+    process.exit(1);
+  }
+}
+
 export function registerBuyerChannelWithdrawCommands(channelsCmd: Command, buyerCmd: Command): void {
   channelsCmd
     .command('request-close <channelId>')
@@ -74,7 +83,7 @@ export function registerBuyerChannelWithdrawCommands(channelsCmd: Command, buyer
       const channelsClient = createChannelsClient(config);
 
       let localChannel: StoredChannel;
-      const store = openChannelStore(globalOpts.dataDir);
+      const store = openChannelStoreOrExit(globalOpts.dataDir);
       try {
         localChannel = resolveBuyerChannelById(
           store.getAllChannelsByBuyer('buyer', address),
@@ -85,18 +94,18 @@ export function registerBuyerChannelWithdrawCommands(channelsCmd: Command, buyer
       }
 
       if (localChannel.status !== CHANNEL_STATUS.ACTIVE) {
-        console.error(chalk.red(`Error: Local channel ${short(localChannel.sessionId)} is ${localChannel.status}, not active.`));
+        console.error(chalk.red(`Error: Local channel ${shortId(localChannel.sessionId, 18)} is ${localChannel.status}, not active.`));
         console.error(chalk.dim('Only active channels can be timeout closed.'));
         process.exit(1);
       }
 
-      const spinner = ora(`Requesting timeout close for channel ${short(localChannel.sessionId)}...`).start();
+      const spinner = ora(`Requesting timeout close for channel ${shortId(localChannel.sessionId, 18)}...`).start();
       try {
         const onChain = await channelsClient.getSession(localChannel.sessionId);
         if (onChain.buyer.toLowerCase() !== address.toLowerCase()) {
           throw new Error(`Configured wallet ${address} is not the on-chain buyer for this channel.`);
         }
-        if (onChain.status !== 1) {
+        if (onChain.status !== ON_CHAIN_STATUS_ACTIVE) {
           throw new Error(`On-chain channel is ${CHANNEL_STATUS_LABELS[onChain.status] ?? `status ${onChain.status}`}, not active.`);
         }
         if (onChain.closeRequestedAt > 0n) {
@@ -115,7 +124,7 @@ export function registerBuyerChannelWithdrawCommands(channelsCmd: Command, buyer
             }, null, 2));
             return;
           }
-          console.log(chalk.yellow(`Close was already requested for ${short(localChannel.sessionId)}.`));
+          console.log(chalk.yellow(`Close was already requested for ${shortId(localChannel.sessionId, 18)}.`));
           console.log(waitSeconds === 0
             ? chalk.green('It is ready to withdraw now: antseed buyer channels withdraw ' + localChannel.sessionId)
             : chalk.dim(`Withdraw should be available in ${formatWait(waitSeconds)}.`));
@@ -123,7 +132,7 @@ export function registerBuyerChannelWithdrawCommands(channelsCmd: Command, buyer
         }
 
         const txHash = await channelsClient.requestClose(wallet, localChannel.sessionId);
-        spinner.succeed(chalk.green(`Requested timeout close for ${short(localChannel.sessionId)}`));
+        spinner.succeed(chalk.green(`Requested timeout close for ${shortId(localChannel.sessionId, 18)}`));
         if (options.json) {
           console.log(JSON.stringify({
             channelId: localChannel.sessionId,
@@ -152,7 +161,7 @@ export function registerBuyerChannelWithdrawCommands(channelsCmd: Command, buyer
       const channelsClient = createChannelsClient(config);
 
       let localChannel: StoredChannel;
-      const store = openChannelStore(globalOpts.dataDir);
+      const store = openChannelStoreOrExit(globalOpts.dataDir);
       try {
         localChannel = resolveBuyerChannelById(
           store.getAllChannelsByBuyer('buyer', address),
@@ -162,29 +171,29 @@ export function registerBuyerChannelWithdrawCommands(channelsCmd: Command, buyer
         store.close();
       }
 
-      const spinner = ora(`Withdrawing reserved funds for channel ${short(localChannel.sessionId)}...`).start();
+      const spinner = ora(`Withdrawing reserved funds for channel ${shortId(localChannel.sessionId, 18)}...`).start();
       try {
         const onChain = await channelsClient.getSession(localChannel.sessionId);
         if (onChain.buyer.toLowerCase() !== address.toLowerCase()) {
           throw new Error(`Configured wallet ${address} is not the on-chain buyer for this channel.`);
         }
-        if (onChain.status !== 1) {
+        if (onChain.status !== ON_CHAIN_STATUS_ACTIVE) {
           throw new Error(`On-chain channel is ${CHANNEL_STATUS_LABELS[onChain.status] ?? `status ${onChain.status}`}; nothing active remains to withdraw.`);
+        }
+        if (onChain.closeRequestedAt <= 0n) {
+          throw new Error(`Close has not been requested yet. Run \`antseed buyer channels request-close ${localChannel.sessionId}\` first.`);
         }
         const waitSeconds = secondsUntilChannelWithdrawReady(
           onChain.closeRequestedAt,
           Math.floor(Date.now() / 1000),
         );
-        if (onChain.closeRequestedAt <= 0n) {
-          throw new Error(`Close has not been requested yet. Run \`antseed buyer channels request-close ${localChannel.sessionId}\` first.`);
-        }
         if (waitSeconds > 0) {
           throw new Error(`Close grace period is not over yet. Try again in ${formatWait(waitSeconds)}.`);
         }
 
         const refund = onChain.deposit > onChain.settled ? onChain.deposit - onChain.settled : 0n;
         const txHash = await channelsClient.withdraw(wallet, localChannel.sessionId);
-        spinner.succeed(chalk.green(`Withdrew reserved funds for ${short(localChannel.sessionId)}`));
+        spinner.succeed(chalk.green(`Withdrew reserved funds for ${shortId(localChannel.sessionId, 18)}`));
         if (options.json) {
           console.log(JSON.stringify({
             channelId: localChannel.sessionId,
