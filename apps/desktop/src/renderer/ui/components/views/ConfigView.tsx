@@ -164,7 +164,7 @@ export function ConfigView({ active }: ConfigViewProps) {
                 <span className="settings-switch-track">
                   <span className="settings-switch-thumb" />
                 </span>
-                <span className="settings-switch-label">{disableMetadataV2Services ? 'On' : 'Off'}</span>
+                <span className="settings-switch-label">{disableMetadataV2Services ? 'Enabled' : 'Disabled'}</span>
               </button>
             </div>
           </div>

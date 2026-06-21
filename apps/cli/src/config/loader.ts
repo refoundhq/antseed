@@ -364,11 +364,19 @@ function mergeBuyerConfig(
     metadataFetchTimeoutMs: typeof value['metadataFetchTimeoutMs'] === 'number'
       ? value['metadataFetchTimeoutMs']
       : defaults.metadataFetchTimeoutMs,
-    disableMetadataV2Services: value['disableMetadataV2Services'] !== undefined
-      ? value['disableMetadataV2Services'] as boolean
-      : defaults.disableMetadataV2Services,
+    disableMetadataV2Services: normalizeBooleanConfigValue(
+      value['disableMetadataV2Services'],
+      defaults.disableMetadataV2Services,
+      'buyer.disableMetadataV2Services',
+    ),
     ...(normalizeBuyerVerification(value['verification'], defaults.verification)),
   };
+}
+
+function normalizeBooleanConfigValue(value: unknown, defaultValue: boolean, path: string): boolean {
+  if (value === undefined) return defaultValue;
+  if (typeof value === 'boolean') return value;
+  throw new Error(`${path} must be a boolean`);
 }
 
 /**
