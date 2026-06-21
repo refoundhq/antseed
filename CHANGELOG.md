@@ -11,6 +11,10 @@ This project uses selective package publishing. Each release entry lists the pub
 - `@antseed/cli`
 - `@antseed/node`
 
+### Desktop
+
+- `@antseed/desktop`
+
 ### Added
 
 - Added zero-price free usage authorization for advertised free services, including buyer-signed P2P usage records, seller on-chain reporting through `AntseedFreeUsage`, and CLI configuration for the deployed free usage contract address.
@@ -28,6 +32,7 @@ This project uses selective package publishing. Each release entry lists the pub
 
 - Fixed buyer response-auth timeout warnings for non-inference probes and sellers that do not advertise response-auth support.
 - Fixed buyer discovery so temporarily unreachable metadata endpoints are probed for recovery before the full exponential cooldown expires, allowing recovered peers to reappear in buyer peer lists sooner.
+- Fixed Desktop chats for peers that disappear from discovery so the header reports that the peer was not found and disables the composer instead of showing stale peer identifiers.
 
 ## 2026-06-15 — Buyer peer failure accounting and desktop stream responsiveness
 
