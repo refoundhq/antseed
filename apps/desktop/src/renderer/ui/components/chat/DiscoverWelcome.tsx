@@ -55,6 +55,7 @@ type CardItem = {
   displayName: string;
   peerLabel: string;
   peerId: string;
+  peerIconUrl: string | null;
   value: string;
   provider: string;
   providerCount: number;
@@ -143,6 +144,7 @@ function buildCards(options: ChatServiceOptionEntry[]): CardItem[] {
       displayName: normalizeServiceName(rawName),
       peerLabel: opt.peerLabel || '',
       peerId: opt.peerId || '',
+      peerIconUrl: opt.peerIconUrl ?? null,
       value: opt.value,
       provider: opt.provider,
       providerCount: opt.count,
@@ -207,6 +209,7 @@ function buildCardsFromRows(rows: DiscoverRow[]): CardItem[] {
       displayName: normalizeServiceName(rawName),
       peerLabel,
       peerId: row.peerId,
+      peerIconUrl: row.peerIconUrl,
       value: row.selectionValue,
       provider: row.provider,
       providerCount: 1,
@@ -300,11 +303,25 @@ function SkeletonCard() {
 
 /* ── Provider avatar ─────────────────────────────────────────────────── */
 
-function ProviderAvatar({ name, gradient }: { name: string; gradient: string }) {
+function ProviderAvatar({ name, gradient, iconUrl }: { name: string; gradient: string; iconUrl?: string | null }) {
+  const [iconFailed, setIconFailed] = useState(false);
   const letter = (name || '?').charAt(0).toUpperCase();
+  const showIcon = Boolean(iconUrl) && !iconFailed;
   return (
-    <span className={styles.providerAvatar} style={{ background: gradient }}>
-      {letter}
+    <span
+      className={`${styles.providerAvatar}${showIcon ? ` ${styles.providerAvatarIcon}` : ''}`}
+      style={showIcon ? undefined : { background: gradient }}
+    >
+      {showIcon ? (
+        <img
+          className={styles.providerAvatarImage}
+          src={iconUrl ?? undefined}
+          alt=""
+          loading="lazy"
+          referrerPolicy="no-referrer"
+          onError={() => setIconFailed(true)}
+        />
+      ) : letter}
     </span>
   );
 }
@@ -317,12 +334,16 @@ function verificationTitle(link: DiscoverVerificationLink): string {
 
 function VerificationLinkBadge({ link }: { link: DiscoverVerificationLink }) {
   const title = verificationTitle(link);
+  const hasDomainPreview = link.kind === 'domain' && (link.title || link.description);
   return (
     <InfoTooltip
       align="left"
       content={(
         <>
-          <strong>{title}</strong>
+          <strong>{hasDomainPreview ? (link.title ?? title) : title}</strong>
+          {link.kind === 'domain' && link.description && (
+            <span className={styles.verificationDescription}>{link.description}</span>
+          )}
           <span>{link.href}</span>
         </>
       )}
@@ -820,7 +841,7 @@ function Card({
       <div className={styles.cardFooter}>
         <div className={styles.cardFooterTop}>
           <div className={styles.cardProvider}>
-            <ProviderAvatar name={providerName} gradient={item.gradient} />
+            <ProviderAvatar name={providerName} gradient={item.gradient} iconUrl={item.peerIconUrl} />
             <span className={styles.cardProviderName}>{providerName}</span>
             <CardBadges item={item} />
           </div>

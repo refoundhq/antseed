@@ -65,6 +65,7 @@ export type ChatServiceOptionEntry = {
   peerId: string;
   peerDisplayName: string | null;
   peerLabel: string;
+  peerIconUrl: string | null;
   inputUsdPerMillion: number | null;
   outputUsdPerMillion: number | null;
   cachedInputUsdPerMillion?: number | null;
@@ -76,6 +77,9 @@ export type DiscoverVerificationLink = {
   kind: 'domain' | 'github';
   label: string;
   href: string;
+  title?: string;
+  description?: string;
+  faviconUrl?: string;
 };
 
 export type DiscoverRow = {
@@ -100,6 +104,7 @@ export type DiscoverRow = {
    */
   sellerContract: string | null;
   verificationLinks: DiscoverVerificationLink[];
+  peerIconUrl: string | null;
   peerDisplayName: string | null;
   peerLabel: string;
 
