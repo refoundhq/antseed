@@ -245,6 +245,7 @@ export type RendererUiState = {
 
   // --- Chat display ---
   chatActiveConversation: string | null;
+  chatOpeningConversationId: string | null;
   chatConversationTitle: string;
   chatConversations: unknown[];
   chatConversationsLoaded: boolean;
@@ -268,6 +269,7 @@ export type RendererUiState = {
   chatLifetimeSessions: string;
   chatServiceOptions: ChatServiceOptionEntry[];
   discoverRows: DiscoverRow[];
+  chatDiscoverRowsLoaded: boolean;
   chatSelectedServiceValue: string;
   chatSelectedPeerId: string;
   chatServiceStatus: BadgeState;
@@ -394,6 +396,7 @@ export function createInitialUiState(): RendererUiState {
 
     // Chat
     chatActiveConversation: null,
+    chatOpeningConversationId: null,
     chatConversationTitle: 'Conversation',
     chatConversations: [],
     chatConversationsLoaded: false,
@@ -416,6 +419,7 @@ export function createInitialUiState(): RendererUiState {
     chatLifetimeSessions: '',
     chatServiceOptions: [],
     discoverRows: [],
+    chatDiscoverRowsLoaded: false,
     chatSelectedServiceValue: '',
     chatSelectedPeerId: '',
     chatServiceStatus: { tone: 'idle', label: 'Services idle' },
