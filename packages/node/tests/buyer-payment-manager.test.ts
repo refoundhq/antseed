@@ -575,6 +575,38 @@ describe('BuyerPaymentManager', () => {
     }));
   });
 
+  it('signPerRequestAuth suppresses per-service metadata when disabled', async () => {
+    manager = new BuyerPaymentManager(identity, makeConfig(tempDir, {
+      metadataV2ServicesEnabled: false,
+    }), store);
+    manager.setSigner(Wallet.createRandom());
+
+    const sellerPeerId = fakePeerId('seller-no-service-meta');
+    await manager.authorizeSpending(sellerPeerId, mux, 10_000n, TEST_PRICING);
+
+    const { payload } = await manager.signPerRequestAuth(
+      sellerPeerId,
+      {
+        inputBytes: SAMPLE_INPUT,
+        outputBytes: SAMPLE_OUTPUT,
+        sellerClaimedCost: 100n,
+        reportedInputTokens: 1000n,
+        reportedCachedInputTokens: 200n,
+        reportedOutputTokens: 50n,
+        service: 'sensitive-model',
+      },
+    );
+
+    const meta = decodeMetadataTokens(payload.metadata);
+    expect(meta.inputTokens).toBe(1000n);
+    expect(meta.outputTokens).toBe(50n);
+    expect(decodeMetadataServices(payload.metadata)).toEqual([]);
+
+    const channel = store.getActiveChannelByPeer(sellerPeerId, CHANNEL_ROLE.BUYER);
+    expect(channel).not.toBeNull();
+    expect(store.getServiceTotals(channel!.sessionId)).toEqual([]);
+  });
+
   it('signPerRequestAuth hydrates cumulative service metadata after restart', async () => {
     const sellerPeerId = fakePeerId('seller-service-restart');
     await manager.authorizeSpending(sellerPeerId, mux, 10_000n, TEST_PRICING);

@@ -348,6 +348,7 @@ function mergeBuyerConfig(
       proxyPort: defaults.proxyPort,
       peerRefreshIntervalMs: defaults.peerRefreshIntervalMs,
       metadataFetchTimeoutMs: defaults.metadataFetchTimeoutMs,
+      metadataV2ServicesEnabled: defaults.metadataV2ServicesEnabled,
       ...(normalizeBuyerVerification(undefined, defaults.verification)),
     };
   }
@@ -363,6 +364,9 @@ function mergeBuyerConfig(
     metadataFetchTimeoutMs: typeof value['metadataFetchTimeoutMs'] === 'number'
       ? value['metadataFetchTimeoutMs']
       : defaults.metadataFetchTimeoutMs,
+    metadataV2ServicesEnabled: value['metadataV2ServicesEnabled'] !== undefined
+      ? value['metadataV2ServicesEnabled'] as boolean
+      : defaults.metadataV2ServicesEnabled,
     ...(normalizeBuyerVerification(value['verification'], defaults.verification)),
   };
 }

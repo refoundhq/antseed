@@ -46,6 +46,7 @@ test('effective buyer config precedence is flags > env > config > defaults', () 
   config.buyer.minPeerReputation = 25;
   config.buyer.peerRefreshIntervalMs = 120_000;
   config.buyer.metadataFetchTimeoutMs = 1_200;
+  config.buyer.metadataV2ServicesEnabled = true;
   config.buyer.maxPricing.defaults.inputUsdPerMillion = 70;
   config.buyer.maxPricing.defaults.outputUsdPerMillion = 80;
 
@@ -54,6 +55,7 @@ test('effective buyer config precedence is flags > env > config > defaults', () 
     ANTSEED_BUYER_MAX_INPUT_USD_PER_MILLION: '90',
     ANTSEED_BUYER_MAX_OUTPUT_USD_PER_MILLION: '95',
     ANTSEED_BUYER_METADATA_FETCH_TIMEOUT_MS: '2200',
+    ANTSEED_BUYER_METADATA_V2_SERVICES_ENABLED: 'false',
   } as NodeJS.ProcessEnv;
 
   const effective = resolveEffectiveBuyerConfig({
@@ -68,8 +70,21 @@ test('effective buyer config precedence is flags > env > config > defaults', () 
   assert.equal(effective.minPeerReputation, 55);
   assert.equal(effective.peerRefreshIntervalMs, 120_000);
   assert.equal(effective.metadataFetchTimeoutMs, 2200);
+  assert.equal(effective.metadataV2ServicesEnabled, false);
   assert.equal(effective.maxPricing.defaults.inputUsdPerMillion, 90);
   assert.equal(effective.maxPricing.defaults.outputUsdPerMillion, 99);
+});
+
+test('effective buyer config rejects invalid metadata v2 services env overrides', () => {
+  const config = createDefaultConfig();
+
+  assert.throws(
+    () => resolveEffectiveBuyerConfig({
+      config,
+      env: { ANTSEED_BUYER_METADATA_V2_SERVICES_ENABLED: 'maybe' } as NodeJS.ProcessEnv,
+    }),
+    /ANTSEED_BUYER_METADATA_V2_SERVICES_ENABLED must be a boolean/,
+  );
 });
 
 test('effective buyer config rejects invalid metadata fetch timeout env overrides', () => {

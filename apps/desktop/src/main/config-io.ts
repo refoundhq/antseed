@@ -30,6 +30,7 @@ const DEFAULT_CONFIG: Record<string, unknown> = {
     proxyPort: 8377,
     peerRefreshIntervalMs: DESKTOP_DEFAULT_PEER_REFRESH_INTERVAL_MS,
     metadataFetchTimeoutMs: DESKTOP_DEFAULT_METADATA_FETCH_TIMEOUT_MS,
+    metadataV2ServicesEnabled: true,
   },
   network: { bootstrapNodes: [] },
   payments: { preferredMethod: 'crypto', platformFeeRate: 0.05 },
@@ -65,6 +66,7 @@ function migrateDesktopBuyerDefaults(config: Record<string, unknown>): {
   const minPeerReputation = buyer.minPeerReputation;
   const peerRefreshIntervalMs = buyer.peerRefreshIntervalMs;
   const metadataFetchTimeoutMs = buyer.metadataFetchTimeoutMs;
+  const metadataV2ServicesEnabled = buyer.metadataV2ServicesEnabled;
   const nextDefaults = { ...defaults };
   let migrated = false;
   let nextBuyer = buyer;
@@ -119,6 +121,14 @@ function migrateDesktopBuyerDefaults(config: Record<string, unknown>): {
     nextBuyer = {
       ...nextBuyer,
       metadataFetchTimeoutMs: DESKTOP_DEFAULT_METADATA_FETCH_TIMEOUT_MS,
+    };
+    migrated = true;
+  }
+
+  if (typeof metadataV2ServicesEnabled !== 'boolean') {
+    nextBuyer = {
+      ...nextBuyer,
+      metadataV2ServicesEnabled: true,
     };
     migrated = true;
   }

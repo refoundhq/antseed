@@ -153,6 +153,8 @@ export interface NodePaymentsConfig {
   maxPerRequestUsdc?: string;
   /** Maximum total USDC the buyer will reserve in a single SpendingAuth (base units). Default: "10000000" ($10.00). */
   maxReserveAmountUsdc?: string;
+  /** Include per-service buyer attribution in metadata v2. Default: true. */
+  metadataV2ServicesEnabled?: boolean;
 }
 
 export interface NodeVerificationConfig {
@@ -1489,6 +1491,7 @@ export class AntseedNode extends EventEmitter {
           defaultAuthDurationSecs: payments.defaultAuthDurationSecs ?? 900, // 15 min — seller must call reserve() promptly
           maxPerRequestUsdc: BigInt(payments.maxPerRequestUsdc ?? "500000"),  // $0.50 default — covers most LLM requests
           maxReserveAmountUsdc: BigInt(payments.maxReserveAmountUsdc ?? "1000000"),  // $1.00 default per session (matches FIRST_SIGN_CAP)
+          metadataV2ServicesEnabled: payments.metadataV2ServicesEnabled ?? true,
           dataDir: paymentsDir,
         };
         this._buyerPaymentManager = new BuyerPaymentManager(identity, buyerPaymentConfig, this._channelStore, this._sellerAddressResolver ?? undefined);
@@ -1673,6 +1676,7 @@ export class AntseedNode extends EventEmitter {
             chainId: freeUsageConfig.chainId,
             freeUsageContractAddress: freeUsageConfig.freeUsageContractAddress,
             defaultAuthDurationSecs: payments.defaultAuthDurationSecs ?? 900,
+            metadataV2ServicesEnabled: payments.metadataV2ServicesEnabled ?? true,
           },
           this._sellerAddressResolver ?? undefined,
           this._channelStore ?? undefined,
