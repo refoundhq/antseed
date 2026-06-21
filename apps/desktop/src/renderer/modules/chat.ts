@@ -1242,6 +1242,7 @@ export function initChatModule({
       peerId: entry.peerId,
       peerDisplayName: entry.peerDisplayName,
       peerLabel: entry.peerLabel,
+      peerIconUrl: null,
       inputUsdPerMillion: entry.inputUsdPerMillion,
       outputUsdPerMillion: entry.outputUsdPerMillion,
       categories: entry.categories,

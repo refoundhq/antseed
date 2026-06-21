@@ -11,8 +11,13 @@ This project uses selective package publishing. Each release entry lists the pub
 - `@antseed/cli`
 - `@antseed/node`
 
+### Desktop
+
+- `@antseed/desktop`
+
 ### Added
 
+- Added Desktop peer favicons from verified domains, showing fetched site icons in Discover and chat peer avatars when available.
 - Added zero-price free usage authorization for advertised free services, including buyer-signed P2P usage records, seller on-chain reporting through `AntseedFreeUsage`, and CLI configuration for the deployed free usage contract address.
 
 ### Removed
