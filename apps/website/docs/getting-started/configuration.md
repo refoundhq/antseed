@@ -282,9 +282,9 @@ ANTSEED_BUYER_METADATA_FETCH_TIMEOUT_MS=1500 antseed buyer start
 Buyer SpendingAuth and free-usage metadata v2 include aggregate usage totals by default. They also include per-service attribution unless disabled. Privacy-sensitive buyers can keep aggregate accounting while suppressing service IDs and per-service totals:
 
 ```bash
-antseed config buyer set metadataV2ServicesEnabled false
+antseed config buyer set disableMetadataV2Services true
 antseed buyer start --disable-metadata-v2-services
-ANTSEED_BUYER_METADATA_V2_SERVICES_ENABLED=false antseed buyer start
+ANTSEED_BUYER_DISABLE_METADATA_V2_SERVICES=true antseed buyer start
 ```
 
 ## Identity and Metadata
@@ -467,7 +467,7 @@ Only secrets, global toggles, and deployment-specific runtime overrides are set 
 | `ANTSEED_IDENTITY_HEX` | Identity private key (64 hex chars, optional 0x prefix) |
 | `ANTSEED_BASE_RPC_URL` | Runtime Base JSON-RPC endpoint override for seller on-chain operations |
 | `ANTSEED_BUYER_METADATA_FETCH_TIMEOUT_MS` | Runtime buyer peer-discovery metadata fetch timeout in milliseconds |
-| `ANTSEED_BUYER_METADATA_V2_SERVICES_ENABLED` | Runtime toggle for buyer per-service metadata v2 attribution (`false` opts out) |
+| `ANTSEED_BUYER_DISABLE_METADATA_V2_SERVICES` | Runtime opt-out for buyer per-service metadata v2 attribution (`true` opts out) |
 | `ANTHROPIC_API_KEY` | Upstream Anthropic API key (used by the `anthropic` provider plugin) |
 | `OPENAI_API_KEY` | Upstream OpenAI-compatible API key (used by the `openai` provider plugin) |
 | `ANTSEED_SETTLEMENT_IDLE_MS` | Idle time before settling a session (default: 600000 / 10 min) |

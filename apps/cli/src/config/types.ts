@@ -141,11 +141,8 @@ export interface BuyerCLIConfig {
   peerRefreshIntervalMs: number;
   /** Timeout in ms for each HTTP metadata fetch during peer discovery */
   metadataFetchTimeoutMs: number;
-  /**
-   * Include per-service attribution in buyer-signed metadata v2. Disable to
-   * keep aggregate usage metadata while avoiding service-intent disclosure.
-   */
-  metadataV2ServicesEnabled: boolean;
+  /** Disable per-service attribution in buyer-signed metadata v2. */
+  disableMetadataV2Services: boolean;
   /** Buyer-side response-auth evidence sampling settings. */
   verification?: BuyerVerificationConfig;
 }

@@ -120,7 +120,7 @@ test('loadConfig preserves explicit buyer peerRefreshIntervalMs and metadataFetc
   );
 });
 
-test('loadConfig defaults and preserves buyer metadata v2 service attribution setting', async () => {
+test('loadConfig defaults and preserves buyer metadata v2 service opt-out setting', async () => {
   await withTempConfig(
     JSON.stringify({
       buyer: {
@@ -129,34 +129,34 @@ test('loadConfig defaults and preserves buyer metadata v2 service attribution se
     }),
     async (configPath) => {
       const config = await loadConfig(configPath);
-      assert.equal(config.buyer.metadataV2ServicesEnabled, true);
+      assert.equal(config.buyer.disableMetadataV2Services, false);
     }
   );
 
   await withTempConfig(
     JSON.stringify({
       buyer: {
-        metadataV2ServicesEnabled: false,
+        disableMetadataV2Services: true,
       },
     }),
     async (configPath) => {
       const config = await loadConfig(configPath);
-      assert.equal(config.buyer.metadataV2ServicesEnabled, false);
+      assert.equal(config.buyer.disableMetadataV2Services, true);
     }
   );
 });
 
-test('loadConfig rejects invalid buyer metadataV2ServicesEnabled', async () => {
+test('loadConfig rejects invalid buyer disableMetadataV2Services', async () => {
   await withTempConfig(
     JSON.stringify({
       buyer: {
-        metadataV2ServicesEnabled: 'false',
+        disableMetadataV2Services: 'false',
       },
     }),
     async (configPath) => {
       await assert.rejects(
         async () => loadConfig(configPath),
-        /buyer\.metadataV2ServicesEnabled/
+        /buyer\.disableMetadataV2Services/
       );
     }
   );

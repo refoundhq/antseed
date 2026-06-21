@@ -203,7 +203,7 @@ describe('FreeUsage P2P lifecycle', () => {
     try {
       const buyerManager = new BuyerFreeUsageManager(
         buyer,
-        freeUsageConfig({ metadataV2ServicesEnabled: false }),
+        freeUsageConfig({ disableMetadataV2Services: true }),
         undefined,
         store,
       );

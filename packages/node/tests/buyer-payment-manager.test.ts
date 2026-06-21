@@ -577,7 +577,7 @@ describe('BuyerPaymentManager', () => {
 
   it('signPerRequestAuth suppresses per-service metadata when disabled', async () => {
     manager = new BuyerPaymentManager(identity, makeConfig(tempDir, {
-      metadataV2ServicesEnabled: false,
+      disableMetadataV2Services: true,
     }), store);
     manager.setSigner(Wallet.createRandom());
 

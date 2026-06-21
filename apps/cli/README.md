@@ -175,7 +175,7 @@ Pricing is configured in USD per 1M tokens with role-specific defaults and optio
     "proxyPort": 8377,
     "peerRefreshIntervalMs": 300000,
     "metadataFetchTimeoutMs": 1500,
-    "metadataV2ServicesEnabled": true
+    "disableMetadataV2Services": false
   }
 }
 ```
@@ -234,7 +234,7 @@ antseed config buyer set maxPricing.defaults.cachedInputUsdPerMillion 12
 antseed config buyer set maxPricing.defaults.outputUsdPerMillion 75
 antseed config buyer set peerRefreshIntervalMs 300000
 antseed config buyer set metadataFetchTimeoutMs 1500
-antseed config buyer set metadataV2ServicesEnabled false
+antseed config buyer set disableMetadataV2Services true
 ```
 
 Runtime-only overrides (do not write your config file):
@@ -334,7 +334,7 @@ Use `base-sepolia` for testing with MockUSDC.
 
 - `ANTSEED_BASE_RPC_URL=<url>` — custom Base JSON-RPC endpoint for seller on-chain operations (recommended for production)
 - `ANTSEED_BUYER_METADATA_FETCH_TIMEOUT_MS=<ms>` — runtime override for buyer peer-discovery metadata fetch timeout
-- `ANTSEED_BUYER_METADATA_V2_SERVICES_ENABLED=false` — suppress buyer per-service metadata v2 attribution while keeping aggregate usage totals
+- `ANTSEED_BUYER_DISABLE_METADATA_V2_SERVICES=true` — suppress buyer per-service metadata v2 attribution while keeping aggregate usage totals
 - `ANTSEED_SETTLEMENT_IDLE_MS=600000` — idle time before settling a session (default: 10 minutes)
 - `ANTSEED_DEFAULT_DEPOSIT_USDC=1` — default lock amount per session
 - `ANTSEED_IDENTITY_HEX=<hex>` — inject identity via env (supports 0x prefix)

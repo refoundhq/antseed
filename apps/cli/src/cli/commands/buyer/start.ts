@@ -38,7 +38,7 @@ export function buildBuyerRuntimeOverridesFromFlags(options: {
   if (options.maxInputUsdPerMillion !== undefined) overrides.maxInputUsdPerMillion = options.maxInputUsdPerMillion
   if (options.maxOutputUsdPerMillion !== undefined) overrides.maxOutputUsdPerMillion = options.maxOutputUsdPerMillion
   if (options.metadataFetchTimeoutMs !== undefined) overrides.metadataFetchTimeoutMs = options.metadataFetchTimeoutMs
-  if (options.disableMetadataV2Services === true) overrides.metadataV2ServicesEnabled = false
+  if (options.disableMetadataV2Services === true) overrides.disableMetadataV2Services = true
   return overrides
 }
 
@@ -325,7 +325,7 @@ export function registerBuyerStartCommand(buyerCmd: Command): void {
           // seller can extract via an inflated 402 target (per 402 round trip).
           maxPerRequestUsdc: config.payments?.maxPerRequestUsdc ?? '300000',
           maxReserveAmountUsdc: config.payments?.maxReserveAmountUsdc ?? '1000000',
-          metadataV2ServicesEnabled: effectiveBuyerConfig.metadataV2ServicesEnabled,
+          disableMetadataV2Services: effectiveBuyerConfig.disableMetadataV2Services,
         }
       }
 
@@ -345,7 +345,7 @@ export function registerBuyerStartCommand(buyerCmd: Command): void {
       console.log(chalk.dim(`  min peer reputation: ${effectiveBuyerConfig.minPeerReputation}`))
       console.log(chalk.dim(`  peer refresh interval: ${effectiveBuyerConfig.peerRefreshIntervalMs}ms`))
       console.log(chalk.dim(`  metadata fetch timeout: ${effectiveBuyerConfig.metadataFetchTimeoutMs}ms`))
-      console.log(chalk.dim(`  metadata v2 service attribution: ${effectiveBuyerConfig.metadataV2ServicesEnabled ? 'enabled' : 'disabled'}`))
+      console.log(chalk.dim(`  metadata v2 service opt-out: ${effectiveBuyerConfig.disableMetadataV2Services ? 'enabled' : 'disabled'}`))
       console.log(chalk.dim(`  proxy port: ${effectiveBuyerConfig.proxyPort}`))
       if (pinnedPeerId) {
         console.log(chalk.yellow(`  pinned peer: ${pinnedPeerId} (router bypassed)`))

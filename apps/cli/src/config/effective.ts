@@ -13,7 +13,7 @@ export interface BuyerRuntimeOverrides {
   maxInputUsdPerMillion?: number;
   maxOutputUsdPerMillion?: number;
   metadataFetchTimeoutMs?: number;
-  metadataV2ServicesEnabled?: boolean;
+  disableMetadataV2Services?: boolean;
 }
 
 export interface ResolveEffectiveConfigInput {
@@ -110,7 +110,7 @@ export function resolveEffectiveBuyerConfig(input: ResolveEffectiveConfigInput):
   if (env[envMetadataFetchTimeoutKey] !== undefined && envMetadataFetchTimeoutMs === undefined) {
     throw new Error(`${envMetadataFetchTimeoutKey} must be a finite number`);
   }
-  const envMetadataV2ServicesEnabled = parseEnvBoolean(env, 'ANTSEED_BUYER_METADATA_V2_SERVICES_ENABLED');
+  const envDisableMetadataV2Services = parseEnvBoolean(env, 'ANTSEED_BUYER_DISABLE_METADATA_V2_SERVICES');
 
   if (envMinReputation !== undefined) {
     buyer.minPeerReputation = envMinReputation;
@@ -124,8 +124,8 @@ export function resolveEffectiveBuyerConfig(input: ResolveEffectiveConfigInput):
   if (envMetadataFetchTimeoutMs !== undefined) {
     buyer.metadataFetchTimeoutMs = envMetadataFetchTimeoutMs;
   }
-  if (envMetadataV2ServicesEnabled !== undefined) {
-    buyer.metadataV2ServicesEnabled = envMetadataV2ServicesEnabled;
+  if (envDisableMetadataV2Services !== undefined) {
+    buyer.disableMetadataV2Services = envDisableMetadataV2Services;
   }
 
   const overrides = input.buyerOverrides;
@@ -144,8 +144,8 @@ export function resolveEffectiveBuyerConfig(input: ResolveEffectiveConfigInput):
   if (overrides?.metadataFetchTimeoutMs !== undefined) {
     buyer.metadataFetchTimeoutMs = overrides.metadataFetchTimeoutMs;
   }
-  if (overrides?.metadataV2ServicesEnabled !== undefined) {
-    buyer.metadataV2ServicesEnabled = overrides.metadataV2ServicesEnabled;
+  if (overrides?.disableMetadataV2Services !== undefined) {
+    buyer.disableMetadataV2Services = overrides.disableMetadataV2Services;
   }
 
   assertValidMetadataFetchTimeoutMs(buyer.metadataFetchTimeoutMs, 'buyer.metadataFetchTimeoutMs');

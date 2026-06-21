@@ -82,7 +82,7 @@ export function initSettingsModule({
         DESKTOP_DEFAULT_MAX_OUTPUT_USD_PER_MILLION,
       ),
       minRep: safeNumber(buyer.minPeerReputation, 0),
-      metadataV2ServicesEnabled: safeBoolean(buyer.metadataV2ServicesEnabled, true),
+      disableMetadataV2Services: safeBoolean(buyer.disableMetadataV2Services, false),
       paymentMethod: safeString(payments.preferredMethod, 'crypto'),
       devMode: uiState.devMode,
       cryptoChainId: safeString(crypto.chainId, 'base-mainnet'),
@@ -120,7 +120,7 @@ export function initSettingsModule({
             },
           },
           minPeerReputation: formData.minRep,
-          metadataV2ServicesEnabled: formData.metadataV2ServicesEnabled,
+          disableMetadataV2Services: formData.disableMetadataV2Services,
         },
         payments: {
           ...asRecord(currentConfig.payments),

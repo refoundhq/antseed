@@ -49,7 +49,7 @@ export type ConfigFormData = {
   maxInputUsdPerMillion: number;
   maxOutputUsdPerMillion: number;
   minRep: number;
-  metadataV2ServicesEnabled: boolean;
+  disableMetadataV2Services: boolean;
   paymentMethod: string;
   devMode: boolean;
   cryptoChainId: string;

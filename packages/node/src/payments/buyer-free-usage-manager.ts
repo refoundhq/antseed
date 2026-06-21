@@ -23,8 +23,8 @@ export interface BuyerFreeUsageConfig {
   freeUsageContractAddress: string;
   defaultAuthDurationSecs: number;
   openAckTimeoutMs?: number;
-  /** Include per-service attribution in free-usage metadata. Default: true. */
-  metadataV2ServicesEnabled?: boolean;
+  /** Disable per-service attribution in free-usage metadata. Default: false. */
+  disableMetadataV2Services?: boolean;
 }
 
 interface FreeUsageSession {
@@ -76,12 +76,12 @@ export class BuyerFreeUsageManager {
     this._hydrateFromStore();
   }
 
-  private get _metadataV2ServicesEnabled(): boolean {
-    return this._config.metadataV2ServicesEnabled !== false;
+  private get _disableMetadataV2Services(): boolean {
+    return this._config.disableMetadataV2Services === true;
   }
 
   private _sanitizeMetadata(metadata: FreeUsageMetadata): FreeUsageMetadata {
-    if (this._metadataV2ServicesEnabled) return metadata;
+    if (!this._disableMetadataV2Services) return metadata;
     return {
       cumulativeInputTokens: metadata.cumulativeInputTokens,
       cumulativeOutputTokens: metadata.cumulativeOutputTokens,
@@ -97,7 +97,7 @@ export class BuyerFreeUsageManager {
   ): FreeUsageMetadata {
     return advanceUsageMetadata(
       this._sanitizeMetadata(previous),
-      this._metadataV2ServicesEnabled ? service : undefined,
+      this._disableMetadataV2Services ? undefined : service,
       delta,
     );
   }
@@ -108,7 +108,7 @@ export class BuyerFreeUsageManager {
     for (const channel of activeChannels) {
       if (this._sessions.has(channel.peerId)) continue;
       const metadata = this._sanitizeMetadata(this._channelStore.getChannelMetadata(channel));
-      if (!this._metadataV2ServicesEnabled) {
+      if (!this._disableMetadataV2Services) {
         this._channelStore.replaceMetadataServiceTotals(channel.sessionId, metadata.services);
       }
       this._sessions.set(channel.peerId, {

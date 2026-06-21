@@ -54,8 +54,8 @@ export interface BuyerPaymentConfig {
   maxReserveAmountUsdc: bigint;
   /** Max ratio of seller-claimed cost to buyer's bytes/4 estimate. Default: 1.4. */
   costToleranceMultiplier?: number;
-  /** Include per-service attribution in metadata v2. Default: true. */
-  metadataV2ServicesEnabled?: boolean;
+  /** Disable per-service attribution in metadata v2. Default: false. */
+  disableMetadataV2Services?: boolean;
   dataDir: string;
 }
 
@@ -139,7 +139,7 @@ export class BuyerPaymentManager {
       this._cumulativeAmount.set(peerId, persistedCumulative);
       const metadata = this._sanitizeMetadata(this._channelStore.getChannelMetadata(channel));
       this._metadata.set(peerId, metadata);
-      if (!this._metadataV2ServicesEnabled) {
+      if (!this._disableMetadataV2Services) {
         this._persistServiceMetadata(channel.sessionId, metadata);
       }
       // Hydrate verifiedCost to authMax so _maxSignable can grow beyond maxPerRequestUsdc.
@@ -170,13 +170,13 @@ export class BuyerPaymentManager {
     return this._config.costToleranceMultiplier ?? DEFAULT_COST_TOLERANCE;
   }
 
-  private get _metadataV2ServicesEnabled(): boolean {
-    return this._config.metadataV2ServicesEnabled !== false;
+  private get _disableMetadataV2Services(): boolean {
+    return this._config.disableMetadataV2Services === true;
   }
 
   private _sanitizeMetadata(metadata: SpendingAuthMetadata | undefined): SpendingAuthMetadata {
     const current = metadata ?? ZERO_METADATA;
-    if (this._metadataV2ServicesEnabled) return current;
+    if (!this._disableMetadataV2Services) return current;
     return {
       cumulativeInputTokens: current.cumulativeInputTokens,
       cumulativeOutputTokens: current.cumulativeOutputTokens,
@@ -192,7 +192,7 @@ export class BuyerPaymentManager {
   ): SpendingAuthMetadata {
     return advanceUsageMetadata(
       this._sanitizeMetadata(previous),
-      this._metadataV2ServicesEnabled ? service : undefined,
+      this._disableMetadataV2Services ? undefined : service,
       delta,
     );
   }

@@ -41,7 +41,7 @@ test('ensureConfig creates config with desktop buyer max pricing defaults', asyn
   assert.equal((config.buyer as { minPeerReputation?: number }).minPeerReputation, DESKTOP_DEFAULT_MIN_PEER_REPUTATION);
   assert.equal((config.buyer as { peerRefreshIntervalMs?: number }).peerRefreshIntervalMs, DESKTOP_DEFAULT_PEER_REFRESH_INTERVAL_MS);
   assert.equal((config.buyer as { metadataFetchTimeoutMs?: number }).metadataFetchTimeoutMs, DESKTOP_DEFAULT_METADATA_FETCH_TIMEOUT_MS);
-  assert.equal((config.buyer as { metadataV2ServicesEnabled?: boolean }).metadataV2ServicesEnabled, true);
+  assert.equal((config.buyer as { disableMetadataV2Services?: boolean }).disableMetadataV2Services, false);
 });
 
 test('ensureConfig clamps buyer max pricing above desktop defaults', async (t) => {
@@ -117,7 +117,7 @@ test('ensureConfig fills missing buyer max pricing defaults for existing configs
   assert.equal((config.buyer as { proxyPort?: number }).proxyPort, 9123);
   assert.equal((config.buyer as { minPeerReputation?: number }).minPeerReputation, 42);
   assert.equal((config.buyer as { peerRefreshIntervalMs?: number }).peerRefreshIntervalMs, DESKTOP_DEFAULT_PEER_REFRESH_INTERVAL_MS);
-  assert.equal((config.buyer as { metadataV2ServicesEnabled?: boolean }).metadataV2ServicesEnabled, true);
+  assert.equal((config.buyer as { disableMetadataV2Services?: boolean }).disableMetadataV2Services, false);
 });
 
 test('ensureConfig preserves valid buyer peer refresh interval and metadata v2 setting', async (t) => {
@@ -128,7 +128,7 @@ test('ensureConfig preserves valid buyer peer refresh interval and metadata v2 s
     buyer: {
       peerRefreshIntervalMs: 30_000,
       metadataFetchTimeoutMs: 2_000,
-      metadataV2ServicesEnabled: false,
+      disableMetadataV2Services: true,
       maxPricing: {
         defaults: {
           inputUsdPerMillion: 4,
@@ -143,7 +143,7 @@ test('ensureConfig preserves valid buyer peer refresh interval and metadata v2 s
   const config = await readConfig(configPath);
   assert.equal((config.buyer as { peerRefreshIntervalMs?: number }).peerRefreshIntervalMs, 30_000);
   assert.equal((config.buyer as { metadataFetchTimeoutMs?: number }).metadataFetchTimeoutMs, 2_000);
-  assert.equal((config.buyer as { metadataV2ServicesEnabled?: boolean }).metadataV2ServicesEnabled, false);
+  assert.equal((config.buyer as { disableMetadataV2Services?: boolean }).disableMetadataV2Services, true);
 });
 
 test('ensureConfig preserves buyer max pricing at or below desktop defaults', async (t) => {
