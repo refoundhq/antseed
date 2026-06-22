@@ -20,7 +20,7 @@
   /* PHEROMONE — pale mint trail. text + hairlines on dark */
   --as-mint: #97ffc7;              /* glow text, never body copy */
   --as-text: #edf6ee;              /* primary text on dark */
-  --as-text-2: #97aa9f;            /* secondary text */
+  --as-text-2: #d2e3d9;            /* secondary text */
   --as-text-3: #5e6f64;            /* muted labels, captions */
 
   /* CLAY — warm earth accent. ONLY for economics: $ANTS, USDC, burn */
@@ -172,9 +172,9 @@ html[data-theme='dark'] {
   --as-soil-2: #0e141c;
   --as-soil-3: #15201a;
   --as-text: #edf6ee;
-  --as-text-2: #97aa9f;
+  --as-text-2: #d2e3d9;
   --as-text-3: #5e6f64;
-  --as-line: rgba(151, 255, 199, 0.09);
+  --as-line: rgba(68, 147, 105, 0.09);
   --as-line-strong: rgba(151, 255, 199, 0.16);
   --as-green-glow: rgba(31, 216, 122, 0.45);
   --as-green-dim: rgba(31, 216, 122, 0.08);
@@ -232,17 +232,17 @@ html[data-theme='dark'] {
   --ifm-code-font-size: 12px;
 
   --ifm-color-emphasis-300: #21262D;
-  --ifm-font-color-base: #97aa9f;
+  --ifm-font-color-base: #d2e3d9;
   --ifm-font-color-secondary: #5e6f64;
   --ifm-heading-color: #edf6ee;
   --ifm-heading-font-weight: 700;
   --ifm-link-color: #1FD87A;
   --ifm-link-hover-color: #8fffc4;
-  --ifm-menu-color: #97aa9f;
+  --ifm-menu-color: #d2e3d9;
   --ifm-menu-color-active: #1FD87A;
   --ifm-menu-color-background-hover: rgba(31, 216, 122, 0.06);
   --ifm-menu-color-background-active: rgba(31, 216, 122, 0.1);
-  --ifm-navbar-link-color: #97aa9f;
+  --ifm-navbar-link-color: #d2e3d9;
   --ifm-navbar-link-hover-color: #edf6ee;
 
   --ifm-hr-border-color: rgba(61, 255, 162, 0.07);
@@ -940,7 +940,7 @@ html:has(.homepage-wrapper) .navbar__title {
 }
 
 html:has(.homepage-wrapper) .navbar__items--right .navbar__link {
-  color: #97aa9f;
+  color: #d2e3d9;
 }
 
 html:has(.homepage-wrapper) .navbar__items--right .navbar__link:hover,

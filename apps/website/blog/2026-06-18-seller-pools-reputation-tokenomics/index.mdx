@@ -49,7 +49,7 @@ Seller pools introduce a simple loop for ANTS:
 1. **Real usage creates reputation.** When buyers pay sellers through AntSeed channels, that settled USDC volume becomes recognized usage.
 2. **Good sellers can attract long-term support.** ANTS holders can lock tokens behind a seller identity, creating a public signal that the service has durable backing.
 3. **Rewards follow useful participation.** Sellers, buyers, stakers, and verifiers can earn from the weekly emissions budget, but only inside capped ranges.
-4. **Unused rewards do not quietly become extra yield.** If a dynamic reward bucket is not fully earned, the remainder burns first, then routes to the AntSeed Foundation.
+4. **Unused rewards do not quietly become extra yield.** If a dynamic reward bucket is not fully earned, up to 30% of the extra budget gets burned.
 5. **Fees can add another burn path.** Platform and operator-pool fees may be directed to market buy-and-burn, separate from emission routing.
 
 The important change is that ANTS emissions are not just a flat giveaway. They are routed through usage, stake, verification, burn, and Foundation rules so the system can reward growth while reducing the value of fake activity.
@@ -139,7 +139,7 @@ The lANTS NFT is **not** a profile picture. It is **not** reputation by itself. 
 
 Because it is an NFT, the support is public and composable. Wallets can show it. Dashboards can explain it. Routers can factor it into policy. Future contracts can build on top of it.
 
-We also expect the locked-position object — **lANTS / iANTS naming may be finalized as the implementation moves forward** — to play a role in the second ANTS utility phase focused on **liquid inference**. The exact mechanics are still being designed, but the intent is that long-term support behind real providers can become useful beyond this first reputation layer.
+We also expect lANTS to play a role in the second ANTS utility phase focused on **liquid inference**. The exact mechanics are still being designed, but the intent is that long-term support behind real providers can become useful beyond this first reputation layer.
 
 ## Recognized Usage
 
@@ -464,3 +464,5 @@ Seller pools are how AntSeed starts putting those pieces together.
 We are still early. We are building while the network is already being used at meaningful scale. We will learn, we will adjust, and when we get things wrong, we will fix them quickly.
 
 The goal is simple: a more trustworthy market for AI services, where useful providers can earn trust in public and buyers can route with more confidence.
+
+**Disclaimer:** everything described here may still change. We are building in public, watching how the network is actually used, and trying to be sensitive to real network activity rather than forcing fixed parameters too early.
