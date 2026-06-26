@@ -58,6 +58,7 @@ import type {
   ProviderStreamCallbacks,
 } from "./interfaces/seller-provider.js";
 import type { Router } from "./interfaces/buyer-router.js";
+import type { Prover } from "./interfaces/plugin.js";
 import { NatTraversal } from "./p2p/nat-traversal.js";
 import { signUtf8 } from "./p2p/identity.js";
 import {
@@ -173,6 +174,8 @@ export interface NodeConfig {
   publicAddress?: string;
   /** External ownership claims announced in signed peer metadata. */
   verifications?: PeerVerifications;
+  /** Extra peer capability strings to advertise (e.g. supported verifier SDKs). */
+  capabilities?: string[];
   dataDir?: string;           // Default: ~/.antseed
   dhtPort?: number;           // Default: 6881 for seller, 0 for buyer
   signalingPort?: number;     // Default: 6882 for seller
@@ -245,6 +248,7 @@ export class AntseedNode extends EventEmitter {
   private _dht: DHTNode | null = null;
   private _connectionManager: ConnectionManager | null = null;
   private _providers: Provider[] = [];
+  private _provers: Prover[] = [];
   private _router: Router | null = null;
   private _started = false;
   private _announcer: PeerAnnouncer | null = null;
@@ -316,6 +320,11 @@ export class AntseedNode extends EventEmitter {
 
   registerProvider(provider: Provider): void {
     this._providers.push(provider);
+  }
+
+  /** Register an embedded verifier prover (serves reserved attestation requests). */
+  registerProver(prover: Prover): void {
+    this._provers.push(prover);
   }
 
   setRouter(router: Router): void {
@@ -1377,6 +1386,7 @@ export class AntseedNode extends EventEmitter {
         ...(this._config.displayName ? { displayName: this._config.displayName } : {}),
         ...(this._config.publicAddress ? { publicAddress: this._config.publicAddress } : {}),
         ...(this._config.verifications ? { verifications: this._config.verifications } : {}),
+        ...(this._config.capabilities ? { capabilities: this._config.capabilities } : {}),
         region: "unknown",
         pricing: new Map(
           this._providers.map((p) => [
@@ -1409,6 +1419,7 @@ export class AntseedNode extends EventEmitter {
     this._sellerHandler = new SellerRequestHandler({
       identity,
       providers: this._providers,
+      provers: this._provers,
       sellerPaymentManager: this._sellerPaymentManager,
       sellerFreeUsageManager: this._sellerFreeUsageManager,
       sessionTracker: this._sessionTracker,

@@ -15,6 +15,7 @@ import { loadRouterPlugin, buildPluginConfig, getPackageVersions } from '../../.
 import { ensurePluginsUpToDate } from '../../../plugins/drift.js'
 import { resolvePluginPackage } from '../../../plugins/registry.js'
 import { BuyerProxy } from '../../../proxy/buyer-proxy.js'
+import { normalizeVerifierIds, type VerifierPolicy } from '../../../plugins/verifier.js'
 import { resolveEffectiveBuyerConfig, type BuyerRuntimeOverrides } from '../../../config/effective.js'
 import type { BuyerCLIConfig } from '../../../config/types.js'
 
@@ -197,6 +198,9 @@ export function registerBuyerStartCommand(buyerCmd: Command): void {
     .option('--metadata-fetch-timeout-ms <number>', 'runtime-only timeout for each peer metadata HTTP fetch during discovery', Number)
     .option('--disable-metadata-v2-services', 'runtime-only opt-out from per-service buyer metadata v2 attribution')
     .option('--peer <peerId>', 'pin all requests to a specific peer ID (40-char hex EVM address), bypassing the router')
+    .option('--verifiers <ids>', "ordered, comma-separated verifier SDK ids to verify sellers with (default: the seller's advertised default if trusted)")
+    .option('--require-verifier', 'refuse to route unless a verifier SDK verifies the seller (default: verify but route anyway)')
+    .option('--no-verifier', 'disable seller verification entirely')
     .action(async (options) => {
       const globalOpts = getGlobalOptions(buyerCmd)
       const config = await loadConfig(globalOpts.config)
@@ -400,12 +404,28 @@ export function registerBuyerStartCommand(buyerCmd: Command): void {
 
       const proxyPort = effectiveBuyerConfig.proxyPort
       const proxySpinner = ora(`Starting local proxy on port ${proxyPort}...`).start()
+      let verifierPolicy: VerifierPolicy | undefined
+      if (options.verifier === false) {
+        verifierPolicy = undefined
+      } else {
+        try {
+          verifierPolicy = {
+            prefer: normalizeVerifierIds(String(options.verifiers ?? '')),
+            require: Boolean(options.requireVerifier),
+          }
+        } catch (err) {
+          console.error(chalk.red((err as Error).message))
+          process.exit(1)
+        }
+      }
+
       const proxy = new BuyerProxy({
         port: proxyPort,
         node,
         pinnedPeerId,
         dataDir: globalOpts.dataDir,
         backgroundRefreshIntervalMs: effectiveBuyerConfig.peerRefreshIntervalMs,
+        ...(verifierPolicy ? { verifier: verifierPolicy } : {}),
       })
       let ownsProxyListener = false
 
@@ -413,6 +433,12 @@ export function registerBuyerStartCommand(buyerCmd: Command): void {
         await proxy.start()
         ownsProxyListener = true
         proxySpinner.succeed(chalk.green(`Proxy listening on http://localhost:${proxyPort}`))
+        if (verifierPolicy) {
+          const sel = verifierPolicy.prefer?.length ? verifierPolicy.prefer.join(', ') : 'seller default (trusted set)'
+          console.log(chalk.dim(`  Verifier: ${sel} (${verifierPolicy.require ? 'required' : 'optional'})`))
+        } else {
+          console.log(chalk.dim('  Verifier: disabled'))
+        }
       } catch (err) {
         if (isAddrInUseError(err) && await isCompatibleBuyerProxy(proxyPort)) {
           proxySpinner.succeed(chalk.yellow(`Proxy port ${proxyPort} already in use; reusing existing local proxy.`))

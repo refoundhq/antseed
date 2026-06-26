@@ -75,6 +75,8 @@ export interface AnnouncerConfig {
   stakingClient?: StakingClient;
   reannounceIntervalMs: number;
   signalingPort: number;
+  /** Extra peer capability strings to advertise (merged with the built-in set). */
+  capabilities?: string[];
   /** Optional health monitor — if supplied, announce outcomes are recorded. */
   healthMonitor?: DHTHealthMonitor;
   /**
@@ -277,7 +279,7 @@ export class PeerAnnouncer {
       ...(this.config.displayName ? { displayName: this.config.displayName } : {}),
       ...(this.config.publicAddress ? { publicAddress: this.config.publicAddress } : {}),
       providers,
-      capabilities: [CONNECTION_CAPABILITY_RESPONSE_AUTH_V1],
+      capabilities: [CONNECTION_CAPABILITY_RESPONSE_AUTH_V1, ...(this.config.capabilities ?? [])],
       region: this.config.region,
       timestamp: Date.now(),
       signature: "",
